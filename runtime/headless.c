@@ -26,7 +26,21 @@ static void saved(const char *rel, const char *hex, void *ctx) {
     *first = 0;
 }
 
+#include <signal.h>
+#include <unistd.h>
+#include <stdint.h>
+extern uint8_t *G_MEM;
+uint32_t tp_get(unsigned i);
+static void on_fault(int sig, siginfo_t *si, void *uc) {
+    (void)uc;
+    fprintf(stderr, "signal %d at host %p (guest offset %#llx), guest block %08x esp %08x\n", sig, si->si_addr,
+            (unsigned long long)((uint8_t *)si->si_addr - G_MEM), tp_get(9), tp_get(4));
+    _exit(3);
+}
+
 int main(int argc, char **argv) {
+    struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
     uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
     double fuzz = 0;            /* after the deterministic part: seconds of random clicks in real time */

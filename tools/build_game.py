@@ -24,7 +24,7 @@ from lift_dos import create_lifter, ROOT
 
 # Bytes the DOS host places at bootstrap (dos.py DOS.bootstrap).
 SYNTHETIC = {0xf000: bytes.fromhex('cf'), 0xf010: bytes.fromhex('0fa90fa1071f619dc3')}
-TERMINAL = ('ret', 'retf', 'iretd', 'hlt', 'ud2', 'int3')
+TERMINAL = ('ret', 'retf', 'iretd', 'hlt', 'ud2')
 
 
 def successors(i):
@@ -78,6 +78,36 @@ def main():
 
     decode_base = lifter.ins
 
+    def collect(address):
+        """Block extent following QEMU/Unicorn's x86 translation-block rules, so
+        block counts (and the deterministic scheduler) match the oracle: end at
+        control transfers, after a REP string instruction, after loading
+        DS/ES/SS/CS, after POPF/STI, and at 512 instructions or ~4 KiB."""
+        out, pc = {}, address
+        while lo <= pc < hi and len(out) < 512 and pc - address < 4064:
+            i = lifter.ins(pc)
+            if i is None:
+                break
+            out[pc] = i
+            pc += i.size
+            mn = i.mnemonic
+            if mn.startswith(('j', 'loop')) or mn in ('call', 'ret', 'retf', 'iretd', 'int', 'int1', 'int3', 'into',
+                                                      'hlt', 'ud2', 'popfd', 'popf', 'sti', 'lcall', 'ljmp'):
+                break
+            prefixes = set()
+            for b in i.bytes:
+                if b not in (0xf0, 0xf2, 0xf3, 0x66, 0x67, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65):
+                    break
+                prefixes.add(b)
+            if prefixes & {0xf2, 0xf3} and mn.split()[-1][:4] in ('movs', 'stos', 'lods', 'scas', 'cmps', 'ins', 'outs'):
+                break
+            if mn in ('lds', 'les', 'lss'):
+                break
+            if mn in ('mov', 'pop') and i.operands and i.operands[0].type == X.X86_OP_REG and \
+                    i.reg_name(i.operands[0].reg) in ('ds', 'es', 'ss', 'cs'):
+                break
+        return out
+
     def decode_bytes(address, data):
         return {i.address: i for i in lifter.md.disasm(data, address)}
 
@@ -90,7 +120,7 @@ def main():
             return [(data, decode_bytes(address, data))]
         if not lo <= address < hi:
             return []
-        return [(None, lifter.collect(address))]
+        return [(None, collect(address))]
 
     blocks, todo, outside = {}, sorted(seeds), set()
     while todo:

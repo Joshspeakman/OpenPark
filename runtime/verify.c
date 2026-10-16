@@ -2,6 +2,7 @@
 #include "rt.h"
 #include <stdlib.h>
 #include <setjmp.h>
+#include <sys/mman.h>
 #include <stdio.h>
 
 uint8_t *G_MEM;
@@ -55,8 +56,14 @@ double rt_f80_load(const uint8_t *M, uint32_t a) {
     if (e == 0x7fff) return (mant << 1) ? NAN : s * INFINITY;
     return s * ldexp((double)mant, e - 16383 - 63);
 }
+/* Guest memory is the first 64 MiB of a 4 GiB reservation: every 32-bit
+ * address is mapped, so a stray access past the DOS extender's memory reads
+ * zeros instead of crashing the app (pages are committed only when touched). */
 void *tp_memory(void) {
-    if (!G_MEM) G_MEM = calloc(1, 64u * 1024u * 1024u);
+    if (!G_MEM) {
+        void *p = mmap(0, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+        G_MEM = p == MAP_FAILED ? calloc(1, 64u * 1024u * 1024u) : p;
+    }
     return G_MEM;
 }
 void tp_dispatch_init(void);

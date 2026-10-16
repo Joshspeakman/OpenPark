@@ -161,6 +161,11 @@ def main():
         # Undefined x86 arithmetic flags are not compared at arbitrary services.
         if (native.get('eflags') ^ original.get('eflags')) & 0x600:
             raise AssertionError('IF/DF divergence')
+        # Arithmetic flags may be architecturally undefined here (after MUL,
+        # shifts, ...). They are not compared, so they must not leak into
+        # memory through interrupt or callback frames either: continue both
+        # sides from the original's flags.
+        native.set('eflags', original.get('eflags'))
         # Include relocated code: startup writes its saved data selector there.
         # Compare CPU-written pages at each boundary and the complete mapped
         # region periodically and at the final stop. The full comparisons catch

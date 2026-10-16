@@ -4,13 +4,29 @@ A new Apple Silicon port of the user's own GOG Theme Park release. The target is
 an ARM64 app that recompiles the original game code, with native platform
 services. DOSBox, Wine and Rosetta are not part of the intended runtime.
 
-**Status:** native game code now boots through setup, accepts keyboard/mouse
-input, buys land and enters the first park. Eight million executed blocks match
-the x86 original, including 13,678 DOS/BIOS boundaries, 6,882 scheduling boundaries,
-the park framebuffer and setup-profile file. The same result runs without
-Unicorn or Capstone at runtime. This is a bounded, headless development host,
-not a finished app: real-time pacing, audio, full park save/load, build-operation
-acceptance and native window/input presentation remain work.
+**Status:** `Theme Park Nightly.app` runs the game as native ARM64 code in
+a Cocoa window with keyboard and mouse, from the title through setup and into
+a running park, paced like GOG's DOSBox configuration. All 30,143 statically
+reachable blocks are compiled; the scripted first-park run matches the x86
+original for eight million blocks, and checkpoints from random play match it
+too. No sound or intro movie yet, and long random play has found open faults;
+see [the plan](docs/PLAN.md).
+
+## Build and install the app
+
+```sh
+export TP_PYTHON="$HOME/Projects/freedom-force-macos/recomp/.venv/bin/python3"
+bash tests/check_macos.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
+  "$HOME/Projects/freedom-force-macos" --park     # verified trace the build uses
+bash tools/build_app.sh                            # installs ~/Applications/Theme Park Nightly.app
+```
+
+Game files are copied from the verified extraction to
+`~/Games/ThemeParkNative/game` (DOS executables excluded); saves and changed
+files go to `~/Games/ThemeParkNative/saves`; the log is
+`~/Games/ThemeParkNative/theme-park.log`. `TP_CYCLES` sets the emulated CPU
+speed in thousands of instructions per second (default 10000, as in GOG's
+DOSBox configuration). Control-click is the right mouse button.
 
 The supplied Mac package contains DOS/4GW LE executables. This requires a DOS
 platform layer; the Windows loaders in the other ports cannot load it directly.

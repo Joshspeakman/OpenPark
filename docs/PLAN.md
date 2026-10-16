@@ -3,30 +3,49 @@
 Target: the user's GOG `theme_park_enUS_1_0_33010.pkg`, recompiled into native
 Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
-## Current verified milestone — 2026-10-16
+## Current milestone — 2026-10-16: native app (Claude Code, continuing Codex)
 
-Native game code now reaches the first park, through title, nickname entry,
-setup, mouse-driven country selection and buying land. **3,627 compiled blocks,
-8,000,000 block executions, 13,678 matched DOS/BIOS service boundaries and 6,882
-matched scheduling boundaries**. The park framebuffer and setup profile match
-byte for byte. A separate `python3 -S` run reaches the identical result without
-Unicorn or Capstone (0.33 seconds for this accelerated test on this machine;
-not a real-time performance claim).
+**Theme Park Nightly.app** runs the game as native ARM64 code in a Cocoa
+window, with real-time keyboard/mouse input. Title, nickname, main menu, player
+setup, the world map, buying land and the park itself run at the original
+pace. No DOSBox, Wine, Rosetta, interpreter or Python is in the app process.
+There is **no sound yet** and the intro movie (INTRO.EXE) is not played.
 
-The macOS check passes 17 synthetic LE/DOS tests, 124 synthetic CPU cases,
-2,000 original routine comparisons and the startup comparisons. Its `--park`
-mode covers the complete eight-million-block scenario above and checks captured
-milestone hashes, then reruns without the oracle or disassembler.
-The ARM64 library links only libSystem. Test runs are headless, muted and scratch
-only. The project and generated outputs are entirely in theme-park-macos; no
-Freedom Force launcher is used.
+What is verified:
 
-The game is **not yet a finished playable port**. The current host is Python
-development infrastructure. Real PIT-rate scheduling, native window/input,
-build-operation acceptance, full park save/reload and audio have not
-passed acceptance. The DOS model is shared by the oracle/native harness and
-is not independently verified against DOS4GW. See [DOS contract](DOS-CONTRACT.md)
-and [progress report](reports/2026-10-16-native-startup.md).
+- **Whole-program compilation.** `tools/build_game.py` compiles every block
+  statically reachable from the entry point, all relocated code pointers, the
+  survey's call targets and the verified trace: 30,143 blocks, O(1) dispatch.
+  Block extents follow QEMU/Unicorn's translation-block rules so block-count
+  scheduling matches the oracle. Unknown targets stop with their address.
+- **x86 oracle, scripted path.** `tests/check_macos.sh ... --park` verifies the
+  whole-program library: eight million blocks, 13,678 DOS/BIOS and 6,882
+  scheduling boundaries, golden first-park frame and profile.
+- **Native C host.** `runtime/host.c` (C port of `tools/dos.py`) in
+  deterministic mode reproduces the golden first-park frame and profile
+  byte for byte; inside the app the menu and setup frames hash identically to
+  the verified milestones.
+- **Off-path code.** `tools/spotcheck.py` replays C-host checkpoints from
+  random-click play through the compiled blocks and Unicorn in lockstep
+  (exact arrival-count synchronisation). 160 of 160 checkpoints match.
+
+Pacing: the game's loop is not timer-paced; idle timeouts, the attract montage
+and the simulation advance per pass. GOG's release pins DOSBox at
+`cycles=fixed 10000`, so the host holds the executed x86 instruction rate at
+10 million per second (`TP_CYCLES`, thousands per second) by sleeping. Without
+it the nickname screen timed out to the demo in about a second. The PIT runs
+at the game's programmed 72.8 Hz.
+
+Known problems (see "Next"):
+
+- Long random-click fuzzing reached a division fault at 0x1452cf (two seeds,
+  after staff hiring/negotiation screens) and a "STAFF NEGOTIATION" screen with
+  a garbled background. Not yet shown to be a translation fault or a game bug.
+- One fuzz seed read past the 64 MiB guest space while drawing a corrupt
+  cursor sprite on the park-status screen. Guest memory is now a 4 GiB
+  reservation, so this reads zeros instead of crashing; the cause is open.
+- No audio (HMI SOS drivers), no intro playback, no VESA modes, no launcher
+  window yet. Save/load through the app has not been exercised.
 
 ## Confirmed input survey
 
@@ -71,10 +90,10 @@ every apparent service found in a speculative decode.
 | 2 | ARM64 routine proofs using the shared lifter | Two integer/memory slices pass | Small initial proof; broad CPU coverage still needed |
 | 3 | Verified startup analysis and differential trace to first DOS service | Passed through player details | Synthetic DOS4G launch contract; original-vs-native CPU agreement |
 | 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Observed startup services implemented | Keyboard, timer and far mouse callbacks tested |
-| 5 | Framebuffer/palette presentation through a background Metal host, then menus | Headless VGA frames through park pass | Native window/Metal and VESA remain |
-| 6 | Native input and simulation pacing; new park, build operations, save/load | Scripted mouse buys land and enters park | Real-time pacing, build operations and full save/reload remain |
+| 5 | Framebuffer/palette presentation in a native window, then menus | Cocoa window (CoreAnimation, 4:3, full screen) | VESA modes remain |
+| 6 | Native input and simulation pacing; new park, build operations, save/load | Real-time input and 10M-instruction/s governor; park runs; path tool opens | Save/reload and build-operation acceptance remain |
 | 7 | Intro playback and HMI audio through native output | Not started | Large/uncertain; driver ABI and music formats (verify) |
-| 8 | Soak, original-behavior comparisons, launcher and packaging | Not started | After playable milestone; no installation authorized yet |
+| 8 | Soak, original-behavior comparisons, launcher and packaging | App builds and installs (user authorised 2026-10-16); fuzz + checkpoint oracle | Launcher window, fuzz faults above |
 
 The DOS adapter implements interrupts, port I/O, selector state, segmented string
 operations and interrupt/far returns without invoking the shared lifter's game
@@ -109,12 +128,21 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Next concrete step
 
-Implement native window/event presentation and real-time PIT scheduling, then
-exercise building operations and full park save/reload through the same
-differential checks. Move development platform services into the native app
-host before packaging. Preserve the first-park golden frame and profile hashes.
+1. Decide the fuzz faults: replay the deterministic fuzz scripts
+   (`work/headless-build/detfuzz-*.txt`) through `tools/verify_startup.py
+   --library` to find the first divergence, or show the original faults too.
+2. Save/load from the app, then a long real-time soak.
+3. HMI SOS audio: identify the driver ABI the game calls and replace it with
+   native Core Audio output (sound effects, then music).
+4. A launch window in the other ports' layout; INTRO.EXE (separate image).
 
 ## Done so far
+
+- 2026-10-16 (Claude Code, continuing Codex after its usage limit): whole-program
+  build; native C DOS host with deterministic and real-time modes; Cocoa app,
+  self-test mode and build/install script; CPU-speed governor; checkpoint
+  oracle and fuzzing. Installed `~/Applications/Theme Park Nightly.app` at the
+  user's request (data `~/Games/ThemeParkNative`).
 
 - 2026-10-16 (Codex, input/scheduling): added far mouse callbacks, full caller
   restoration, POPFD interrupt-flag restoration and independent scheduling

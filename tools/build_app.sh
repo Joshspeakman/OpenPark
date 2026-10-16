@@ -22,14 +22,14 @@ OUT=build/app
 # allocation variant; build it with tests/check_macos.sh ... --park first.
 TRACE=work/check-startup/trace.json
 [[ -f $TRACE ]] || { echo "missing $TRACE: run tests/check_macos.sh $EXE $REF --park" >&2; exit 1; }
-"$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-game --opt=-O2 >/dev/null
+"$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-release --opt=-O2 >/dev/null
 mkdir -p "$OUT"
 APP="$OUT/$NAME.app"
 if [[ -e "$APP.new" ]]; then mv "$APP.new" "$HOME/.Trash/$NAME-partial-$(date +%s).app"; fi
 mkdir -p "$APP.new/Contents/MacOS" "$APP.new/Contents/Resources"
 INC="$REF/recomp/runtime"
 clang -arch arm64 -O2 -fobjc-arc -Wall -Wno-unused-function -I "$INC" -I runtime \
-  app/main.m runtime/host.c runtime/verify.c work/app-game/game.a \
+  app/main.m runtime/host.c runtime/verify.c work/app-release/game.a \
   -framework Cocoa -framework QuartzCore -lz -o "$APP.new/Contents/MacOS/ThemePark"
 "$PYTHON" tools/export_image.py "$EXE" "$APP.new/Contents/Resources/MAIN.TPIMG" >/dev/null
 ICO=$GAMEDIR/goggame-1207660423.ico
