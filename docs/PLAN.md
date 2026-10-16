@@ -36,16 +36,32 @@ and the simulation advance per pass. GOG's release pins DOSBox at
 it the nickname screen timed out to the demo in about a second. The PIT runs
 at the game's programmed 72.8 Hz.
 
-Known problems (see "Next"):
+- **Random play against the oracle.** Deterministic click fuzzing replays
+  through `tools/verify_startup.py --library` in full lockstep: seeds 1 and 3
+  (left clicks) matched for 120 million blocks each, ~85,000 DOS/BIOS and
+  ~225,000 scheduling boundaries in total, identical memory and final frames.
 
-- Long random-click fuzzing reached a division fault at 0x1452cf (two seeds,
-  after staff hiring/negotiation screens) and a "STAFF NEGOTIATION" screen with
-  a garbled background. Not yet shown to be a translation fault or a game bug.
-- One fuzz seed read past the 64 MiB guest space while drawing a corrupt
-  cursor sprite on the park-status screen. Guest memory is now a 4 GiB
-  reservation, so this reads zeros instead of crashing; the cause is open.
-- No audio (HMI SOS drivers), no intro playback, no VESA modes, no launcher
-  window yet. Save/load through the app has not been exercised.
+Known problems and decisions:
+
+- With right clicks, three of eight deterministic fuzz seeds make the game read
+  outside guest memory: address 0xFFFFFFFF in block 0x1670a7 (seeds 16, 18)
+  and past 64 MiB in the sprite loop at 0x15f338 (seed 14; also one real-time
+  seed). Seed 16 replayed through the x86 oracle stayed in exact lockstep until
+  **the original code itself** made the unmapped read, so this is the game's
+  own behaviour, not a translation fault. DOSBox tolerates such reads; the
+  app maps a 4 GiB guest space so they read zeros rather than crash
+  (deliberately softer than DOS/4GW on real hardware).
+- A division fault at 0x1452cf (staff hiring/negotiation) and a garbled
+  "STAFF NEGOTIATION" background appeared in early real-time fuzzing, before
+  block extents followed the oracle's rules; nine later real-time seeds and
+  all deterministic seeds have not reproduced it. Not yet explained.
+- The app self-test injects input below the Cocoa layer and hashes frames.
+  The NSEvent key table, window mouse mapping and on-screen drawing have not
+  been observed by a person yet. Control-click is the right button.
+- No audio (HMI SOS drivers), no intro (INTRO.EXE), no VESA modes, no launcher
+  window. Save/load through the app has not been exercised. The game runs
+  with an empty command tail; the original `-l0` option is unverified
+  (THEME.CD/DATA is byte-identical to GAME/DATA, so `-d` does not matter).
 
 ## Confirmed input survey
 
@@ -128,10 +144,9 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Next concrete step
 
-1. Decide the fuzz faults: replay the deterministic fuzz scripts
-   (`work/headless-build/detfuzz-*.txt`) through `tools/verify_startup.py
-   --library` to find the first divergence, or show the original faults too.
-2. Save/load from the app, then a long real-time soak.
+1. The user's first launch: keyboard, mouse, full screen, appearance.
+2. Save/load from the app, then a long real-time soak; chase the 0x1452cf
+   division fault if it recurs (real-time fuzz with TP_CHECKPOINTS).
 3. HMI SOS audio: identify the driver ABI the game calls and replace it with
    native Core Audio output (sound effects, then music).
 4. A launch window in the other ports' layout; INTRO.EXE (separate image).
