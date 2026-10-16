@@ -129,7 +129,7 @@ def main():
             lifter.ins = decode_base
             name = 'b_%08x_%d' % (a, index)
             sources.append((a, source.replace('f_%08x(' % a, name + '('), name, data))
-            names.setdefault(a, []).append((name, data))
+            names.setdefault(a, []).append((name, data, len(decoded)))
 
     header = '#include "rt.h"\nextern uint32_t tp_seg[6], tp_base[8192];\n' \
              'void tp_set_segment(unsigned n, unsigned selector);\n' \
@@ -147,30 +147,34 @@ def main():
     # Dispatch: an O(1) table over the code object plus the synthetic host code.
     decls, entries, guarded = [], [], []
     for a, variants in sorted(names.items()):
-        for name, _ in variants:
+        for name, _, _ in variants:
             decls.append('void %s(Ctx *c);' % name)
+        count = min(255, max(n for _, _, n in variants))
         if len(variants) == 1:
-            entries.append('{0x%xu, %s},' % (a, variants[0][0]))
+            entries.append('{0x%xu, %s, %d},' % (a, variants[0][0], count))
         else:
             fn = 'g_%08x' % a
             body = ''.join('if (!memcmp(G_MEM + 0x%xu, "%s", %du)) { %s(c); return; }\n' % (
-                a, ''.join('\\x%02x' % b for b in data), len(data), name) for name, data in variants)
+                a, ''.join('\\x%02x' % b for b in data), len(data), name) for name, data, _ in variants)
             guarded.append('static void %s(Ctx *c) {\n%s rt_unhandled(c, c->tc, "uncompiled self-modified code variant");\n}\n' % (fn, body))
-            entries.append('{0x%xu, %s},' % (a, fn))
+            entries.append('{0x%xu, %s, %d},' % (a, fn, count))
     dispatch = header + '\n'.join(decls) + '\n' + ''.join(guarded) + '''
 typedef void (*Block)(Ctx *);
-static const struct { uint32_t address; Block fn; } blocks[] = {
+static const struct { uint32_t address; Block fn; uint8_t insns; } blocks[] = {
 %s
 };
 #define CODE_LO 0x%xu
 #define CODE_HI 0x%xu
 static Block table[CODE_HI - CODE_LO];
+static uint8_t counts[CODE_HI - CODE_LO];
 static Block synthetic[0x100];
+/* Executed x86 instructions (per block, REP counted once): the host's CPU-speed governor. */
+extern uint64_t tp_insns;
 const uint32_t tp_block_count = %du;
 void tp_dispatch_init(void) {
     for (unsigned i = 0; i < sizeof blocks / sizeof blocks[0]; i++) {
         uint32_t a = blocks[i].address;
-        if (a >= CODE_LO && a < CODE_HI) table[a - CODE_LO] = blocks[i].fn;
+        if (a >= CODE_LO && a < CODE_HI) table[a - CODE_LO] = blocks[i].fn, counts[a - CODE_LO] = blocks[i].insns;
         else if (a >= 0xf000 && a < 0xf100) synthetic[a - 0xf000] = blocks[i].fn;
     }
 }
@@ -178,6 +182,7 @@ int tp_dispatch(Ctx *c) {
     uint32_t pc = c->tc;
     Block fn = pc >= CODE_LO && pc < CODE_HI ? table[pc - CODE_LO] : pc >= 0xf000 && pc < 0xf100 ? synthetic[pc - 0xf000] : 0;
     if (!fn) return 0;
+    if (pc >= CODE_LO && pc < CODE_HI) tp_insns += counts[pc - CODE_LO];
     fn(c);
     return 1;
 }
@@ -210,6 +215,9 @@ int tp_dispatch(Ctx *c) {
               'traced_blocks': len(observed), 'guarded': len(guarded),
               'targets_outside_code': sorted(hex(t) for t in outside)[:50], 'outside_count': len(outside),
               'unsupported': dict(lifter.unsup.most_common()), 'internal_errors': lifter.internal[:20]}
+    # Block extents (bytes per variant) for tools/spotcheck.py synchronisation.
+    (out / 'blocks.json').write_text(json.dumps({str(a): sorted({max(d) + d[max(d)].size - a for _, d in v if d})
+                                                 for a, v in blocks.items()}) + '\n')
     (out / 'lift.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({k: v for k, v in report.items() if k != 'targets_outside_code'}, indent=2))
 

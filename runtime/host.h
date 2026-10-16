@@ -8,7 +8,7 @@
 typedef struct TpScript {          /* deterministic test input (tools/dos.py) */
     struct { uint32_t at; uint32_t key; } keys[64];        /* poll:scan<<8|ascii */
     struct { uint32_t at, x, y; } clicks[64];               /* poll:x:y, released 50000 blocks later */
-    struct { uint32_t at, x, y; } block_clicks[64];         /* block:x:y */
+    struct { uint32_t at, x, y; } block_clicks[4096];       /* block:x:y */
     int nkeys, nclicks, nblock_clicks;
 } TpScript;
 
@@ -33,6 +33,11 @@ void tp_host_shift(uint32_t flags);       /* BIOS shift-state byte (INT 16h AH=2
 void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
 void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
 void tp_host_quit(void);
+void tp_host_set_realtime(void);   /* switch a deterministic run to real time (tests) */
+/* Emulated CPU speed in thousands of x86 instructions per second (DOSBox "cycles"); 0 = unthrottled. */
+void tp_host_set_cycles(double per_ms);
+
+int  tp_host_checkpoint(const char *path);   /* state snapshot for tools/spotcheck.py */
 
 /* Saved files below the overlay (sha256), for tests. */
 void tp_host_list_saved(void (*fn)(const char *rel, const char *sha256_hex, void *), void *ctx);

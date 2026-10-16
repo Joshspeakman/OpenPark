@@ -28,7 +28,9 @@ static void saved(const char *rel, const char *hex, void *ctx) {
 
 int main(int argc, char **argv) {
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
-    uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0;
+    uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
+    double fuzz = 0;            /* after the deterministic part: seconds of random clicks in real time */
+    const char *rt_keys = "";   /* real time: seconds:key(hex) or seconds:m:x:y:buttons */
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : "";
         if (!strcmp(a, "--game")) game = v, i++;
@@ -41,16 +43,19 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--quantum")) quantum = (uint32_t)atoi(v), i++;
         else if (!strcmp(a, "--blocks")) limit = (uint32_t)atoi(v), i++;
         else if (!strcmp(a, "--realtime")) realtime = 1, seconds = atof(v), i++;
+        else if (!strcmp(a, "--rt-keys")) rt_keys = v, i++;
+        else if (!strcmp(a, "--shots")) shots = atof(v), i++;
+        else if (!strcmp(a, "--fuzz")) fuzz = atof(v), i++;
         else { fprintf(stderr, "unknown argument %s\n", a); return 2; }
     }
     if (!game || !overlay) { fprintf(stderr, "usage: headless --game GAME --overlay DIR [--image MAIN.TPIMG] ...\n"); return 2; }
-    TpScript s = {0};
-    uint32_t tmp[64 * 3];
+    static TpScript s;
+    static uint32_t tmp[4096 * 3];
     s.nkeys = parse(keys, tmp, 2, 64);
     for (int i = 0; i < s.nkeys; i++) s.keys[i].at = tmp[i * 2], s.keys[i].key = tmp[i * 2 + 1];
     s.nclicks = parse(clicks, tmp, 3, 64);
     for (int i = 0; i < s.nclicks; i++) s.clicks[i].at = tmp[i * 3], s.clicks[i].x = tmp[i * 3 + 1], s.clicks[i].y = tmp[i * 3 + 2];
-    s.nblock_clicks = parse(block_clicks, tmp, 3, 64);
+    s.nblock_clicks = parse(block_clicks, tmp, 3, 4096);
     for (int i = 0; i < s.nblock_clicks; i++)
         s.block_clicks[i].at = tmp[i * 3], s.block_clicks[i].x = tmp[i * 3 + 1], s.block_clicks[i].y = tmp[i * 3 + 2];
     mkdir(out, 0755);
@@ -58,9 +63,62 @@ int main(int argc, char **argv) {
     if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
     int r;
     if (realtime) {
-        do r = tp_host_run(2000, 0, 50); while (!r && ({ clock_gettime(CLOCK_MONOTONIC, &t1); (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9 < seconds; }));
+        double next_shot = shots; int shot_n = 0; const char *k = rt_keys;
+        for (;;) {
+            r = tp_host_run(2000, 0, 20);
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            double el = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9;
+            if (r || el >= seconds) break;
+            while (*k && strtod(k, NULL) <= el) {
+                char *e; strtod(k, &e); e++;
+                if (*e == 'm') {
+                    double x = strtod(e + 2, &e); double y = strtod(e + 1, &e); unsigned b = (unsigned)strtoul(e + 1, &e, 10);
+                    tp_host_mouse(x / 640, y / 400, b);
+                } else tp_host_key((uint32_t)strtoul(e, &e, 16));
+                k = *e ? e + 1 : e;
+            }
+            if (shots && el >= next_shot) {
+                char p[1024], h[65]; snprintf(p, sizeof p, "%s/rt-%03d.png", out, shot_n++);
+                tp_host_png(p, h); fprintf(stderr, "shot %s t=%.2f\n", p, el); next_shot += shots;
+            }
+        }
     } else {
-        r = tp_host_run(quantum, limit, 0);
+        if (shots) {                 /* deterministic: a frame every `shots` million blocks */
+            uint32_t step = (uint32_t)(shots * 1e6), at = step; int n = 0;
+            do {
+                r = tp_host_run(quantum, at < limit ? at : limit, 0);
+                char p[1024], h[65]; snprintf(p, sizeof p, "%s/d-%03d.png", out, n++);
+                tp_host_png(p, h); fprintf(stderr, "shot %s blocks=%u %s\n", p, at, h);
+                at += step;
+            } while (!r && at <= limit);
+        } else r = tp_host_run(quantum, limit, 0);
+        if (!r && fuzz > 0) {
+            tp_host_set_realtime();
+            srand(getenv("TP_SEED") ? atoi(getenv("TP_SEED")) : 1234);
+            struct timespec f0; clock_gettime(CLOCK_MONOTONIC, &f0);
+            double next_click = 0, next_shot = 0; int n = 0, held = 0; double hx = 0, hy = 0;
+            for (;;) {
+                r = tp_host_run(2000, 0, 10);
+                clock_gettime(CLOCK_MONOTONIC, &t1);
+                double el = (t1.tv_sec - f0.tv_sec) + (t1.tv_nsec - f0.tv_nsec) * 1e-9;
+                if (r || el >= fuzz) break;
+                if (el >= next_click) {
+                    if (held) { tp_host_mouse(hx, hy, 0); held = 0; }
+                    else {
+                        hx = rand() / (double)RAND_MAX * 0.999; hy = rand() / (double)RAND_MAX * 0.999;
+                        tp_host_mouse(hx, hy, 0);
+                        tp_host_mouse(hx, hy, rand() % 5 ? 1 : 2); held = 1;
+                    }
+                    next_click = el + 0.05;
+                }
+                if (shots && el >= next_shot) {
+                    char p[1024], h[65]; snprintf(p, sizeof p, "%s/fz-%03d.png", out, n);
+                    tp_host_png(p, h); next_shot += shots;
+                    if (getenv("TP_CHECKPOINTS")) { snprintf(p, sizeof p, "%s/fz-%03d.ckpt", out, n); tp_host_checkpoint(p); }
+                    n++;
+                }
+            }
+        }
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
     char png[1024], hex[65] = "";

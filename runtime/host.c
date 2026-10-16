@@ -30,6 +30,7 @@ const char *tp_error(void);
 void tp_io_callback(int (*fn)(int, unsigned, unsigned, unsigned));
 extern uint32_t tp_watch_pc;
 extern volatile int tp_watch_hit;
+extern uint64_t tp_insns;
 
 enum { EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI, EFLAGS, EIP, CS, DS, ES, SS, FS, GS };
 #define MEMORY (64u * 1024u * 1024u)
@@ -134,12 +135,12 @@ static Lin linear_allocs[8192]; static int nlinear;
 static uint32_t next_selector, heap;
 static uint32_t free_selectors[4096]; static int nfree_selectors;
 static uint32_t vec_sel[256], vec_pc[256]; static uint8_t vec_set[256];
-static int handles_fd[20]; static int handles_writable[20];
+static int handles_fd[20] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}; static int handles_writable[20];
 static uint64_t ticks;
 static uint32_t video_mode;
 static uint8_t port_val[65536]; static uint8_t port_known[65536];
 static uint8_t palette[768]; static uint32_t dac_index;
-static uint32_t poll_count, irq_count;
+static uint32_t poll_count, irq_count, time_calls, retrace_reads, int_calls;
 static uint64_t blocks;
 static int64_t release_due = -1;
 static uint32_t pit_divisor = 65536; static int pit_low = -1;
@@ -199,7 +200,7 @@ static int vretrace(void) {
 static int port_in(unsigned port, unsigned size) {
     if (size != 1) stop("unsupported port input width at %x", port);
     if (port_known[port]) return port_val[port];
-    if (port == 0x3da) return vretrace();
+    if (port == 0x3da) { retrace_reads++; return vretrace(); }
     stop("unsupported IN %04x", port);
 }
 static void port_out(unsigned port, unsigned size, unsigned value) {
@@ -261,7 +262,20 @@ static void mouse_callback(void) {
 }
 
 /* Real-time: deliver queued input and due timer ticks at a block boundary. */
+static void debug_stats(void) {
+    static double last; static uint32_t lirq, lpoll, ltime, lret, lint; static uint64_t lblocks;
+    static int on = -1; if (on < 0) on = getenv("TP_DEBUG") != NULL;
+    if (!on) return;
+    double t = now_s(); if (t - last < 1.0) return;
+    static uint64_t lins; fprintf(stderr, "Mins/s=%.1f time/s=%u 3da/s=%u ints/s=%u ", (tp_insns - lins) / 1e6, time_calls - ltime, retrace_reads - lret, int_calls - lint); lins = tp_insns;
+    ltime = time_calls; lret = retrace_reads; lint = int_calls;
+    fprintf(stderr, "t=%.1f irq/s=%u polls/s=%u Mblocks/s=%.1f pit=%u vec8=%x:%x mode=%x eip=%08x keys=%d cb=%d\n",
+            t - rt_start, irq_count - lirq, poll_count - lpoll, (blocks - lblocks) / 1e6, pit_divisor,
+            vec_sel[8], vec_pc[8], video_mode, G(EIP), nkeys, in_callback);
+    last = t; lirq = irq_count; lpoll = poll_count; lblocks = blocks;
+}
 static void realtime_events(void) {
+    debug_stats();
     if (in_callback && tp_watch_hit) in_callback = 0;
     if (!(G(EFLAGS) & 0x200)) return;
     double t = now_s();
@@ -446,7 +460,29 @@ static void dos_time(uint32_t a) {
     S(EDX, (tm.tm_sec << 8) | (uint32_t)(ts.tv_nsec / 10000000));
 }
 
+/* CPU-speed governor. Theme Park's main loop is not timer-paced: screen
+ * timeouts, the attract montage and the simulation advance per loop pass, so
+ * the original ran at the speed of the PC. GOG's release pins DOSBox at
+ * cycles=fixed 10000 (about ten million instructions a second); natively the
+ * loop runs some sixty times faster. Hold the executed x86 instruction rate at
+ * TP_CYCLES thousand per second (default 10000) by sleeping when ahead. */
+extern uint64_t tp_insns;
+static double gov_t0; static uint64_t gov_i0; static double gov_rate;
+void tp_host_set_cycles(double per_ms) { gov_rate = per_ms * 1000.0; gov_t0 = 0; }
+static void govern(void) {
+    if (gov_rate <= 0) return;
+    double t = now_s();
+    if (!gov_t0) { gov_t0 = t; gov_i0 = tp_insns; return; }
+    double ahead = (double)(tp_insns - gov_i0) / gov_rate - (t - gov_t0);
+    if (ahead < -0.1) { gov_t0 = t; gov_i0 = tp_insns; return; }   /* never burst to catch up */
+    if (ahead > 0.001) {
+        struct timespec ts = {0, (long)(ahead * 1e9)};
+        nanosleep(&ts, NULL);
+    }
+}
+
 static void interrupt(uint32_t number) {
+    int_calls++;
     uint32_t a = G(EAX), b = G(EBX), c = G(ECX), d = G(EDX);
     uint32_t ax = a & 65535, ah = (a >> 8) & 255;
     char name[512], path[1024];
@@ -455,7 +491,7 @@ static void interrupt(uint32_t number) {
         if (ah == 7 || ah == 8) { uint32_t k = wait_key(); S(EAX, (a & ~255u) | (k & 255)); return; }
         if (ah == 0x30) { S(EAX, 0x1606); S(EBX, 0); S(ECX, 0); return; }
         if (ax == 0xff00 && (d & 65535) == 0x78) { S(EAX, (a & ~255u) | 1); return; }
-        if (ah == 0x2c) { dos_time(a); return; }
+        if (ah == 0x2c) { time_calls++; dos_time(a); return; }
         if (ah == 0x2a) {
             if (deterministic) { S(EAX, (a & ~255u) | 5); S(ECX, 2026); S(EDX, 0xa10); return; }
             time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
@@ -471,6 +507,7 @@ static void interrupt(uint32_t number) {
         if (ah == 0x3d) {
             cstring(address(DS, d), name, sizeof name);
             int where = resolve(name, path, sizeof path);
+            if (getenv("TP_DEBUG")) fprintf(stderr, "open %s mode %u -> %s\n", name, a & 255, where ? path : "(missing)");
             if (!where) { carry(2); return; }
             if (a & 3 && where == 2) {
                 char target[1024]; snprintf(target, sizeof target, "%s%s", overlay_root, path + strlen(game_root));
@@ -671,7 +708,20 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     snprintf(game_root, sizeof game_root, "%s", game_dir);
     snprintf(overlay_root, sizeof overlay_root, "%s", overlay_dir);
     mkdir(overlay_root, 0755);
-    for (int i = 0; i < 20; i++) handles_fd[i] = -1;
+    for (int i = 0; i < 20; i++) { if (handles_fd[i] >= 0) close(handles_fd[i]); handles_fd[i] = -1; }
+    /* Full reset: the app restarts the game in-process (THEME.BAT errorlevel >= 10). */
+    memset(bases, 0, sizeof bases); memset(has_base, 0, sizeof has_base);
+    memset(alloc_size, 0, sizeof alloc_size); memset(is_alloc_sel, 0, sizeof is_alloc_sel);
+    nlinear = nfree_selectors = 0;
+    memset(vec_sel, 0, sizeof vec_sel); memset(vec_pc, 0, sizeof vec_pc); memset(vec_set, 0, sizeof vec_set);
+    memset(port_val, 0, sizeof port_val); memset(port_known, 0, sizeof port_known);
+    memset(palette, 0, sizeof palette); dac_index = 0;
+    ticks = 0; poll_count = irq_count = 0; blocks = 0; release_due = -1;
+    pit_divisor = 65536; pit_low = -1;
+    memset(&mouse, 0, sizeof mouse); pending_mouse = 0; in_callback = 0;
+    pthread_mutex_lock(&input_lock); nkeys = 0; mq_head = mq_tail = 0; pthread_mutex_unlock(&input_lock);
+    key_at = click_at = block_click_at = 0;
+    stopped = 0; exit_code = -1;
     arena_init(&linear_arena, 0x400000, MEMORY, 4096);
     arena_init(&conventional, 0x40000, 0x90000, 16);
     next_selector = 0x100; heap = 0x400000;
@@ -701,6 +751,8 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     S(CS, 8); S(DS, 16); S(ES, 24); S(SS, 16); S(FS, 16); S(GS, 0);
     S(EIP, entry);
     tp_watch_pc = 0xf010;
+    if (!gov_rate) { const char *e = getenv("TP_CYCLES"); tp_host_set_cycles(e ? atof(e) : 10000); }
+    gov_t0 = 0;
     rt_start = now_s(); timer_next = rt_start;
     snprintf(status, sizeof status, "running");
     return 0;
@@ -727,6 +779,7 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
         if (n) interrupt((uint32_t)n);
         advance_blocks(tp_blocks());
         if (!deterministic) {
+            govern();
             realtime_events();
             if (now_s() >= deadline) return 0;
         }
@@ -812,6 +865,7 @@ void tp_host_mouse_delta(double dx, double dy, uint32_t buttons) {
     push_mouse(clampi(bx + ix, mouse.rx0, mouse.rx1), clampi(by + iy, mouse.ry0, mouse.ry1), buttons);
 }
 void tp_host_quit(void) { quit_requested = 1; }
+void tp_host_set_realtime(void) { deterministic = 0; timer_next = rt_start = now_s(); gov_t0 = 0; }
 
 static void list_dir(const char *dir, const char *rel, void (*fn)(const char *, const char *, void *), void *ctx) {
     DIR *d = opendir(dir); if (!d) return;
@@ -833,5 +887,20 @@ static void list_dir(const char *dir, const char *rel, void (*fn)(const char *, 
         for (int j = 0; j < 32; j++) sprintf(hex + j * 2, "%02x", md[j]);
         fn(r, hex, ctx);
     }
+}
+/* Checkpoint for tools/spotcheck.py: "TPCKPT01", 16 registers (EAX..GS order of
+ * tp_get), selector bases (count, then selector/base pairs), then zlib memory. */
+int tp_host_checkpoint(const char *path) {
+    FILE *f = fopen(path, "wb"); if (!f) return -1;
+    fwrite("TPCKPT01", 1, 8, f);
+    uint32_t regs[16]; for (int i = 0; i < 16; i++) regs[i] = G(i);
+    fwrite(regs, 4, 16, f);
+    uint32_t n = 0; for (uint32_t s = 0; s < 65536; s++) if (has_base[s]) n++;
+    fwrite(&n, 4, 1, f);
+    for (uint32_t s = 0; s < 65536; s++) if (has_base[s]) { uint32_t pair[2] = {s, bases[s]}; fwrite(pair, 4, 2, f); }
+    uLongf zn = compressBound(MEMORY); uint8_t *z = malloc(zn);
+    compress2(z, &zn, mem, MEMORY, 1);
+    uint64_t len = zn; fwrite(&len, 8, 1, f); fwrite(z, 1, zn, f); free(z);
+    fclose(f); return 0;
 }
 void tp_host_list_saved(void (*fn)(const char *, const char *, void *), void *ctx) { list_dir(overlay_root, "", fn, ctx); }
