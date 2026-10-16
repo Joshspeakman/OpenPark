@@ -51,7 +51,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 
 @implementation TPLaunchView {
     NSImage *_banner, *_backdrop;
-    Setting _top[3];
+    Setting _top[4];
     NSArray<NSString *> *_groups;
     Setting _display[3], _sound[3];
 }
@@ -67,6 +67,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _top[1] = setting(@"Game speed", @"Cycles", @[@10000, @20000, @40000],
                           @[@"Original (as GOG's DOSBox)", @"Fast", @"Fastest"]);
         _top[2] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"]);
+        _top[3] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"]);
         _groups = @[@"Display", @"Sound", @"Controls", @"Files"];
         _display[0] = setting(@"Pixels", @"SmoothPixels", @[@NO, @YES], @[@"Sharp", @"Smooth"]);
         _display[1] = setting(@"Aspect", @"Stretch", @[@NO, @YES], @[@"4:3, as on a CRT", @"Fill the window"]);
@@ -84,7 +85,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 3 : self.open == 1 ? 3 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 3 : self.open == 1 ? 3 : self.open < 0 ? 4 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -241,7 +242,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 
 /* Returns YES to play. */
 BOOL tp_launcher_run(void) {
-    NSRect frame = NSMakeRect(0, 0, 820, 580);
+    NSRect frame = NSMakeRect(0, 0, 820, 626);
     TPLaunchView *v = [[TPLaunchView alloc] initWithFrame:frame];
     NSString *shot = NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"];
     if (shot) {                                             /* bounded preview render */

@@ -23,25 +23,27 @@ OUT=build/app
 TRACE=work/check-startup/trace.json
 [[ -f $TRACE ]] || { echo "missing $TRACE: run tests/check_macos.sh $EXE $REF --park" >&2; exit 1; }
 # HMI sound drivers the game loads at run time (work/drv-ADDR-MODE-NAME.bin,
-# made by tools/dump_drivers.sh): compiled at their load addresses.
-LOADED=()
-for f in work/drv-*-*-*.bin; do
-  [[ -e $f ]] || continue
-  IFS=- read -r _ addr mode _ <<< "$(basename "$f" .bin)"
-  if [[ $mode == cs ]]; then LOADED+=(--loaded-code "$addr:$f:cs"); else LOADED+=(--loaded-code "$addr:$f"); fi
-done
-[[ ${#LOADED[@]} -gt 0 ]] || echo "warning: no sound driver images; the app will run with sound off" >&2
-"$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-release --opt=-O2 "${LOADED[@]}" >/dev/null
+# see tools/dump_drivers.md): compiled at their load addresses.
+HAVE_DRIVERS=0; ls work/drv-*-*-*.bin >/dev/null 2>&1 && HAVE_DRIVERS=1
+[[ $HAVE_DRIVERS == 1 ]] || echo "warning: no sound driver images; the app will run with sound off" >&2
+DRV=(); [[ $HAVE_DRIVERS == 1 ]] && DRV=(--drivers work)
+"$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-release --opt=-O2 "${DRV[@]}" >/dev/null
+# INTRO.EXE: its own image, linked beside MAIN.EXE's with an intro_ prefix.
+INTRO=$GAMEDIR/GAME/INTRO.EXE
+[[ -f work/intro-survey.json ]] || "$PYTHON" tools/survey.py "$INTRO" --out work/intro-survey.json
+[[ -f work/intro-trace/trace.json ]] || DS_TEST=1 W32_AUDIO_MUTE=1 "$PYTHON" tools/trace_startup.py "$INTRO" --out work/intro-trace --quantum 1000 --blocks 30000000 --seconds 240 >/dev/null
+"$PYTHON" tools/build_game.py "$INTRO" --reference "$REF" --trace work/intro-trace/trace.json --survey work/intro-survey.json --out work/app-release-intro --opt=-O2 --prefix intro_ "${DRV[@]}" >/dev/null
 mkdir -p "$OUT"
 APP="$OUT/$NAME.app"
 if [[ -e "$APP.new" ]]; then mv "$APP.new" "$HOME/.Trash/$NAME-partial-$(date +%s).app"; fi
 mkdir -p "$APP.new/Contents/MacOS" "$APP.new/Contents/Resources"
 INC="$REF/recomp/runtime"
 clang -arch arm64 -O2 -fobjc-arc -Wall -Wno-unused-function -I "$INC" -I runtime \
-  app/main.m app/audio.m app/launcher.m runtime/host.c runtime/sb16.c runtime/verify.c work/app-release/game.a \
+  app/main.m app/audio.m app/launcher.m runtime/host.c runtime/sb16.c runtime/verify.c work/app-release/game.a work/app-release-intro/game.a \
   -framework Cocoa -framework QuartzCore -framework AVFoundation -framework AudioToolbox -lz \
   -o "$APP.new/Contents/MacOS/ThemePark"
 "$PYTHON" tools/export_image.py "$EXE" "$APP.new/Contents/Resources/MAIN.TPIMG" >/dev/null
+"$PYTHON" tools/export_image.py "$INTRO" "$APP.new/Contents/Resources/INTRO.TPIMG" >/dev/null
 # Launcher art from the player's own copy: the title screen and a park from the
 # attract demo, rendered by running the compiled game headless (muted, scratch).
 clang -arch arm64 -O2 -w -I "$INC" -I runtime runtime/host.c runtime/sb16.c runtime/headless.c runtime/verify.c \
@@ -92,7 +94,7 @@ if [[ ! -d "$DATA/game/DATA" ]]; then
   rsync -a --exclude '*.EXE' "$GAMEDIR/GAME/" "$DATA/game/"
 fi
 # GOG's sound setup (Sound Blaster 16 at 220h/IRQ 7/DMA 1, General MIDI at 330h).
-if [[ ${#LOADED[@]} -gt 0 && ! -e "$DATA/game/sndsetup.inf" ]]; then
+if [[ $HAVE_DRIVERS == 1 && ! -e "$DATA/game/sndsetup.inf" ]]; then
   cp "$GAMEDIR/THEME.CD/SNDSETUP.INF" "$DATA/game/sndsetup.inf"
 fi
 if [[ ${TP_NO_INSTALL:-0} != 1 ]]; then

@@ -29,7 +29,8 @@ int  tp_host_png(const char *path, char sha256_hex[65]);
 
 /* Input (any thread). key = scan<<8 | ascii, as INT 16h returns it. */
 void tp_host_key(uint32_t key);
-void tp_host_shift(uint32_t flags);       /* BIOS shift-state byte (INT 16h AH=2) */
+void tp_host_shift(uint32_t flags);
+void tp_host_key_raw(uint8_t scan, int down);  /* make/break codes for programs with their own INT 9 */       /* BIOS shift-state byte (INT 16h AH=2) */
 void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
 void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
 void tp_host_quit(void);

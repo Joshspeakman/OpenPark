@@ -80,8 +80,13 @@ void *tp_memory(void) {
     return G_MEM;
 }
 void tp_dispatch_init(void);
+int tp_dispatch(Ctx *c);
+/* The compiled image in use: MAIN.EXE's, or another linked with a prefix (INTRO.EXE). */
+static int (*dispatch_fn)(Ctx *) = tp_dispatch;
+static void (*dispatch_init_fn)(void) = tp_dispatch_init;
+void tp_select_code(int (*dispatch)(Ctx *), void (*init)(void)) { dispatch_fn = dispatch; dispatch_init_fn = init; }
 void tp_reset(void) {
-    tp_dispatch_init();
+    dispatch_init_fn();
     memset(&state, 0, sizeof state);
     state.fcw = 0x37f;
     memset(tp_seg, 0, sizeof tp_seg);
@@ -129,7 +134,7 @@ int tp_run(uint32_t budget) {
                      for (int k = 0; k < 32; k++) fprintf(stderr, " %02x", G_MEM[a + k]); fprintf(stderr, "\n"); }
         }
         if (tp_trace_buf && tp_trace_n < tp_trace_cap) tp_trace_buf[tp_trace_n++] = state.tc;
-        if (!tp_dispatch(&state)) return -2;
+        if (!dispatch_fn(&state)) return -2;
         blocks_run++;
         if (interrupt_number) return (int)interrupt_number;
     }

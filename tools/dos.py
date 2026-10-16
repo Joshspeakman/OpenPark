@@ -436,7 +436,8 @@ class DOS:
                     m.set('edx', 0); self.carry(); return
                 self.carry(6); return
             if ah == 0x35:
-                sel, ptr = self.vectors.get(a & 255, (8, 0))
+                # Unset vectors point at an IRET so handlers can chain to them.
+                sel, ptr = self.vectors.get(a & 255, (8, 0xf000))
                 m.set('es', sel); m.set('ebx', ptr); return
             if ah == 0x25:
                 self.vectors[a & 255] = (m.get('ds'), d); return
