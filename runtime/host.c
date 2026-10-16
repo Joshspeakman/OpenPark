@@ -130,6 +130,7 @@ static uint32_t bases[4096 * 2];        /* selector -> base (selector index = se
 static uint8_t has_base[65536];
 static uint32_t alloc_size[65536];      /* DOS selector -> size */
 static uint8_t is_alloc_sel[65536];
+static uint8_t code_sel[65536];
 typedef struct { uint32_t ptr, size; } Lin;
 static Lin linear_allocs[8192]; static int nlinear;
 static uint32_t next_selector, heap;
@@ -484,10 +485,18 @@ static void govern(void) {
 
 static void interrupt(uint32_t number) {
     int_calls++;
+    static int trace_ints = -1; if (trace_ints < 0) trace_ints = getenv("TP_TRACE_INTS") ? atoi(getenv("TP_TRACE_INTS")) : 0;
+    if (trace_ints && number != 0x16 && !(number == 0x21 && ((G(EAX) >> 8) & 255) == 0x2c)) {
+        trace_ints--;
+        fprintf(stderr, "int %02x eax=%08x ebx=%08x ecx=%08x edx=%08x at %08x\n", number, G(EAX), G(EBX), G(ECX), G(EDX), G(EIP));
+    }
     uint32_t a = G(EAX), b = G(EBX), c = G(ECX), d = G(EDX);
     uint32_t ax = a & 65535, ah = (a >> 8) & 255;
     char name[512], path[1024];
     if (number == 0x21) {
+        /* Handle functions take the handle in BX only (the upper half of EBX
+         * can hold anything); counts and offsets are 32-bit under DOS/4GW. */
+        if (ah == 0x3e || ah == 0x3f || ah == 0x40 || ah == 0x42 || ax == 0x4400) b &= 0xffff;
         if (ah == 0xb) { S(EAX, (a & ~255u) | (keys_available() ? 255 : 0)); return; }
         if (ah == 7 || ah == 8) { uint32_t k = wait_key(); S(EAX, (a & ~255u) | (k & 255)); return; }
         if (ah == 0x30) { S(EAX, 0x1606); S(EBX, 0); S(ECX, 0); return; }
@@ -623,6 +632,47 @@ static void interrupt(uint32_t number) {
         if (ah == 0 || ah == 0x10) { uint32_t k = wait_key(); S(EAX, (a & 0xffff0000u) | k); return; }
     }
     if (number == 0x31) {
+        /* Lock/unlock linear region or real-mode region: nothing pages here. */
+        if (ax >= 0x600 && ax <= 0x603) { carry(0); return; }
+        if (ax == 0x0000) {                      /* allocate CX descriptors (contiguous) */
+            uint32_t n = c & 65535, first = next_selector;
+            if (!n || first + 8 * n >= 4096) { carry(0x8011); return; }
+            for (uint32_t k = 0; k < n; k++) { set_base(first + 8 * k, 0); descriptor(first + 8 * k, 0, 0x92); }
+            next_selector += 8 * n;
+            S(EAX, (a & 0xffff0000u) | first); carry(0); return;
+        }
+        if (ax == 0x0001) { carry(0); return; }  /* free descriptor: kept mapped */
+        if (ax == 0x0003) { S(EAX, (a & 0xffff0000u) | 8); carry(0); return; }
+        if (ax == 0x0007) {
+            uint32_t sel = b & 65535;
+            if (!has_base[sel] || sel < 0x100) { carry(0x8022); return; }
+            uint32_t base = ((c & 65535) << 16) | (d & 65535);
+            set_base(sel, base); descriptor(sel, base, code_sel[sel] ? 0x9a : 0x92); carry(0); return;
+        }
+        if (ax == 0x0008) { if (!has_base[b & 65535]) { carry(0x8022); return; } carry(0); return; }
+        if (ax == 0x0009) {
+            uint32_t sel = b & 65535;
+            if (!has_base[sel]) { carry(0x8022); return; }
+            code_sel[sel] = (c & 8) != 0;
+            descriptor(sel, bases[sel], code_sel[sel] ? 0x9a : 0x92); carry(0); return;
+        }
+        if (ax == 0x000a) {
+            uint32_t sel = b & 65535, alias = next_selector;
+            if (!has_base[sel] || alias >= 4096) { carry(0x8022); return; }
+            next_selector += 8; set_base(alias, bases[sel]); descriptor(alias, bases[sel], 0x92);
+            S(EAX, (a & 0xffff0000u) | alias); carry(0); return;
+        }
+        if (ax == 0x0204) {
+            uint32_t n = b & 255;
+            S(ECX, (c & 0xffff0000u) | (vec_set[n] ? vec_sel[n] : 8)); S(EDX, vec_set[n] ? vec_pc[n] : 0); carry(0); return;
+        }
+        if (ax == 0x0205) {
+            uint32_t n = b & 255;
+            vec_sel[n] = c & 65535; vec_pc[n] = d; vec_set[n] = 1; carry(0); return;
+        }
+        if (ax == 0x0200) { S(ECX, (c & 0xffff0000u) | 0xf000); S(EDX, (d & 0xffff0000u) | 0xff53); carry(0); return; }
+        if (ax == 0x0201) { carry(0); return; }  /* real-mode vectors: no real mode here */
+        if (ax == 0x0400) { S(EAX, 0x005a); S(EBX, 3); S(ECX, (c & 0xffffff00u) | 4); S(EDX, 0x0870); carry(0); return; }
         if (ax == 6) {
             uint32_t sel = b & 65535;
             if (!has_base[sel]) { carry(0x8022); return; }
@@ -712,7 +762,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     for (int i = 0; i < 20; i++) { if (handles_fd[i] >= 0) close(handles_fd[i]); handles_fd[i] = -1; }
     /* Full reset: the app restarts the game in-process (THEME.BAT errorlevel >= 10). */
     memset(bases, 0, sizeof bases); memset(has_base, 0, sizeof has_base);
-    memset(alloc_size, 0, sizeof alloc_size); memset(is_alloc_sel, 0, sizeof is_alloc_sel);
+    memset(alloc_size, 0, sizeof alloc_size); memset(is_alloc_sel, 0, sizeof is_alloc_sel); memset(code_sel, 0, sizeof code_sel);
     nlinear = nfree_selectors = 0;
     memset(vec_sel, 0, sizeof vec_sel); memset(vec_pc, 0, sizeof vec_pc); memset(vec_set, 0, sizeof vec_set);
     memset(port_val, 0, sizeof port_val); memset(port_known, 0, sizeof port_known);
@@ -752,6 +802,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     S(CS, 8); S(DS, 16); S(ES, 24); S(SS, 16); S(FS, 16); S(GS, 0);
     S(EIP, entry);
     tp_watch_pc = 0xf010;
+    { extern uint32_t tp_break_pc; const char *b = getenv("TP_BREAK"); if (b) tp_break_pc = (uint32_t)strtoul(b, NULL, 16); }
     if (!gov_rate) { const char *e = getenv("TP_CYCLES"); tp_host_set_cycles(e ? atof(e) : 10000); }
     gov_t0 = 0;
     rt_start = now_s(); timer_next = rt_start;
