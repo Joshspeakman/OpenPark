@@ -95,6 +95,8 @@ int tp_dispatch(Ctx *c);
 /* The host learns when execution reaches one address (the far-callback
  * epilogue) without changing block scheduling. */
 uint64_t tp_insns;
+/* Development breakpoint (TP_BREAK=hex address): prints registers. */
+uint32_t tp_break_pc = 0xffffffffu; int tp_break_hits;
 /* Optional record of dispatched block addresses (tools/spotcheck.py). */
 uint32_t *tp_trace_buf; uint32_t tp_trace_cap, tp_trace_n;
 uint32_t tp_watch_pc = 0xffffffffu;
@@ -105,6 +107,14 @@ int tp_run(uint32_t budget) {
     if (setjmp(trap)) return -1;
     while (budget--) {
         if (state.tc == tp_watch_pc) tp_watch_hit = 1;
+        if (state.tc == tp_break_pc && tp_break_hits < 20) {
+            tp_break_hits++;
+            fprintf(stderr, "break %08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x [esp]=%08x\n", state.tc,
+                    state.eax, state.ebx, state.ecx, state.edx, state.esi, state.edi, state.esp, *(uint32_t *)(G_MEM + state.esp));
+            const char *m = getenv("TP_BREAK_MEM");
+            if (m) { uint32_t a = (uint32_t)strtoul(m, NULL, 16); fprintf(stderr, "  [%08x]:", a);
+                     for (int k = 0; k < 32; k++) fprintf(stderr, " %02x", G_MEM[a + k]); fprintf(stderr, "\n"); }
+        }
         if (tp_trace_buf && tp_trace_n < tp_trace_cap) tp_trace_buf[tp_trace_n++] = state.tc;
         if (!tp_dispatch(&state)) return -2;
         blocks_run++;

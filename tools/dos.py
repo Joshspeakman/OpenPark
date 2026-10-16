@@ -348,6 +348,10 @@ class DOS:
         ax, ah = a & 65535, (a >> 8) & 255
         self.events.append({'int': number, 'eax': a, 'ebx': b, 'ecx': c, 'edx': d, 'pc': m.get('eip')})
         if number == 0x21:
+            # Handle functions take the handle in BX only (the upper half of
+            # EBX can hold anything); counts/offsets are 32-bit under DOS/4GW.
+            if ah in (0x3e,0x3f,0x40,0x42) or ax == 0x4400:
+                b &= 0xffff
             if ah == 0xb:
                 m.set('eax',(a&~255)|(255 if self.keys else 0)); return
             if ah in (7,8):

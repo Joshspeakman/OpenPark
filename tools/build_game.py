@@ -35,6 +35,8 @@ def successors(i):
         return [imm] if imm is not None else []
     if mn == 'call':
         return [nxt] + ([imm] if imm is not None else [])
+    if mn in ('lcall', 'ljmp') and len(i.operands) == 2:
+        return ([nxt] if mn == 'lcall' else []) + [i.operands[1].imm & 0xffffffff]
     if mn.startswith('j') or mn.startswith('loop'):
         return [nxt] + ([imm] if imm is not None else [])
     if mn in TERMINAL:
@@ -157,6 +159,9 @@ def main():
             source, _ = lifter.lift_function(a)
             lifter.collect = saved
             lifter.ins = decode_base
+            # Every block must hand control on (set the next PC) or trap.
+            if decoded and 'c->tc' not in source and 'rt_unhandled' not in source:
+                raise SystemExit('block %08x does not reach a successor' % a)
             name = 'b_%08x_%d' % (a, index)
             sources.append((a, source.replace('f_%08x(' % a, name + '('), name, data))
             names.setdefault(a, []).append((name, data, len(decoded)))

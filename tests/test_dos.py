@@ -91,6 +91,17 @@ class DOSTests(unittest.TestCase):
         self.assertEqual(self.m.get('eax'),6)
         self.assertTrue(self.m.get('eflags')&1)
 
+    def test_handle_uses_bx_only(self):
+        # Watcom's stdio passes garbage in the upper half of EBX (seen while
+        # reading sndsetup.inf); DOS reads the handle from BX.
+        h=self.open()
+        self.call(0x4400,ebx=0x1c0000|h)
+        self.assertFalse(self.m.get('eflags')&1)
+        self.call(0x3f00,ebx=0x1c0000|h,ecx=3,edx=0x20000)
+        self.assertEqual((self.m.get('eax'),self.m.read(0x20000,3)),(3,b'abc'))
+        self.call(0x3e00,ebx=0x1c0000|h)
+        self.assertFalse(self.m.get('eflags')&1)
+
     def test_writable_open_copies_owned_file_to_scratch(self):
         h=self.open(2)
         self.dos.handles[h].write(b'XYZ');self.dos.handles[h].flush()

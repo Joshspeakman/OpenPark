@@ -73,7 +73,7 @@ def create_lifter(reference, image, output):
         def falls_through(self, i):
             if i.mnemonic in ('int', 'retf', 'iretd'):
                 return False
-            if i.mnemonic in ('cli', 'sti', 'in', 'out'):
+            if i.mnemonic in ('cli', 'sti', 'in', 'out', 'lds', 'les', 'lfs', 'lgs', 'lss'):
                 return True
             return super().falls_through(i)
 
@@ -91,6 +91,18 @@ def create_lifter(reference, image, output):
                 # Capstone omits REPNE in the mnemonic for F2 MOVS/STOS,
                 # although the target CPU repeats these Watcom instructions.
                 return self.string(mn,'repne' if 0xf2 in prefixes else 'rep')
+            # Far CALL/JMP through memory (FF /3, FF /5): Capstone reports a
+            # near 4-byte operand. Load selector:offset; CALL pushes CS then EIP.
+            k = len(prefixes)
+            if mn in ('call', 'jmp') and i.bytes[k] == 0xff and len(i.bytes) > k + 1 and (i.bytes[k + 1] >> 3) & 7 in (3, 5):
+                if 0x66 in prefixes:
+                    raise lift.Unsupported('16-bit far transfer')
+                p = self.addr(i, ops[0])
+                push = 'esp -= 4; W32(esp, tp_seg[0]); esp -= 4; W32(esp, 0x%xu); ' % (i.address + i.size) if mn == 'call' else ''
+                return '{ uint32_t p = %s; uint32_t off = R32(p), sel = R16(p + 4); %stp_set_segment(0, sel); c->tc = off; SPILL; return; }' % (p, push)
+            if mn in ('lcall', 'ljmp') and len(ops) == 2:
+                push = 'esp -= 4; W32(esp, tp_seg[0]); esp -= 4; W32(esp, 0x%xu); ' % (i.address + i.size) if mn == 'lcall' else ''
+                return '{ %stp_set_segment(0, 0x%xu); c->tc = 0x%xu; SPILL; return; }' % (push, ops[0].imm & 0xffff, ops[1].imm & 0xffffffff)
             if mn == 'int':
                 return 'c->tc = 0x%xu; SPILL; tp_interrupt(c, %du); return;' % (i.address + i.size, ops[0].imm)
             if mn in ('sti', 'cli'):
