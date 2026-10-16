@@ -1,0 +1,22 @@
+{
+  "package": {
+    "name": "theme_park_enUS_1_0_33010.pkg",
+    "sha256": "942da3010a657c07621eb19c6f2dacbb71ce6f06c07f62914cb8f422e1305650",
+    "size": 104934252,
+    "scripts_sha256": "1774ad34b9447e0e32d2232071089c43743562fc54b6afe7fdc36355e07fd5bb"
+  },
+  "executables": {
+    "GAME/MAIN.EXE": {
+      "sha256": "fba72de2cee7f92dc26801ab2ee6a7c6f8c84aefb8cdab0da1fbcee532b5dc79",
+      "size": 841223
+    },
+    "GAME/INTRO.EXE": {
+      "sha256": "af066092e83238e2699cbe993582c2d433cb473f9a4b144ad0088648c1c8bb00",
+      "size": 179303
+    },
+    "CONFIG/MAIN.EXE": {
+      "sha256": "f3600c6a5830002e11fcb5688b7995a9ad0382c13a420774152f882ad5ab6b13",
+      "size": 90758
+    }
+  }
+}
