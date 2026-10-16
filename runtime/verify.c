@@ -84,6 +84,9 @@ const char *tp_error(void) { return error; }
 int tp_dispatch(Ctx *c);
 /* The host learns when execution reaches one address (the far-callback
  * epilogue) without changing block scheduling. */
+uint64_t tp_insns;
+/* Optional record of dispatched block addresses (tools/spotcheck.py). */
+uint32_t *tp_trace_buf; uint32_t tp_trace_cap, tp_trace_n;
 uint32_t tp_watch_pc = 0xffffffffu;
 volatile int tp_watch_hit;
 int tp_run(uint32_t budget) {
@@ -92,6 +95,7 @@ int tp_run(uint32_t budget) {
     if (setjmp(trap)) return -1;
     while (budget--) {
         if (state.tc == tp_watch_pc) tp_watch_hit = 1;
+        if (tp_trace_buf && tp_trace_n < tp_trace_cap) tp_trace_buf[tp_trace_n++] = state.tc;
         if (!tp_dispatch(&state)) return -2;
         blocks_run++;
         if (interrupt_number) return (int)interrupt_number;
