@@ -4,9 +4,12 @@ A new Apple Silicon port of the user's own GOG Theme Park release. The target is
 an ARM64 app that recompiles the original game code, with native platform
 services. DOSBox, Wine and Rosetta are not part of the intended runtime.
 
-**Status:** binary survey and a first native-code proof. The game does not boot
-or display a menu yet. Two original integer/memory routines compile into an
-ARM64 library and match the x86 originals over 2,000 differential cases.
+**Status:** native game code now reaches the title, nickname entry, main menu
+and new-park player-details screen. The latter matches the original x86 over
+12,818 service boundaries, including a byte-identical framebuffer. It also runs
+with no Unicorn or Capstone installed/imported at runtime. This is a bounded,
+headless development host, not a finished playable app; mouse callbacks,
+real-time pacing, audio, save/load and Cocoa presentation remain work.
 
 The supplied Mac package contains DOS/4GW LE executables. This requires a DOS
 platform layer; the Windows loaders in the other ports cannot load it directly.
@@ -30,6 +33,9 @@ bash tests/check.sh
 bash tests/check.sh \
   work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
   "$HOME/Projects/freedom-force-macos"
+bash tests/check_macos.sh \
+  work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
+  "$HOME/Projects/freedom-force-macos"
 ```
 
 `prepare.py` verifies the package and executable hashes, extracts only the game
@@ -42,6 +48,30 @@ With both arguments it also generates, compiles and runs the native differential
 proof. Generated code, binaries, extracted files and reports remain ignored in
 `work/`. The proof library links only `libSystem`; Unicorn is used by the Python
 test harness, not by the generated ARM64 routines.
+
+`check_macos.sh` runs the parser/host tests, 100 synthetic instruction cases,
+the 2,000 routine comparisons, and scripted startup through nickname entry and
+the menu. It compares CPU-written pages at every service boundary, all 64 MiB
+periodically and at completion, register/segment state, port traffic and the
+final framebuffer. Arithmetic flags that may be undefined at arbitrary service
+boundaries are excluded; IF/DF are checked. See [DOS contract](docs/DOS-CONTRACT.md)
+for the limits of the shared host and deterministic input/timer model.
+
+After that check, run the compiled game without the development oracle:
+
+```sh
+python3 -S tools/run_native.py \
+  work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
+  --library work/check-native/startup.dylib \
+  --services 12699 \
+  --keys 60:1c0d,80:1454,82:1245,84:1f53,86:1454,88:1c0d
+```
+
+The frame is saved to `work/native-run/frame.png`. `-S` excludes third-party
+Python packages; the game executes in the compiled ARM64 library, with a Python
+development implementation of the DOS platform services. A library/input hash
+manifest guards against using a mismatched build. Unknown code targets or
+self-modified variants stop explicitly, without decoding or interpreting x86.
 
 Nothing here installs an app or modifies the downloaded package, an installed
 game, the user's saves, or another project. No game content belongs in git.

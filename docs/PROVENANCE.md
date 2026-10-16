@@ -10,10 +10,14 @@ Existing ports reviewed read-only:
 
 - Freedom Force: executable analysis/lifting, the CPU context and flags, test
   harness, background/muted runs, and overlay architecture. `prove_native.py`
-  currently imports its lifter and includes its runtime headers without copying
+  imports its lifter and includes its runtime headers without copying
   or changing that project. `config/reference.json` pins the exact commit and
   hashes of all five files used. All game hooks and overrides are empty in this
   proof; the lifter's game-specific command-line build is not invoked.
+  The DOS adapter now also reuses only its generic instruction emitters. It
+  replaces collection/dispatch, segment accesses, DOS boundaries and string
+  handling; no Win32 service implementation or game hook is imported into the
+  native product. Python bytecode writes into reference directories are disabled.
 - Delta Force: Watcom conventions, code discovery, self-modifying renderer
   treatment, paletted/software framebuffer handling, and platform-service reuse.
   Those findings are leads for Theme Park, not proof that it has the same engine.
@@ -30,3 +34,8 @@ The owned package and three executable identities are in `config/inputs.json`.
 Unpacking archive data does not run the package's installation scripts. The
 bundled DOSBox configuration was read as evidence of the shipped platform;
 neither DOSBox nor the GOG launcher was launched.
+
+Additional primary references and synthetic host choices are recorded in
+[DOS-CONTRACT.md](DOS-CONTRACT.md). The optional mouse extension is treated as
+unavailable, not as successful hardware emulation. No external implementation
+source was copied for DOS services, memory allocation, VGA presentation or input.
