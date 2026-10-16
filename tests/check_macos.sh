@@ -64,5 +64,23 @@ assert a['frame_sha256']==b['frame_sha256'],(a,b)
 assert a['saved_files']==b['saved_files'],(a,b)
 print('PASS: identical native-only frame and scratch files, without oracle/disassembler')
 PY
+if [[ "${3:-}" == --park ]]; then
+  # The app's C DOS host, deterministic mode: the same scenario must give the golden hashes.
+  clang -arch arm64 -O2 -w -I "$2/recomp/runtime" -I runtime runtime/host.c runtime/sb16.c runtime/headless.c \
+    runtime/verify.c work/check-native/game.a -lz -o work/check-native/tp-headless
+  overlay=$(mktemp -d work/check-native/c-host-XXXXXXXX)
+  "$PYTHON" tools/export_image.py "$1" work/check-native/MAIN.TPIMG >/dev/null
+  work/check-native/tp-headless --game "$(dirname "$1")" --overlay "$PWD/$overlay" --image work/check-native/MAIN.TPIMG \
+    --out work/check-native/c-host "${input_args[@]}" --quantum 1000 --blocks 8000000 > work/check-native/c-host.json
+  "$PYTHON" - <<'PY'
+import json
+from pathlib import Path
+r=json.loads(Path('work/check-native/c-host.json').read_text())
+m=json.loads(Path('config/milestones.json').read_text())['first_park']
+assert r['frame_sha256']==m['frame_sha256'],r
+assert r['saved_files']['save/TEST.GD']==m['profile_sha256'],r
+print('PASS: C host reproduces the golden first-park frame and profile')
+PY
+fi
 file work/check-native/game.dylib
 otool -L work/check-native/game.dylib
