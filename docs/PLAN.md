@@ -3,65 +3,63 @@
 Target: the user's GOG `theme_park_enUS_1_0_33010.pkg`, recompiled into native
 Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
-## Current milestone — 2026-10-16: native app (Claude Code, continuing Codex)
+## Current milestone — 2026-10-16 (evening): sound, intro, launcher, save/load
 
-**Theme Park Nightly.app** runs the game as native ARM64 code in a Cocoa
-window, with real-time keyboard/mouse input. Title, nickname, main menu, player
-setup, the world map, buying land and the park itself run at the original
-pace. No DOSBox, Wine, Rosetta, interpreter or Python is in the app process.
-There is **no sound yet** and the intro movie (INTRO.EXE) is not played.
+**Theme Park Nightly.app** runs INTRO.EXE and MAIN.EXE as native ARM64 code
+in a Cocoa window with a launch window, keyboard/mouse, Sound Blaster 16
+digital sound and General MIDI music, at GOG's DOSBox pace. No DOSBox, Wine,
+Rosetta, CPU interpreter or Python runs in the app.
 
-What is verified:
+What is verified, and how:
 
-- **Whole-program compilation.** `tools/build_game.py` compiles every block
-  statically reachable from the entry point, all relocated code pointers, the
-  survey's call targets and the verified trace: 30,143 blocks, O(1) dispatch.
-  Block extents follow QEMU/Unicorn's translation-block rules so block-count
-  scheduling matches the oracle. Unknown targets stop with their address.
-- **x86 oracle, scripted path.** `tests/check_macos.sh ... --park` verifies the
-  whole-program library: eight million blocks, 13,678 DOS/BIOS and 6,882
-  scheduling boundaries, golden first-park frame and profile.
-- **Native C host.** `runtime/host.c` (C port of `tools/dos.py`) in
-  deterministic mode reproduces the golden first-park frame and profile
-  byte for byte; inside the app the menu and setup frames hash identically to
-  the verified milestones.
-- **Off-path code.** `tools/spotcheck.py` replays C-host checkpoints from
-  random-click play through the compiled blocks and Unicorn in lockstep
-  (exact arrival-count synchronisation). 160 of 160 checkpoints match.
+- **Main game code** (30,143 blocks + loaded drivers): the scripted first-park
+  run matches the x86 oracle for 8M blocks with golden frame/profile hashes
+  (`tests/check_macos.sh ... --park`, green on 611a66a); two deterministic
+  random-click runs matched the oracle in full lockstep for 120M blocks each.
+- **Off-path code from real-time play**: `tools/spotcheck.py` replays C-host
+  checkpoints through compiled code and Unicorn. 160 random-play checkpoints,
+  108 timer-interrupt entries and 90 Sound Blaster interrupt entries (1.8M
+  blocks of HMI driver and mixer code) match.
+- **Sound**: the HMI SOS drivers the game copies into DOS memory (MPU-401,
+  detection, SB16 `sw1616m`, software mixer `tr16m` with its generated
+  routine pool) are compiled ahead of time at their deterministic load
+  addresses (`tools/dump_drivers.md`); blocks over bytes the drivers rewrite
+  are re-checked on every run. `runtime/sb16.c` emulates the DSP, mixer and
+  8237 DMA (the driver sends 16-bit samples over DMA 1) and IRQ 7;
+  `app/audio.m` plays them through AVAudioEngine and MIDI through Apple's DLS
+  synth. Measured: IRQ 7 at 5.5/s (44,100 Hz / 8,000-sample blocks), effect
+  and ambience levels 0.2–0.9 in the park, MIDI 27–153 bytes/s in the intro.
+  The hardware model itself is checked only by these measurements, not
+  against real hardware; **nobody has listened to it yet**. The main game sent
+  no MIDI in the parts of play exercised (its park audio is digital).
+- **Intro**: INTRO.EXE traced (no self-modifying code in 30M blocks) and
+  compiled with an `intro_` prefix; plays with sound, Escape skips (its own
+  INT 9 handler reading port 0x60).
+- **Save/load**: a random-play run writes a 304,668-byte `save/TEST.gy`;
+  a new session's "Continue game" reads it and restores the park. (Before the
+  BX handle fix below, saves were written empty.)
+- **Soak**: four 2-minute sound-on random-play runs at 4x speed (≈1.27B blocks
+  each) and earlier deterministic seeds: no stops.
 
-Pacing: the game's loop is not timer-paced; idle timeouts, the attract montage
-and the simulation advance per pass. GOG's release pins DOSBox at
-`cycles=fixed 10000`, so the host holds the executed x86 instruction rate at
-10 million per second (`TP_CYCLES`, thousands per second) by sleeping. Without
-it the nickname screen timed out to the demo in about a second. The PIT runs
-at the game's programmed 72.8 Hz.
+Fixes found today by these checks: DOS handle functions must use BX only
+(Watcom passes junk in EBX's top half: sound setup and saves silently failed);
+blocks ending at LES/LDS never reached a successor; far CALL/JMP through
+memory were compiled as near; block extents now follow QEMU's rules so
+deterministic scheduling matches the oracle; PIC mask/keyboard IRQ for the
+intro; DPMI descriptor, vector and lock services for HMI.
 
-- **Random play against the oracle.** Deterministic click fuzzing replays
-  through `tools/verify_startup.py --library` in full lockstep: seeds 1 and 3
-  (left clicks) matched for 120 million blocks each, ~85,000 DOS/BIOS and
-  ~225,000 scheduling boundaries in total, identical memory and final frames.
+Known limits:
 
-Known problems and decisions:
-
-- With right clicks, three of eight deterministic fuzz seeds make the game read
-  outside guest memory: address 0xFFFFFFFF in block 0x1670a7 (seeds 16, 18)
-  and past 64 MiB in the sprite loop at 0x15f338 (seed 14; also one real-time
-  seed). Seed 16 replayed through the x86 oracle stayed in exact lockstep until
-  **the original code itself** made the unmapped read, so this is the game's
-  own behaviour, not a translation fault. DOSBox tolerates such reads; the
-  app maps a 4 GiB guest space so they read zeros rather than crash
-  (deliberately softer than DOS/4GW on real hardware).
-- A division fault at 0x1452cf (staff hiring/negotiation) and a garbled
-  "STAFF NEGOTIATION" background appeared in early real-time fuzzing, before
-  block extents followed the oracle's rules; nine later real-time seeds and
-  all deterministic seeds have not reproduced it. Not yet explained.
-- The app self-test injects input below the Cocoa layer and hashes frames.
-  The NSEvent key table, window mouse mapping and on-screen drawing have not
-  been observed by a person yet. Control-click is the right button.
-- No audio (HMI SOS drivers), no intro (INTRO.EXE), no VESA modes, no launcher
-  window. Save/load through the app has not been exercised. The game runs
-  with an empty command tail; the original `-l0` option is unverified
-  (THEME.CD/DATA is byte-identical to GAME/DATA, so `-d` does not matter).
+- Random right-click play can make the original code read outside memory
+  (oracle-confirmed for one case; game behaviour); the app maps a 4 GiB guest
+  space so this reads zeros, as DOSBox tolerates it.
+- The early division fault at 0x1452cf has not recurred since the block-rule
+  fix; not explained.
+- Driver images are game-derived files in work/, made by the procedure in
+  `tools/dump_drivers.md`; a different sound configuration needs new images.
+- No VESA/SVGA mode; the game runs in 320x200 as GOG's default does.
+- The NSEvent key table, window mouse mapping, on-screen drawing and audio
+  output have only been exercised by automated tests, not by a person.
 
 ## Confirmed input survey
 
@@ -107,8 +105,8 @@ every apparent service found in a speculative decode.
 | 3 | Verified startup analysis and differential trace to first DOS service | Passed through player details | Synthetic DOS4G launch contract; original-vs-native CPU agreement |
 | 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Observed startup services implemented | Keyboard, timer and far mouse callbacks tested |
 | 5 | Framebuffer/palette presentation in a native window, then menus | Cocoa window (CoreAnimation, 4:3, full screen) | VESA modes remain |
-| 6 | Native input and simulation pacing; new park, build operations, save/load | Real-time input and 10M-instruction/s governor; park runs; path tool opens | Save/reload and build-operation acceptance remain |
-| 7 | Intro playback and HMI audio through native output | Not started | Large/uncertain; driver ABI and music formats (verify) |
+| 6 | Native input and simulation pacing; new park, build operations, save/load | Real-time input, governor, save/continue verified | Build operations covered by fuzzing only |
+| 7 | Intro playback and HMI audio through native output | Done: intro, SB16 effects, General MIDI | Hardware model checked by measurement only |
 | 8 | Soak, original-behavior comparisons, launcher and packaging | App builds and installs (user authorised 2026-10-16); fuzz + checkpoint oracle | Launcher window, fuzz faults above |
 
 The DOS adapter implements interrupts, port I/O, selector state, segmented string
@@ -144,14 +142,15 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Next concrete step
 
-1. The user's first launch: keyboard, mouse, full screen, appearance.
-2. Save/load from the app, then a long real-time soak; chase the 0x1452cf
-   division fault if it recurs (real-time fuzz with TP_CHECKPOINTS).
-3. HMI SOS audio: identify the driver ABI the game calls and replace it with
-   native Core Audio output (sound effects, then music).
-4. A launch window in the other ports' layout; INTRO.EXE (separate image).
+1. The user's first session: keyboard, mouse, full screen, sound balance.
+2. Regenerate driver images automatically (script the dump/mask procedure).
+3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
 
 ## Done so far
+
+- 2026-10-16 evening (Claude Code): sound (HMI drivers compiled, SB16/MPU-401
+  emulation, Core Audio), intro, launch window, save/load verified, DOS handle
+  fix, lifter fixes, interrupt-entry oracle checks, soak. Reinstalled the app.
 
 - 2026-10-16 (Claude Code, continuing Codex after its usage limit): whole-program
   build; native C DOS host with deterministic and real-time modes; Cocoa app,
