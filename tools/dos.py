@@ -273,8 +273,9 @@ class DOS:
             self.queue_mouse(self.mouse['x'],self.mouse['y'],0)
             self.mouse_callback()
         if self.block_clicks and self.blocks>=self.block_clicks[0][0] and self.m.get('eflags')&0x200:
-            _,x,y=self.block_clicks.pop(0)
-            self.queue_mouse(x,y,1);self.release_due=self.blocks+50000
+            # block:x:y[:buttons] (1 left, 2 right); released 50000 blocks later
+            _,x,y,*b=self.block_clicks.pop(0)
+            self.queue_mouse(x,y,b[0] if b else 1);self.release_due=self.blocks+50000
             self.mouse_callback()
 
     def mouse_callback(self):

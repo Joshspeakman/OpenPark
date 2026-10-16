@@ -62,6 +62,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--fuzz")) fuzz = atof(v), i++;
         else { fprintf(stderr, "unknown argument %s\n", a); return 2; }
     }
+    if (overlay && (!*overlay || overlay[strlen(overlay) - 1] == '/')) { fprintf(stderr, "overlay must name a directory\n"); return 2; }
     if (!game || !overlay) { fprintf(stderr, "usage: headless --game GAME --overlay DIR [--image MAIN.TPIMG] ...\n"); return 2; }
     static TpScript s;
     static uint32_t tmp[4096 * 3];
@@ -69,9 +70,14 @@ int main(int argc, char **argv) {
     for (int i = 0; i < s.nkeys; i++) s.keys[i].at = tmp[i * 2], s.keys[i].key = tmp[i * 2 + 1];
     s.nclicks = parse(clicks, tmp, 3, 64);
     for (int i = 0; i < s.nclicks; i++) s.clicks[i].at = tmp[i * 3], s.clicks[i].x = tmp[i * 3 + 1], s.clicks[i].y = tmp[i * 3 + 2];
-    s.nblock_clicks = parse(block_clicks, tmp, 3, 4096);
-    for (int i = 0; i < s.nblock_clicks; i++)
-        s.block_clicks[i].at = tmp[i * 3], s.block_clicks[i].x = tmp[i * 3 + 1], s.block_clicks[i].y = tmp[i * 3 + 2];
+    /* block:x:y[:buttons] */
+    for (const char *q = block_clicks; q && *q && s.nblock_clicks < 4096; ) {
+        char *e; int i = s.nblock_clicks++;
+        s.block_clicks[i].at = (uint32_t)strtoul(q, &e, 10); s.block_clicks[i].x = (uint32_t)strtoul(e + 1, &e, 10);
+        s.block_clicks[i].y = (uint32_t)strtoul(e + 1, &e, 10);
+        if (*e == ':') s.block_clicks[i].buttons = (uint32_t)strtoul(e + 1, &e, 10);
+        q = *e ? e + 1 : e;
+    }
     mkdir(out, 0755);
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
