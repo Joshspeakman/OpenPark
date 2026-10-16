@@ -264,12 +264,12 @@ def main():
                 out.append('    if (csbase == 0x%xu && pc < %du) { uint32_t off = pc;' % (linear, len(data)))
             else:
                 out.append('    if (!csbase && pc >= 0x%xu && pc < 0x%xu) { uint32_t off = pc - 0x%xu;' % (linear, linear + len(data), linear))
-            # Full image check on first entry; afterwards the driver patches
-            # selector values into its own code, so re-entries check the
-            # (unpatched) header that identifies the driver.
+            # Identity: the driver header (the package and its driver files
+            # are pinned by hash). Blocks over bytes the driver rewrites are
+            # checked against the compiled bytes on every execution.
             out.append('        if (current_region != %d) {' % k)
             m = region_info[k][2] or bytes([1]) * len(data)
-            out.append('            { static const uint8_t mask[%d] = {%s}; int n = region%d_state ? %d : %d;' % (len(data), ','.join(str(b) for b in m), k, min(32, len(data)), len(data)))
+            out.append('            { static const uint8_t mask[%d] = {%s}; int n = %d;' % (len(data), ','.join(str(b) for b in m), min(32, len(data))))
             out.append('              for (int i = 0; i < n; i++) if (mask[i] && G_MEM[0x%xu + i] != region%d_image[i]) goto next%d; }' % (linear, k, k))
             out.append('            if (!region%d_state) { for (int i = 0; region%d_blocks[i].fn; i++) region%d_table[region%d_blocks[i].off] = region%d_blocks[i].fn, region%d_counts[region%d_blocks[i].off] = region%d_blocks[i].insns, region%d_guard[region%d_blocks[i].off] = region%d_blocks[i].guard; region%d_state = 1; }' % ((k,) * 12))
             out.append('            current_region = %d;' % k)

@@ -266,11 +266,20 @@ static int io_cb(int output, unsigned port, unsigned size, unsigned value) {
 
 /* ---- interrupts into guest code ---- */
 static int timer_installed(void) { return !(vec_sel[8] == 8 && vec_pc[8] == 0xf000); }
+int tp_host_checkpoint(const char *path);
 static void hw_interrupt(uint32_t vector) {
     uint32_t sp = G(ESP) - 12;
     put32(sp, G(EIP)); put32(sp + 4, G(CS)); put32(sp + 8, G(EFLAGS));
     S(ESP, sp); S(CS, vec_sel[vector]); S(EIP, vec_pc[vector]);
     S(EFLAGS, G(EFLAGS) & ~0x300u);
+    /* Tests: checkpoints at interrupt entry let tools/spotcheck.py replay
+     * the handlers (HMI driver code) against the x86 oracle. */
+    static int every = -1, n, saved;
+    if (every < 0) every = getenv("TP_CKPT_IRQ_EVERY") ? atoi(getenv("TP_CKPT_IRQ_EVERY")) : 0;
+    if (every && (!getenv("TP_CKPT_VECTOR") || strtoul(getenv("TP_CKPT_VECTOR"), NULL, 16) == vector) && ++n % every == 0 && saved < 200) {
+        char p[256]; snprintf(p, sizeof p, "%s/irq-%02x-%03d.ckpt", getenv("TP_CKPT_DIR") ? getenv("TP_CKPT_DIR") : ".", vector, saved++);
+        tp_host_checkpoint(p);
+    }
 }
 static void timer_irq(void) {
     if (!(G(EFLAGS) & 0x200) || !timer_installed()) return;
@@ -694,6 +703,9 @@ static void interrupt(uint32_t number) {
         if (ah == 0 || ah == 0x10) { uint32_t k = wait_key(); S(EAX, (a & 0xffff0000u) | k); return; }
     }
     if (number == 0x31) {
+        /* HMI's timer shutdown sends INT 21h function 2508h to INT 31h; a DPMI
+         * host answers an unknown function with CF=1, AX=8001h. */
+        if ((ax & 0xff00) == 0x2500) { carry(0x8001); return; }
         /* Lock/unlock linear region or real-mode region: nothing pages here. */
         if (ax >= 0x600 && ax <= 0x603) { carry(0); return; }
         if (ax == 0x0000) {                      /* allocate CX descriptors (contiguous) */
