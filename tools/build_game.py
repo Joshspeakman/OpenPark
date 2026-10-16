@@ -9,6 +9,7 @@ variants so verified scheduling stays identical. No decoder or interpreter
 exists at runtime: a target that was not compiled stops with its address.
 """
 import argparse
+import re
 import concurrent.futures
 import hashlib
 import json
@@ -51,6 +52,8 @@ def main():
     ap.add_argument('--trace', type=Path, action='append', default=[])
     ap.add_argument('--survey', type=Path)
     ap.add_argument('--extra', default='', help='comma-separated extra block addresses (hex)')
+    ap.add_argument('--loaded-code', action='append', default=[],
+                    help='ADDR:image.bin — code the game loads at run time (HMI drivers), dumped after loading')
     ap.add_argument('--out', type=Path, default=Path('work/game-build'))
     ap.add_argument('--per-file', type=int, default=1500)
     ap.add_argument('--opt', default='-O1')
@@ -62,6 +65,44 @@ def main():
     lifter.illegal_seh = False
     code, = [o for o in image.objects if o.flags & 4]
     lo, hi = code.base, code.base + code.size
+    # Run-time loaded code (drivers) at their deterministic load addresses.
+    # (decode base, bytes); region_info[k] = (linear load address, entered
+    # through its own code selector?). Selector-entered drivers see EIP as an
+    # offset: they are decoded at a private virtual base and their address
+    # literals are rewritten to offsets after lifting.
+    regions, region_info = [], []
+    for spec in args.loaded_code:
+        at, path, *mode = spec.split(':')
+        offset_space = mode == ['cs']
+        base = 0x80000000 + len(regions) * 0x100000      # private decode space
+        regions.append((base, Path(path).read_bytes()))
+        # Optional <image>.mask: 0 marks bytes the driver rewrites at run time
+        # (its own variables), excluded from the identity check.
+        mask = Path(path + '.mask')
+        region_info.append((int(at, 16), offset_space, mask.read_bytes() if mask.exists() else None))
+
+    def region_of(a):
+        for base, data in regions:
+            if base <= a < base + len(data):
+                return base, data
+        return None
+
+    def to_offsets(source):
+        for k, (base, data) in enumerate(regions):
+            # Selector-entered drivers see offsets; flat-entered ones linear addresses.
+            origin = 0 if region_info[k][1] else region_info[k][0]
+            source = re.sub(r'0x([0-9a-f]{8})u', lambda m, b=base, n=len(data), o=origin: '0x%xu' % (int(m.group(1), 16) - b + o)
+                            if b <= int(m.group(1), 16) < b + n else m.group(0), source)
+        return source
+    lifter.patchable = lambda a: region_of(a) is not None
+
+    def code_linear(a):
+        r = region_of(a)
+        if r:
+            k = regions.index(r)
+            return region_info[k][0] + a - r[0]
+        return a
+    lifter.code_linear = code_linear
 
     # Observed extents/variants from traces (address -> set of hex byte strings).
     observed = {}
@@ -77,8 +118,23 @@ def main():
     if args.survey:
         seeds.update(a + BIAS for a in json.loads(args.survey.read_text())['funcs'])
     seeds.update(int(a, 16) for a in args.extra.split(',') if a)
+    for base, data in regions:
+        # Driver images are a few KiB with entry tables in unknown formats:
+        # compile a block at every byte offset. Junk decodes trap only if run.
+        seeds.update(base + k for k in range(len(data)) if data[k:k + 2] != b'\0\0')
 
     decode_base = lifter.ins
+
+    region_cache = {}
+
+    def region_ins(pc):
+        r = region_of(pc)
+        if not r:
+            return None
+        if pc not in region_cache:
+            base, data = r
+            region_cache[pc] = next(lifter.md.disasm(data[pc - base:pc - base + 16], pc, 1), None)
+        return region_cache[pc]
 
     def collect(address):
         """Block extent following QEMU/Unicorn's x86 translation-block rules, so
@@ -86,8 +142,10 @@ def main():
         control transfers, after a REP string instruction, after loading
         DS/ES/SS/CS, after POPF/STI, and at 512 instructions or ~4 KiB."""
         out, pc = {}, address
-        while lo <= pc < hi and len(out) < 512 and pc - address < 4064:
-            i = lifter.ins(pc)
+        inside = region_of(address)
+        limit = 64 if inside else 512        # driver blocks: every offset is a seed; keep them short
+        while (inside and region_of(pc) == inside or not inside and lo <= pc < hi) and len(out) < limit and pc - address < 4064:
+            i = region_ins(pc) if inside else lifter.ins(pc)
             if i is None:
                 break
             out[pc] = i
@@ -120,7 +178,7 @@ def main():
         if address in SYNTHETIC:
             data = SYNTHETIC[address]
             return [(data, decode_bytes(address, data))]
-        if not lo <= address < hi:
+        if not (lo <= address < hi or region_of(address)):
             return []
         return [(None, collect(address))]
 
@@ -144,9 +202,10 @@ def main():
             if last.mnemonic not in TERMINAL and not last.mnemonic.startswith(('j', 'loop', 'call')):
                 nexts.append(end)
             for t in nexts:
-                if t not in blocks and (lo <= t < hi or t in SYNTHETIC):
+                inside = lo <= t < hi or t in SYNTHETIC or region_of(t)
+                if t not in blocks and inside:
                     todo.append(t)
-                elif not (lo <= t < hi or t in SYNTHETIC):
+                elif not inside:
                     outside.add(t)
 
     # Generate C.
@@ -161,6 +220,8 @@ def main():
             lifter.ins = decode_base
             # Every block must hand control on (set the next PC) or trap.
             if decoded and 'c->tc' not in source and 'rt_unhandled' not in source:
+                if region_of(a):
+                    continue        # a junk decode inside a driver image: left uncompiled (stops if reached)
                 raise SystemExit('block %08x does not reach a successor' % a)
             name = 'b_%08x_%d' % (a, index)
             sources.append((a, source.replace('f_%08x(' % a, name + '('), name, data))
@@ -171,6 +232,14 @@ def main():
              'uint32_t tp_io(Ctx *c, int output, unsigned port, unsigned size, unsigned value);\n' \
              'void tp_interrupt(Ctx *c, uint32_t number);\n'
     files = []
+    loaded = [x for x in sources if region_of(x[0])]
+    for k in range(0, len(loaded), args.per_file):
+        path = out / ('blocks_loaded_%03d.c' % (k // args.per_file))
+        text = header + ''.join(to_offsets(src) for _, src, _, _ in loaded[k:k + args.per_file])
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
+        files.append(path)
+    sources = [x for x in sources if not region_of(x[0])]
     for k in range(0, len(sources), args.per_file):
         chunk = sources[k:k + args.per_file]
         path = out / ('blocks_%03d.c' % (k // args.per_file))
@@ -179,9 +248,58 @@ def main():
             path.write_text(text)
         files.append(path)
 
+    def region_code():
+        """Blocks of run-time loaded code: a table per region, entered only
+        while the bytes in memory match the image compiled here (checked on
+        every entry from outside the region: drivers share load addresses)."""
+        out = ['typedef void (*RBlock)(Ctx *);', 'static int current_region = -1;']
+        for k, (base, data) in enumerate(regions):
+            out.append('static const uint8_t region%d_image[%d] = {%s};' % (k, len(data), ','.join(str(b) for b in data)))
+            out.append('static const struct { uint32_t off; RBlock fn; uint8_t insns; uint8_t guard; } region%d_blocks[] = {%s{0,0,0,0}};' % (k, ''.join(region_entries[k])))
+            out.append('static RBlock region%d_table[%d]; static uint8_t region%d_counts[%d], region%d_guard[%d]; static int region%d_state;' % (k, len(data), k, len(data), k, len(data), k))
+        out.append('static Block region_block(Ctx *c, uint32_t pc, uint32_t csbase) {')
+        for k, (base, data) in enumerate(regions):
+            linear, offset_space, _ = region_info[k]
+            if offset_space:
+                out.append('    if (csbase == 0x%xu && pc < %du) { uint32_t off = pc;' % (linear, len(data)))
+            else:
+                out.append('    if (!csbase && pc >= 0x%xu && pc < 0x%xu) { uint32_t off = pc - 0x%xu;' % (linear, linear + len(data), linear))
+            # Full image check on first entry; afterwards the driver patches
+            # selector values into its own code, so re-entries check the
+            # (unpatched) header that identifies the driver.
+            out.append('        if (current_region != %d) {' % k)
+            m = region_info[k][2] or bytes([1]) * len(data)
+            out.append('            { static const uint8_t mask[%d] = {%s}; int n = region%d_state ? %d : %d;' % (len(data), ','.join(str(b) for b in m), k, min(32, len(data)), len(data)))
+            out.append('              for (int i = 0; i < n; i++) if (mask[i] && G_MEM[0x%xu + i] != region%d_image[i]) goto next%d; }' % (linear, k, k))
+            out.append('            if (!region%d_state) { for (int i = 0; region%d_blocks[i].fn; i++) region%d_table[region%d_blocks[i].off] = region%d_blocks[i].fn, region%d_counts[region%d_blocks[i].off] = region%d_blocks[i].insns, region%d_guard[region%d_blocks[i].off] = region%d_blocks[i].guard; region%d_state = 1; }' % ((k,) * 12))
+            out.append('            current_region = %d;' % k)
+            out.append('        }')
+            out.append('        if (region%d_guard[off] && memcmp(G_MEM + 0x%xu + off, region%d_image + off, region%d_guard[off])) return 0;' % (k, linear, k, k))
+            out.append('        tp_insns += region%d_counts[off];' % k)
+            out.append('        return region%d_table[off];' % k)
+            out.append('    }')
+            out.append('    next%d:;' % k)
+        out.append('    return 0;\n}')
+        out.append('static void region_reset(void) { current_region = -1;%s}' % ''.join(' region%d_state = 0;' % k for k in range(len(regions))))
+        return '\n'.join(out)
+
     # Dispatch: an O(1) table over the code object plus the synthetic host code.
     decls, entries, guarded = [], [], []
+    region_entries = [[] for _ in regions]
     for a, variants in sorted(names.items()):
+        r = region_of(a)
+        if r:
+            k = regions.index(r)
+            off = a - r[0]
+            dec = blocks[a][0][1]
+            length = max(dec) + dec[max(dec)].size - a if dec else 0
+            m = region_info[k][2]
+            # Blocks over bytes the driver rewrites (generated/patched code)
+            # are checked against the compiled bytes on every execution.
+            guard = length if m and any(m[off + j] == 0 for j in range(length) if off + j < len(m)) else 0
+            region_entries[k].append('{0x%xu, %s, %d, %d},' % (off, variants[0][0], min(255, variants[0][2]), guard))
+            decls.append('void %s(Ctx *c);' % variants[0][0])
+            continue
         for name, _, _ in variants:
             decls.append('void %s(Ctx *c);' % name)
         count = min(255, max(n for _, _, n in variants))
@@ -206,22 +324,27 @@ static Block synthetic[0x100];
 /* Executed x86 instructions (per block, REP counted once): the host's CPU-speed governor. */
 extern uint64_t tp_insns;
 const uint32_t tp_block_count = %du;
+static void region_reset(void);
 void tp_dispatch_init(void) {
+    region_reset();
     for (unsigned i = 0; i < sizeof blocks / sizeof blocks[0]; i++) {
         uint32_t a = blocks[i].address;
         if (a >= CODE_LO && a < CODE_HI) table[a - CODE_LO] = blocks[i].fn, counts[a - CODE_LO] = blocks[i].insns;
         else if (a >= 0xf000 && a < 0xf100) synthetic[a - 0xf000] = blocks[i].fn;
     }
 }
+%s
 int tp_dispatch(Ctx *c) {
     uint32_t pc = c->tc;
-    Block fn = pc >= CODE_LO && pc < CODE_HI ? table[pc - CODE_LO] : pc >= 0xf000 && pc < 0xf100 ? synthetic[pc - 0xf000] : 0;
+    Block fn = tp_base[tp_seg[0] >> 3] ? 0 : pc >= CODE_LO && pc < CODE_HI ? table[pc - CODE_LO] : pc >= 0xf000 && pc < 0xf100 ? synthetic[pc - 0xf000] : 0;
+    if (fn) current_region = -1;
+    else fn = region_block(c, pc, tp_base[tp_seg[0] >> 3]);
     if (!fn) return 0;
-    if (pc >= CODE_LO && pc < CODE_HI) tp_insns += counts[pc - CODE_LO];
+    if (current_region < 0 && pc >= CODE_LO && pc < CODE_HI) tp_insns += counts[pc - CODE_LO];
     fn(c);
     return 1;
 }
-''' % ('\n'.join(entries), lo, hi, len(blocks))
+''' % ('\n'.join(entries), lo, hi, len(blocks), region_code())
     dpath = out / 'dispatch.c'
     dpath.write_text(dispatch)
     files.append(dpath)

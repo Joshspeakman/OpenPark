@@ -7,6 +7,9 @@
 #import <QuartzCore/QuartzCore.h>
 #include <pthread.h>
 #include "host.h"
+int tp_audio_start(void);
+void tp_audio_stop(void);
+void tp_audio_set_volumes(float sfx, float music);
 
 static NSString *dataRoot(void) {
     NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
@@ -228,6 +231,12 @@ static void *game_thread(void *arg) {
     _window.acceptsMouseMovedEvents = YES;
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"StartFullScreen"]) [_window toggleFullScreen:nil];
 
+    {
+        NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
+        [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES}];
+        if ([u boolForKey:@"Sound"] && tp_audio_start() == 0)
+            tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
+    }
     pthread_t t;
     pthread_attr_t attr; pthread_attr_init(&attr);
     pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
@@ -287,6 +296,7 @@ static void *game_thread(void *arg) {
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a { return YES; }
 - (void)applicationWillTerminate:(NSNotification *)n {
     tp_host_quit();
+    tp_audio_stop();
     for (int i = 0; i < 100 && !game_done; i++) usleep(10000);
     fflush(stderr);
 }

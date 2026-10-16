@@ -59,6 +59,16 @@ double rt_f80_load(const uint8_t *M, uint32_t a) {
 /* Guest memory is the first 64 MiB of a 4 GiB reservation: every 32-bit
  * address is mapped, so a stray access past the DOS extender's memory reads
  * zeros instead of crashing the app (pages are committed only when touched). */
+/* x87 state/transcendental helpers: unused by the game; stop explicitly. */
+void rt_frstor(Ctx *c, uint32_t a) { (void)a; rt_unhandled(c, c->tc, "x87 frstor"); }
+void rt_fnsave(Ctx *c, uint32_t a) { (void)a; rt_unhandled(c, c->tc, "x87 fnsave"); }
+void rt_fldenv(Ctx *c, uint32_t a) { (void)a; rt_unhandled(c, c->tc, "x87 fldenv"); }
+void rt_fnstenv(Ctx *c, uint32_t a) { (void)a; rt_unhandled(c, c->tc, "x87 fnstenv"); }
+void rt_fxam(Ctx *c) { rt_unhandled(c, c->tc, "x87 fxam"); }
+void rt_fprem(Ctx *c, int ieee) { (void)ieee; rt_unhandled(c, c->tc, "x87 fprem"); }
+void rt_f80_store(uint8_t *M, uint32_t a, double v) { (void)M; (void)a; (void)v; rt_unhandled(&state, state.tc, "x87 80-bit store"); }
+double rt_x87_1(int op, double x) { (void)op; (void)x; rt_unhandled(&state, state.tc, "x87 transcendental"); }
+double rt_x87_2(int op, double y, double x) { (void)op; (void)y; (void)x; rt_unhandled(&state, state.tc, "x87 transcendental"); }
 void *tp_memory(void) {
     if (!G_MEM) {
         void *p = mmap(0, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
@@ -97,6 +107,7 @@ int tp_dispatch(Ctx *c);
 uint64_t tp_insns;
 /* Development breakpoint (TP_BREAK=hex address): prints registers. */
 uint32_t tp_break_pc = 0xffffffffu; int tp_break_hits;
+uint32_t tp_break_list[32]; int tp_break_count[32], tp_break_n;
 /* Optional record of dispatched block addresses (tools/spotcheck.py). */
 uint32_t *tp_trace_buf; uint32_t tp_trace_cap, tp_trace_n;
 uint32_t tp_watch_pc = 0xffffffffu;
@@ -107,6 +118,8 @@ int tp_run(uint32_t budget) {
     if (setjmp(trap)) return -1;
     while (budget--) {
         if (state.tc == tp_watch_pc) tp_watch_hit = 1;
+        if (tp_break_n) for (int b = 0; b < tp_break_n; b++) if (state.tc == tp_break_list[b] && tp_break_count[b]++ < 3)
+            fprintf(stderr, "hit %08x\n", state.tc);
         if (state.tc == tp_break_pc && tp_break_hits < 20) {
             tp_break_hits++;
             fprintf(stderr, "break %08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x [esp]=%08x\n", state.tc,

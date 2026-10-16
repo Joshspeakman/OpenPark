@@ -192,6 +192,38 @@ static void carry(uint32_t error) {
     if (error) S(EAX, error);
 }
 
+/* ---- sound hardware: MPU-401 (UART mode) ----
+ * The game's HMI MPU-401 driver writes MIDI bytes to 0x330. The app plays them
+ * through macOS's General MIDI synthesizer (tp_audio_midi, weak here). */
+__attribute__((weak)) void tp_audio_midi(uint8_t byte) { (void)byte; }
+static uint8_t mpu_queue[16]; static int mpu_n; static uint32_t midi_bytes;
+static void mpu_ack(void) { if (mpu_n < 16) mpu_queue[mpu_n++] = 0xfe; }
+static int mpu_in(unsigned port) {
+    if (port == 0x331) return mpu_n ? 0x00 : 0x80;     /* bit 7 clear: data ready; bit 6 clear: can write */
+    if (!mpu_n) return 0xfe;
+    int v = mpu_queue[0]; memmove(mpu_queue, mpu_queue + 1, --mpu_n); return v;
+}
+static void mpu_out(unsigned port, unsigned value) {
+    if (port == 0x331) { if (value == 0xff || value == 0x3f) mpu_ack(); return; }
+    midi_bytes++;
+    tp_audio_midi((uint8_t)value);
+}
+
+int sb16_port_in(unsigned port, unsigned *v);
+int sb16_port_out(unsigned port, unsigned v);
+int sb16_take_irq(void);
+void sb16_render(float *out, int frames, double out_rate);
+void sb16_reset(void);
+static int audio_attached; static double audio_pumped;
+void tp_host_audio_attached(int on) { audio_attached = on; }
+static int floating_port(unsigned port) {     /* ISA I/O with no device behind it */
+    if (port >= 0x200 && port < 0x400) {
+        if (getenv("TP_DEBUG")) fprintf(stderr, "port %04x: no device\n", port);
+        return 1;
+    }
+    return 0;
+}
+
 /* ---- ports ---- */
 static int vretrace(void) {
     if (deterministic) { ticks++; return ticks & 1 ? 8 : 0; }
@@ -202,6 +234,9 @@ static int port_in(unsigned port, unsigned size) {
     if (size != 1) stop("unsupported port input width at %x", port);
     if (port_known[port]) return port_val[port];
     if (port == 0x3da) { retrace_reads++; return vretrace(); }
+    if (port == 0x330 || port == 0x331) return mpu_in(port);
+    { unsigned v; if (sb16_port_in(port, &v)) return v; }
+    if (floating_port(port)) return 0xff;
     stop("unsupported IN %04x", port);
 }
 static void port_out(unsigned port, unsigned size, unsigned value) {
@@ -213,8 +248,11 @@ static void port_out(unsigned port, unsigned size, unsigned value) {
         else { pit_divisor = pit_low | (value & 255) << 8; if (!pit_divisor) pit_divisor = 65536; pit_low = -1; }
     }
     else if ((port == 0x20 || port == 0xa0) && value == 0x20) {}
+    else if (port == 0x330 || port == 0x331) mpu_out(port, value);
     else if (port == 0x3c8) dac_index = value * 3;
     else if (port == 0x3c9) { palette[dac_index] = value & 63; dac_index = (dac_index + 1) % 768; }
+    else if (sb16_port_out(port, value)) {}
+    else if (floating_port(port)) {}
     else stop("unsupported OUT %04x=%x", port, value);
 }
 static int io_cb(int output, unsigned port, unsigned size, unsigned value) {
@@ -228,13 +266,25 @@ static int io_cb(int output, unsigned port, unsigned size, unsigned value) {
 
 /* ---- interrupts into guest code ---- */
 static int timer_installed(void) { return !(vec_sel[8] == 8 && vec_pc[8] == 0xf000); }
-static void timer_irq(void) {
-    if (!(G(EFLAGS) & 0x200) || !timer_installed()) return;
+static void hw_interrupt(uint32_t vector) {
     uint32_t sp = G(ESP) - 12;
     put32(sp, G(EIP)); put32(sp + 4, G(CS)); put32(sp + 8, G(EFLAGS));
-    S(ESP, sp); S(CS, vec_sel[8]); S(EIP, vec_pc[8]);
+    S(ESP, sp); S(CS, vec_sel[vector]); S(EIP, vec_pc[vector]);
     S(EFLAGS, G(EFLAGS) & ~0x300u);
+}
+static void timer_irq(void) {
+    if (!(G(EFLAGS) & 0x200) || !timer_installed()) return;
+    hw_interrupt(8);
     irq_count++;
+}
+static int sb_irq_pending; static uint32_t sb_irqs_delivered;
+/* Sound Blaster IRQ 7 (vector 0x0f), honouring the PIC mask. */
+static int sb_irq(void) {
+    sb_irq_pending += sb16_take_irq();
+    if (!sb_irq_pending || !(G(EFLAGS) & 0x200) || (port_val[0x21] & 0x80) || !vec_set[0x0f]) return 0;
+    sb_irq_pending--;
+    hw_interrupt(0x0f);
+    return 1;
 }
 
 static void queue_mouse(int x, int y, uint32_t buttons) {
@@ -270,6 +320,7 @@ static void debug_stats(void) {
     double t = now_s(); if (t - last < 1.0) return;
     static uint64_t lins; fprintf(stderr, "Mins/s=%.1f time/s=%u 3da/s=%u ints/s=%u ", (tp_insns - lins) / 1e6, time_calls - ltime, retrace_reads - lret, int_calls - lint); lins = tp_insns;
     ltime = time_calls; lret = retrace_reads; lint = int_calls;
+    { static uint32_t ls; float sb16_peak(void); fprintf(stderr, "sbirq/s=%u pend=%d peak=%.3f midi/s=%u ", sb_irqs_delivered - ls, sb_irq_pending, sb16_peak(), midi_bytes); ls = sb_irqs_delivered; midi_bytes = 0; }
     fprintf(stderr, "t=%.1f irq/s=%u polls/s=%u Mblocks/s=%.1f pit=%u vec8=%x:%x mode=%x eip=%08x keys=%d cb=%d\n",
             t - rt_start, irq_count - lirq, poll_count - lpoll, (blocks - lblocks) / 1e6, pit_divisor,
             vec_sel[8], vec_pc[8], video_mode, G(EIP), nkeys, in_callback);
@@ -281,11 +332,21 @@ static void realtime_events(void) {
     if (!(G(EFLAGS) & 0x200)) return;
     double t = now_s();
     double period = pit_divisor / 1193182.0;
+    if (!audio_attached) {                               /* headless: advance sound at wall-clock rate, muted */
+        if (!audio_pumped || t - audio_pumped > 0.5) audio_pumped = t;
+        int frames = (int)((t - audio_pumped) * 44100);
+        if (frames > 64) {
+            static float scratch[2 * 4096];
+            if (frames > 4096) frames = 4096;
+            sb16_render(scratch, frames, 44100);
+            audio_pumped += frames / 44100.0;
+        }
+    }
     if (t >= timer_next && timer_installed()) {
         if (t - timer_next > 0.25) timer_next = t;        /* do not replay a long stall */
         timer_next += period;
         timer_irq();
-    }
+    } else if (sb_irq()) { sb_irqs_delivered++; return; }
     if (!in_callback) {
         pthread_mutex_lock(&input_lock);
         if (!pending_mouse && mq_head != mq_tail) {
@@ -600,6 +661,7 @@ static void interrupt(uint32_t number) {
         }
         if (ah == 0x4c) { exit_code = a & 255; snprintf(status, sizeof status, "DOS exit %d", exit_code); longjmp(stop_jb, 2); }
     }
+    if (number == 0x2f && ax == 0x1600) { S(EAX, a & ~255u); return; }   /* Windows enhanced mode: not present */
     if (number == 0x33) {
         if (ax == 0x2f) return;
         if (ax == 0) { S(EAX, 0xffff); S(EBX, 3); return; }
@@ -772,7 +834,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     memset(&mouse, 0, sizeof mouse); pending_mouse = 0; in_callback = 0;
     pthread_mutex_lock(&input_lock); nkeys = 0; mq_head = mq_tail = 0; pthread_mutex_unlock(&input_lock);
     key_at = click_at = block_click_at = 0;
-    stopped = 0; exit_code = -1;
+    stopped = 0; exit_code = -1; mpu_n = 0; sb16_reset(); sb_irq_pending = 0; audio_pumped = 0;
     arena_init(&linear_arena, 0x400000, MEMORY, 4096);
     arena_init(&conventional, 0x40000, 0x90000, 16);
     next_selector = 0x100; heap = 0x400000;
@@ -803,6 +865,8 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     S(EIP, entry);
     tp_watch_pc = 0xf010;
     { extern uint32_t tp_break_pc; const char *b = getenv("TP_BREAK"); if (b) tp_break_pc = (uint32_t)strtoul(b, NULL, 16); }
+    { extern uint32_t tp_break_list[32]; extern int tp_break_n; const char *b = getenv("TP_BREAKS");
+      for (char *e; b && *b && tp_break_n < 32; b = *e ? e + 1 : e) tp_break_list[tp_break_n++] = (uint32_t)strtoul(b, &e, 16); }
     if (!gov_rate) { const char *e = getenv("TP_CYCLES"); tp_host_set_cycles(e ? atof(e) : 10000); }
     gov_t0 = 0;
     rt_start = now_s(); timer_next = rt_start;
