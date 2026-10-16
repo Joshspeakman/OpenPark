@@ -11,6 +11,10 @@ int tp_audio_start(void);
 void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
 BOOL tp_launcher_run(void);
+struct Ctx;
+void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
+int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
+int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 
 static NSString *dataRoot(void) {
     NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
@@ -144,10 +148,15 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         if (ch < 128 && !(e.modifierFlags & NSEventModifierFlagOption)) ascii = ch;
     }
     if (kc == 0x75) ascii = 0;                  /* forward delete */
+    if (!e.isARepeat) tp_host_key_raw(scan, 1);
     if (ascii) tp_host_key((uint32_t)scan << 8 | ascii);
     else tp_host_key(function_key(scan, e.modifierFlags));
 }
-- (void)keyUp:(NSEvent *)e {}
+- (void)keyUp:(NSEvent *)e {
+    if (e.modifierFlags & NSEventModifierFlagCommand) return;
+    uint8_t scan = e.keyCode < 128 ? scan_of[e.keyCode] : 0;
+    if (scan) tp_host_key_raw(scan, 0);
+}
 - (void)flagsChanged:(NSEvent *)e {
     NSEventModifierFlags m = e.modifierFlags; uint32_t f = 0;
     if (m & NSEventModifierFlagShift) f |= 3;
@@ -165,7 +174,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     NSWindow *_window;
     GameView *_view;
     NSTimer *_timer;
-    NSString *_game, *_saves, *_image;
+    NSString *_game, *_saves, *_image, *_intro;
     FILE *_log;
 }
 static AppDelegate *app;
@@ -174,6 +183,18 @@ static volatile int game_done, game_result;
 static void *game_thread(void *arg) {
     AppDelegate *d = (__bridge AppDelegate *)arg;
     pthread_setname_np("Theme Park game");
+    /* THEME.BAT runs INTRO.EXE, then MAIN.EXE. */
+    if (d->_intro) {
+        setenv("TP_IMAGE", d->_intro.fileSystemRepresentation, 1);
+        tp_select_code(intro_dispatch, intro_dispatch_init);
+        if (!tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
+            int r; do r = tp_host_run(4000, 0, 50); while (r == 0);
+            fprintf(stderr, "intro ended: %s\n", tp_host_status());
+            if (!strcmp(tp_host_status(), "quit")) { game_result = 1; game_done = 1; return NULL; }
+        }
+        tp_select_code(tp_dispatch, tp_dispatch_init);
+    }
+    setenv("TP_IMAGE", d->_image.fileSystemRepresentation, 1);
     for (;;) {
         if (tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
             game_result = -1; break;
@@ -209,11 +230,12 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @10000}];
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @10000, @"PlayIntro": @YES}];
     BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0;
     if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
     if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }
     if (!getenv("TP_CYCLES")) tp_host_set_cycles([u doubleForKey:@"Cycles"]);
+    if ([u boolForKey:@"PlayIntro"] && !getenv("TP_SKIP_INTRO")) _intro = [NSBundle.mainBundle pathForResource:@"INTRO" ofType:@"TPIMG"];
     [NSFileManager.defaultManager createDirectoryAtPath:_saves withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *logPath = [root stringByAppendingPathComponent:@"theme-park.log"];
     freopen(logPath.fileSystemRepresentation, "a", stderr);
@@ -265,7 +287,10 @@ static void *game_thread(void *arg) {
         if (CACurrentMediaTime() - start < [p[0] doubleValue]) return;
         next++;
         NSString *op = p.count > 1 ? p[1] : @"";
-        if ([op isEqual:@"key"]) tp_host_key((uint32_t)strtoul([p[2] UTF8String], NULL, 16));
+        if ([op isEqual:@"key"]) {
+            uint32_t k = (uint32_t)strtoul([p[2] UTF8String], NULL, 16);
+            tp_host_key(k); tp_host_key_raw(k >> 8, 1); tp_host_key_raw(k >> 8, 0);
+        }
         else if ([op isEqual:@"click"] || [op isEqual:@"move"]) {
             double x = [p[2] doubleValue] / 640.0, y = [p[3] doubleValue] / 400.0;
             tp_host_mouse(x, y, 0);

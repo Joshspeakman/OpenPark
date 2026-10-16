@@ -54,9 +54,11 @@ def main():
     ap.add_argument('--extra', default='', help='comma-separated extra block addresses (hex)')
     ap.add_argument('--loaded-code', action='append', default=[],
                     help='ADDR:image.bin — code the game loads at run time (HMI drivers), dumped after loading')
+    ap.add_argument('--drivers', type=Path, help='directory of drv-ADDR-MODE-NAME.bin driver images (see tools/dump_drivers.md)')
     ap.add_argument('--out', type=Path, default=Path('work/game-build'))
     ap.add_argument('--per-file', type=int, default=1500)
     ap.add_argument('--opt', default='-O1')
+    ap.add_argument('--prefix', default='', help='symbol prefix for a second image in one binary (e.g. intro_)')
     args = ap.parse_args()
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
@@ -71,6 +73,10 @@ def main():
     # offset: they are decoded at a private virtual base and their address
     # literals are rewritten to offsets after lifting.
     regions, region_info = [], []
+    if args.drivers:
+        for f in sorted(args.drivers.glob('drv-*-*-*.bin')):
+            _, at, mode, _ = f.stem.split('-', 3)
+            args.loaded_code.append('%s:%s%s' % (at, f, ':cs' if mode == 'cs' else ''))
     for spec in args.loaded_code:
         at, path, *mode = spec.split(':')
         offset_space = mode == ['cs']
@@ -223,7 +229,7 @@ def main():
                 if region_of(a):
                     continue        # a junk decode inside a driver image: left uncompiled (stops if reached)
                 raise SystemExit('block %08x does not reach a successor' % a)
-            name = 'b_%08x_%d' % (a, index)
+            name = '%sb_%08x_%d' % (args.prefix, a, index)
             sources.append((a, source.replace('f_%08x(' % a, name + '('), name, data))
             names.setdefault(a, []).append((name, data, len(decoded)))
 
@@ -306,7 +312,7 @@ def main():
         if len(variants) == 1:
             entries.append('{0x%xu, %s, %d},' % (a, variants[0][0], count))
         else:
-            fn = 'g_%08x' % a
+            fn = '%sg_%08x' % (args.prefix, a)
             body = ''.join('if (!memcmp(G_MEM + 0x%xu, "%s", %du)) { %s(c); return; }\n' % (
                 a, ''.join('\\x%02x' % b for b in data), len(data), name) for name, data, _ in variants)
             guarded.append('static void %s(Ctx *c) {\n%s rt_unhandled(c, c->tc, "uncompiled self-modified code variant");\n}\n' % (fn, body))
@@ -345,6 +351,9 @@ int tp_dispatch(Ctx *c) {
     return 1;
 }
 ''' % ('\n'.join(entries), lo, hi, len(blocks), region_code())
+    if args.prefix:
+        for sym in ('tp_dispatch_init', 'tp_dispatch', 'tp_block_count'):
+            dispatch = re.sub(r'\b%s\b' % sym, args.prefix + sym[3:], dispatch)
     dpath = out / 'dispatch.c'
     dpath.write_text(dispatch)
     files.append(dpath)
@@ -363,12 +372,14 @@ int tp_dispatch(Ctx *c) {
     runtime = out / 'runtime.o'
     subprocess.run(['clang', '-arch', 'arm64', args.opt, '-c', '-fPIC', '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
     library = out / 'game.dylib'
-    subprocess.run(['clang', '-arch', 'arm64', '-dynamiclib', *map(str, objects), str(runtime), '-o', str(library)], check=True)
+    if not args.prefix:    # a prefixed image is linked into the app beside the main one
+        subprocess.run(['clang', '-arch', 'arm64', '-dynamiclib', *map(str, objects), str(runtime), '-o', str(library)], check=True)
     staged = out / 'game.a.new'
     subprocess.run(['libtool', '-static', '-o', str(staged), *map(str, objects)], check=True, capture_output=True)
     os.replace(staged, out / 'game.a')
-    (out / 'build.json').write_text(json.dumps({'image_sha256': image.sha256,
-        'library_sha256': hashlib.sha256(library.read_bytes()).hexdigest(), 'architecture': 'arm64'}, indent=2) + '\n')
+    if not args.prefix:
+        (out / 'build.json').write_text(json.dumps({'image_sha256': image.sha256,
+            'library_sha256': hashlib.sha256(library.read_bytes()).hexdigest(), 'architecture': 'arm64'}, indent=2) + '\n')
     report = {'blocks': len(blocks), 'functions': len(sources), 'seeds': len(seeds),
               'traced_blocks': len(observed), 'guarded': len(guarded),
               'targets_outside_code': sorted(hex(t) for t in outside)[:50], 'outside_count': len(outside),

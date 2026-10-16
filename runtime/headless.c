@@ -38,12 +38,19 @@ static void on_fault(int sig, siginfo_t *si, void *uc) {
     _exit(3);
 }
 
+#ifdef WITH_INTRO
+struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
+#else
+#define intro_dispatch 0
+#define intro_dispatch_init 0
+#endif
+void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int main(int argc, char **argv) {
     struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
     uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
-    double fuzz = 0;            /* after the deterministic part: seconds of random clicks in real time */
+    double fuzz = 0; int intro = 0;            /* after the deterministic part: seconds of random clicks in real time */
     const char *rt_keys = "";   /* real time: seconds:key(hex) or seconds:m:x:y:buttons */
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : "";
@@ -60,6 +67,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--rt-keys")) rt_keys = v, i++;
         else if (!strcmp(a, "--shots")) shots = atof(v), i++;
         else if (!strcmp(a, "--fuzz")) fuzz = atof(v), i++;
+        else if (!strcmp(a, "--intro")) intro = 1;
         else { fprintf(stderr, "unknown argument %s\n", a); return 2; }
     }
     if (overlay && (!*overlay || overlay[strlen(overlay) - 1] == '/')) { fprintf(stderr, "overlay must name a directory\n"); return 2; }
@@ -80,6 +88,7 @@ int main(int argc, char **argv) {
     }
     mkdir(out, 0755);
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
+    if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
     int r;
     if (realtime) {
@@ -94,7 +103,7 @@ int main(int argc, char **argv) {
                 if (*e == 'm') {
                     double x = strtod(e + 2, &e); double y = strtod(e + 1, &e); unsigned b = (unsigned)strtoul(e + 1, &e, 10);
                     tp_host_mouse(x / 640, y / 400, b);
-                } else tp_host_key((uint32_t)strtoul(e, &e, 16));
+                } else { uint32_t key = (uint32_t)strtoul(e, &e, 16); tp_host_key(key); tp_host_key_raw(key >> 8, 1); tp_host_key_raw(key >> 8, 0); }
                 k = *e ? e + 1 : e;
             }
             static double next_fz; static int held;

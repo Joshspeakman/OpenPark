@@ -155,6 +155,8 @@ static int in_callback;
 /* input queues (real time) */
 static pthread_mutex_t input_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t keys[64]; static int nkeys;
+static uint8_t raw_keys[64]; static int nraw;      /* make/break scancodes for an INT 9 handler */
+static uint8_t port60;
 static uint32_t shift_flags;
 typedef struct { int x, y; uint32_t buttons; } MouseEv;
 static MouseEv mouse_q[256]; static int mq_head, mq_tail;
@@ -235,6 +237,9 @@ static int port_in(unsigned port, unsigned size) {
     if (port_known[port]) return port_val[port];
     if (port == 0x3da) { retrace_reads++; return vretrace(); }
     if (port == 0x330 || port == 0x331) return mpu_in(port);
+    if (port == 0x60) return port60;                    /* keyboard controller data */
+    if (port == 0x61) return port_val[0x61];
+    if (port == 0x64) return 0x14;                      /* status: no data pending, system flag */
     { unsigned v; if (sb16_port_in(port, &v)) return v; }
     if (floating_port(port)) return 0xff;
     stop("unsupported IN %04x", port);
@@ -249,6 +254,7 @@ static void port_out(unsigned port, unsigned size, unsigned value) {
     }
     else if ((port == 0x20 || port == 0xa0) && value == 0x20) {}
     else if (port == 0x330 || port == 0x331) mpu_out(port, value);
+    else if (port == 0x61) port_val[0x61] = value;      /* keyboard acknowledge strobe */
     else if (port == 0x3c8) dac_index = value * 3;
     else if (port == 0x3c9) { palette[dac_index] = value & 63; dac_index = (dac_index + 1) % 768; }
     else if (sb16_port_out(port, value)) {}
@@ -287,6 +293,17 @@ static void timer_irq(void) {
     irq_count++;
 }
 static int sb_irq_pending; static uint32_t sb_irqs_delivered;
+/* IRQ 1 to a program's own INT 9 handler (the intro reads port 0x60). */
+static int keyboard_irq(void) {
+    if (!vec_set[9] || (vec_sel[9] == 8 && vec_pc[9] == 0xf000)) return 0;
+    if (!(G(EFLAGS) & 0x200) || (port_val[0x21] & 0x02)) return 0;
+    pthread_mutex_lock(&input_lock);
+    int have = nraw > 0;
+    if (have) { port60 = raw_keys[0]; memmove(raw_keys, raw_keys + 1, --nraw); }
+    pthread_mutex_unlock(&input_lock);
+    if (have) hw_interrupt(9);
+    return have;
+}
 /* Sound Blaster IRQ 7 (vector 0x0f), honouring the PIC mask. */
 static int sb_irq(void) {
     sb_irq_pending += sb16_take_irq();
@@ -356,6 +373,7 @@ static void realtime_events(void) {
         timer_next += period;
         timer_irq();
     } else if (sb_irq()) { sb_irqs_delivered++; return; }
+    else if (keyboard_irq()) return;
     if (!in_callback) {
         pthread_mutex_lock(&input_lock);
         if (!pending_mouse && mq_head != mq_tail) {
@@ -647,7 +665,8 @@ static void interrupt(uint32_t number) {
         }
         if (ah == 0x35) {
             uint32_t n = a & 255;
-            S(ES, vec_set[n] ? vec_sel[n] : 8); S(EBX, vec_set[n] ? vec_pc[n] : 0); return;
+            /* Unset vectors point at an IRET, so handlers can chain to them. */
+            S(ES, vec_set[n] ? vec_sel[n] : 8); S(EBX, vec_set[n] ? vec_pc[n] : 0xf000); return;
         }
         if (ah == 0x25) { uint32_t n = a & 255; vec_sel[n] = G(DS); vec_pc[n] = d; vec_set[n] = 1; return; }
         if (ah == 0x40 && (b == 1 || b == 2)) {
@@ -738,7 +757,7 @@ static void interrupt(uint32_t number) {
         }
         if (ax == 0x0204) {
             uint32_t n = b & 255;
-            S(ECX, (c & 0xffff0000u) | (vec_set[n] ? vec_sel[n] : 8)); S(EDX, vec_set[n] ? vec_pc[n] : 0); carry(0); return;
+            S(ECX, (c & 0xffff0000u) | (vec_set[n] ? vec_sel[n] : 8)); S(EDX, vec_set[n] ? vec_pc[n] : 0xf000); carry(0); return;
         }
         if (ax == 0x0205) {
             uint32_t n = b & 255;
@@ -844,7 +863,8 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     ticks = 0; poll_count = irq_count = 0; blocks = 0; release_due = -1;
     pit_divisor = 65536; pit_low = -1;
     memset(&mouse, 0, sizeof mouse); pending_mouse = 0; in_callback = 0;
-    pthread_mutex_lock(&input_lock); nkeys = 0; mq_head = mq_tail = 0; pthread_mutex_unlock(&input_lock);
+    pthread_mutex_lock(&input_lock); nkeys = 0; nraw = 0; mq_head = mq_tail = 0; pthread_mutex_unlock(&input_lock);
+    port60 = 0;
     key_at = click_at = block_click_at = 0;
     stopped = 0; exit_code = -1; mpu_n = 0; sb16_reset(); sb_irq_pending = 0; audio_pumped = 0;
     arena_init(&linear_arena, 0x400000, MEMORY, 4096);
@@ -853,6 +873,10 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     vec_sel[8] = 8; vec_pc[8] = 0xf000; vec_set[8] = 1;
     port_val[0x21] = port_val[0xa1] = port_val[0x3c6] = 0xff;
     port_known[0x21] = port_known[0xa1] = port_known[0x3c6] = 1;
+    port_known[0x61] = 1;
+    /* Real time: the PIC mask a BIOS leaves (timer, keyboard and cascade
+     * unmasked). The deterministic model keeps the verified 0xff. */
+    if (!det) port_val[0x21] = 0xb8;
     video_mode = 3;
     mouse.x = 320; mouse.y = 240; mouse.rx1 = 639; mouse.ry1 = 479;
     tp_io_callback(io_cb);
@@ -969,6 +993,11 @@ void tp_host_key(uint32_t key) {
     pthread_mutex_unlock(&input_lock);
 }
 void tp_host_shift(uint32_t flags) { shift_flags = flags; }
+void tp_host_key_raw(uint8_t scan, int down) {
+    pthread_mutex_lock(&input_lock);
+    if (nraw < 64) raw_keys[nraw++] = down ? scan : (scan | 0x80);
+    pthread_mutex_unlock(&input_lock);
+}
 static void push_mouse(int x, int y, uint32_t buttons) {
     pthread_mutex_lock(&input_lock);
     int next = (mq_tail + 1) % 256;
