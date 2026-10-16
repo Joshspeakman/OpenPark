@@ -5,22 +5,25 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current verified milestone — 2026-10-16
 
-Native startup now reaches the title, nickname entry, main menu and the new-park
-player-details form. **2,518 compiled blocks, 12,818 matched DOS/BIOS service
-boundaries**, matching port traffic and a byte-identical 320×200 framebuffer.
-A separate native-only run with `python3 -S` reaches the same form and frame
-hash without importing Unicorn or Capstone (0.215 seconds for this accelerated
-test on this machine; not a real-time performance claim).
+Native game code now reaches the first park, through title, nickname entry,
+setup, mouse-driven country selection and buying land. **3,627 compiled blocks,
+8,000,000 block executions, 13,678 matched DOS/BIOS service boundaries and 6,882
+matched scheduling boundaries**. The park framebuffer and setup profile match
+byte for byte. A separate `python3 -S` run reaches the identical result without
+Unicorn or Capstone (0.33 seconds for this accelerated test on this machine;
+not a real-time performance claim).
 
-The standard menu check passes 15 synthetic LE/DOS tests, 100 synthetic CPU cases,
-2,000 original routine comparisons, and 12,699 startup service comparisons.
+The macOS check passes 17 synthetic LE/DOS tests, 124 synthetic CPU cases,
+2,000 original routine comparisons and the startup comparisons. Its `--park`
+mode covers the complete eight-million-block scenario above and checks captured
+milestone hashes, then reruns without the oracle or disassembler.
 The ARM64 library links only libSystem. Test runs are headless, muted and scratch
 only. The project and generated outputs are entirely in theme-park-macos; no
 Freedom Force launcher is used.
 
 The game is **not yet a finished playable port**. The current host is Python
-development infrastructure. Mouse callback delivery, real PIT-rate scheduling,
-native window/input, gameplay/build operations, save/reload and audio have not
+development infrastructure. Real PIT-rate scheduling, native window/input,
+build-operation acceptance, full park save/reload and audio have not
 passed acceptance. The DOS model is shared by the oracle/native harness and
 is not independently verified against DOS4GW. See [DOS contract](DOS-CONTRACT.md)
 and [progress report](reports/2026-10-16-native-startup.md).
@@ -67,9 +70,9 @@ every apparent service found in a speculative decode.
 | 1 | Bounded LE mapping/fixups, executable census | Initial version done | Small for observed files; medium for arbitrary LE files |
 | 2 | ARM64 routine proofs using the shared lifter | Two integer/memory slices pass | Small initial proof; broad CPU coverage still needed |
 | 3 | Verified startup analysis and differential trace to first DOS service | Passed through player details | Synthetic DOS4G launch contract; original-vs-native CPU agreement |
-| 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Observed startup services implemented | Keyboard and timer callbacks tested; mouse delivery pending |
-| 5 | Framebuffer/palette presentation through a background Metal host, then menus | Headless VGA frames/menu pass | Native window/Metal and VESA remain |
-| 6 | Native input and simulation pacing; new park, build operations, save/load | Scripted keyboard reaches setup form | Mouse, real-time pacing, gameplay/save acceptance remain |
+| 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Observed startup services implemented | Keyboard, timer and far mouse callbacks tested |
+| 5 | Framebuffer/palette presentation through a background Metal host, then menus | Headless VGA frames through park pass | Native window/Metal and VESA remain |
+| 6 | Native input and simulation pacing; new park, build operations, save/load | Scripted mouse buys land and enters park | Real-time pacing, build operations and full save/reload remain |
 | 7 | Intro playback and HMI audio through native output | Not started | Large/uncertain; driver ABI and music formats (verify) |
 | 8 | Soak, original-behavior comparisons, launcher and packaging | Not started | After playable milestone; no installation authorized yet |
 
@@ -106,12 +109,21 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Next concrete step
 
-Deliver mouse events through the registered guest callback, accept the player
-details and reach the first park. Continue differential verification through
-each new path. Replace synthetic timing with PIT-rate scheduling and move the
-development platform services into the native app host before packaging.
+Implement native window/event presentation and real-time PIT scheduling, then
+exercise building operations and full park save/reload through the same
+differential checks. Move development platform services into the native app
+host before packaging. Preserve the first-park golden frame and profile hashes.
 
 ## Done so far
+
+- 2026-10-16 (Codex, input/scheduling): added far mouse callbacks, full caller
+  restoration, POPFD interrupt-flag restoration and independent scheduling
+  quanta. Fixed the release-event deadlock in modal dialogs by scheduling input
+  outside keyboard polling. Each run now gets a fresh, non-overlapping scratch
+  profile. Native/original runs match through land purchase and the first park,
+  including eight million blocks, exact frame output and setup-profile bytes.
+  The complete `tests/check_macos.sh ... --park` check passes. Build-operation
+  and full park-save compatibility are still unverified.
 
 - 2026-10-16 (Codex, continuation): implemented the observed DOS/DPMI host and
   static DOS lifter adapter. Fixed selector width/stack behavior, F2 MOVSD repeat
