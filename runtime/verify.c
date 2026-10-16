@@ -82,11 +82,16 @@ void tp_set(unsigned i, uint32_t value) {
 void tp_descriptor(unsigned selector, unsigned base) { tp_base[selector >> 3] = base; }
 const char *tp_error(void) { return error; }
 int tp_dispatch(Ctx *c);
+/* The host learns when execution reaches one address (the far-callback
+ * epilogue) without changing block scheduling. */
+uint32_t tp_watch_pc = 0xffffffffu;
+volatile int tp_watch_hit;
 int tp_run(uint32_t budget) {
     interrupt_number = 0;
     blocks_run = 0;
     if (setjmp(trap)) return -1;
     while (budget--) {
+        if (state.tc == tp_watch_pc) tp_watch_hit = 1;
         if (!tp_dispatch(&state)) return -2;
         blocks_run++;
         if (interrupt_number) return (int)interrupt_number;
