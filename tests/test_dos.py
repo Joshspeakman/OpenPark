@@ -103,9 +103,25 @@ class DOSTests(unittest.TestCase):
         (self.game/'escape').symlink_to(self.game.parent,target_is_directory=True)
         with self.assertRaises(Stop):self.dos.path('escape/outside')
 
+    def test_scratch_cannot_overlap_owned_game_root(self):
+        for scratch in (self.game,self.game/'scratch',self.game.parent):
+            with self.assertRaises(ValueError):DOS(self.m,self.game,scratch)
+
     def test_unknown_service_is_explicit_failure(self):
         with self.assertRaisesRegex(Stop,'unsupported int'):
             self.call(0xdead)
+
+    def test_create_write_truncate_stays_in_overlay(self):
+        self.m.write(0x10000,b'DATA/Mixed.DAT\0')
+        self.call(0x3c00,ecx=0,edx=0x10000)
+        h=self.m.get('eax')
+        self.m.write(0x20000,b'new data')
+        self.call(0x4000,ebx=h,ecx=8,edx=0x20000)
+        self.call(0x4200,ebx=h,ecx=0,edx=3)
+        self.call(0x4000,ebx=h,ecx=0,edx=0x20000)
+        self.call(0x3e00,ebx=h)
+        self.assertEqual(self.dos.path('data/mixed.dat').read_bytes(),b'new')
+        self.assertEqual((self.game/'Data'/'Mixed.DAT').read_bytes(),b'abcdef')
 
 
 if __name__=='__main__':unittest.main()

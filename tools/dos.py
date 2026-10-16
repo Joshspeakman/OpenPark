@@ -7,6 +7,7 @@ import struct
 import zlib
 import hashlib
 import json
+import tempfile
 from pathlib import Path
 from le import LE
 
@@ -15,6 +16,12 @@ BIAS = 0x100000
 GDT, PSP, ENV = 0x1000, 0x2000, 0x3000
 SEGMENTS = ('cs', 'ds', 'es', 'ss', 'fs', 'gs')
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi')
+
+
+def scratch_profile(output, label='run'):
+    root=Path(output)/'scratch'
+    root.mkdir(parents=True,exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=label+'-',dir=root))
 
 
 def load_image(path):
@@ -99,6 +106,8 @@ class DOS:
     def __init__(self, machine, game, scratch):
         self.m = machine
         self.game, self.scratch = Path(game).resolve(), Path(scratch).resolve()
+        if self.scratch.is_relative_to(self.game) or self.game.is_relative_to(self.scratch):
+            raise ValueError('game and scratch roots must not overlap')
         self.scratch.mkdir(parents=True, exist_ok=True)
         self.bases = {8: 0, 16: 0, 24: PSP, 32: ENV}
         self.next_selector, self.heap = 0x100, 0x400000
@@ -122,6 +131,21 @@ class DOS:
         self.vectors[8] = (8,0xf000)
         self.poll_count = 0
         self.key_script = []
+        self.mouse_script = []
+        self.mouse_events = []
+        self.pending_mouse = None
+        self.click_script=[]
+        self.blocks=0
+        self.release_due=None
+        self.block_clicks=[]
+
+    def saved_files(self):
+        return {str(p.relative_to(self.scratch)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(self.scratch.rglob('*')) if p.is_file()}
+
+    def close(self):
+        for handle in self.handles.values():handle.close()
+        self.handles.clear()
 
     def port_in(self, port, size):
         if size != 1:
@@ -192,6 +216,8 @@ class DOS:
             self.m.write(obj.base, bytes(obj.data))
         self.m.write(GDT, bytes(4096))
         self.m.write(0xf000,b'\xcf') # synthetic default timer interrupt return
+        # Synthetic far-callback epilogue restores the interrupted guest state.
+        self.m.write(0xf010,bytes.fromhex('0fa90fa1071f619dc3'))
         for selector, base in self.bases.items():
             self.m.write(GDT + selector, descriptor(base, access=0x9a if selector == 8 else 0x92))
         self.m.write(PSP + 0x2c, struct.pack('<H', 32))
@@ -223,6 +249,51 @@ class DOS:
         while self.key_script and self.key_script[0][0] <= self.poll_count:
             _,key = self.key_script.pop(0)
             self.keys.append(key)
+        while self.mouse_script and self.mouse_script[0][0] <= self.poll_count:
+            poll,x,y,buttons = self.mouse_script.pop(0)
+            self.queue_mouse(x,y,buttons)
+        while self.click_script and self.click_script[0][0]<=self.poll_count:
+            poll,x,y=self.click_script.pop(0)
+            self.queue_mouse(x,y,1)
+            self.release_due=self.blocks+50000
+
+    def queue_mouse(self,x,y,buttons):
+        old=self.mouse.copy()
+        event=1 if (x,y)!=(old['x'],old['y']) else 0
+        for bit,press,release in ((1,2,4),(2,8,16),(4,32,64)):
+            if (old['buttons']^buttons)&bit:event |= press if buttons&bit else release
+        self.mouse.update(x=x,y=y,buttons=buttons)
+        self.pending_mouse=(event,x-old['x'],y-old['y'])
+        self.mouse_events.append((self.poll_count,x,y,buttons,event,self.blocks))
+
+    def advance_blocks(self,count):
+        self.blocks+=count
+        if self.release_due is not None and self.blocks>=self.release_due and self.m.get('eflags')&0x200:
+            self.release_due=None
+            self.queue_mouse(self.mouse['x'],self.mouse['y'],0)
+            self.mouse_callback()
+        if self.block_clicks and self.blocks>=self.block_clicks[0][0] and self.m.get('eflags')&0x200:
+            _,x,y=self.block_clicks.pop(0)
+            self.queue_mouse(x,y,1);self.release_due=self.blocks+50000
+            self.mouse_callback()
+
+    def mouse_callback(self):
+        if not self.pending_mouse:return
+        event,dx,dy = self.pending_mouse; self.pending_mouse=None
+        callback = self.mouse['callback']
+        if not callback or not event&callback[0]:return
+        mask,selector,pc = callback
+        if self.bases.get(selector)!=0:
+            raise Stop('nonflat mouse callback selector')
+        m=self.m
+        # Callback ES identifies its far address; use the flat code alias.
+        saved=[0xf010,m.get('cs'),m.get('gs'),m.get('fs'),m.get('es'),m.get('ds'),
+               m.get('edi'),m.get('esi'),m.get('ebp'),m.get('esp'),m.get('ebx'),m.get('edx'),m.get('ecx'),m.get('eax'),m.get('eflags'),m.get('eip')]
+        sp=m.get('esp')-4*len(saved)
+        m.write(sp,struct.pack('<'+'I'*len(saved),*saved))
+        for name,value in (('eax',event),('ebx',self.mouse['buttons']),('ecx',self.mouse['x']),('edx',self.mouse['y']),('esi',dx&0xffffffff),('edi',dy&0xffffffff),('esp',sp),('cs',8),('eip',pc)):
+            m.set(name,value)
+        m.set('eflags',m.get('eflags')&~0x400)
 
     def cstring(self, address):
         data = bytearray()
@@ -413,6 +484,7 @@ class DOS:
                 m.set('eflags',(m.get('eflags')&~0x40)|(0 if self.keys else 0x40))
                 if self.keys: m.set('eax',(a&0xffff0000)|self.keys[0])
                 self.timer_irq()
+                self.mouse_callback()
                 return
             if ah in (0,0x10):
                 if not self.keys: raise Stop('waiting for keyboard input')

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from unicorn import UC_HOOK_INTR, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UC_HOOK_INSN, UcError
 from unicorn import x86_const as U
-from dos import DOS, Stop, REGS, SEGMENTS, MEMORY, load_image
+from dos import DOS, Stop, REGS, SEGMENTS, MEMORY, load_image, scratch_profile
 from trace_startup import Original
 from lift_dos import create_lifter, ROOT
 from native_host import Native
@@ -62,18 +62,23 @@ def main():
     ap.add_argument('--debug-from',type=int,default=1000000)
     ap.add_argument('--services',type=int,default=20000)
     ap.add_argument('--seconds',type=float,default=90)
+    ap.add_argument('--quantum',type=int,default=0)
     args = ap.parse_args()
+    if args.services<=0 or args.seconds<=0 or args.quantum<0:ap.error('invalid verification bound')
     args.out.mkdir(parents=True, exist_ok=True)
     image = load_image(args.exe)
     trace = json.loads(args.trace.read_text())
     blocks = set(trace['blocks'])
     library = build(image, args.reference.resolve(), args.out, blocks,trace['variants'])
     native, original = Native(library), Original()
-    hosts = [DOS(m, args.exe.parent, args.out / name) for m,name in ((native,'native-scratch'),(original,'original-scratch'))]
+    hosts = [DOS(m, args.exe.parent, scratch_profile(args.out,name)) for m,name in ((native,'native'),(original,'original'))]
     for host in hosts:
         host.bootstrap(image)
         host.m.set('eip', image.entry)
         host.key_script = [(int(p),int(k,16)) for p,k in (s.split(':') for s in trace.get('keys','').split(',') if s)]
+        host.mouse_script = [tuple(map(int,s.split(':'))) for s in trace.get('mouse','').split(',') if s]
+        host.click_script = [tuple(map(int,s.split(':'))) for s in trace.get('clicks','').split(',') if s]
+        host.block_clicks = [tuple(map(int,s.split(':'))) for s in trace.get('block_clicks','').split(',') if s]
     for sel, base in hosts[0].bases.items():
         native.lib.tp_descriptor(sel, base)
     io_error = []
@@ -99,7 +104,10 @@ def main():
     status = 'service bound'
     deadline = time.monotonic()+args.seconds
     limit = min(args.services,len(trace.get('services',[])))
-    for _ in range(limit):
+    quantum=args.quantum or trace.get('quantum',0)
+    yields=0
+    target_blocks=trace.get('executed_blocks',0) if quantum and args.services>=len(trace.get('services',[])) else 0
+    while comparisons<limit or hosts[0].blocks<target_blocks:
         if time.monotonic() >= deadline:
             status = 'wall-clock bound'; break
         debug = comparisons >= args.debug_from
@@ -128,14 +136,21 @@ def main():
                 dirty.clear()
                 if number: break
         else:
-            number = native.lib.tp_run(1000000)
-        if number <= 0:
+            budget=min(quantum,target_blocks-hosts[0].blocks) if target_blocks else quantum or 1000000
+            if budget<=0:raise AssertionError('trace block bound precedes its service count')
+            number = native.lib.tp_run(budget)
+        if number < 0 or number==0 and not quantum:
             status = 'native %d at %08x: %s' % (number,native.get('eip'),native.lib.tp_error().decode())
             break
         if not debug:
             boundary.clear()
-            original.uc.emu_start(original.get('eip'), 0, timeout=10000000, count=10000000)
-        if boundary != [number]:
+            if quantum:
+                original_number=original.run_blocks(budget)
+                if original_number!=number or original.blocks_run!=native.lib.tp_blocks():
+                    raise AssertionError(('quantum',comparisons,original_number,number,original.blocks_run,native.lib.tp_blocks(),hex(original.get('eip')),hex(native.get('eip'))))
+            else:
+                original.uc.emu_start(original.get('eip'), 0, timeout=10000000, count=10000000)
+        if boundary != ([number] if number else []):
             raise AssertionError(('interrupt divergence',number,boundary))
         if hosts[0].io != hosts[1].io:
             raise AssertionError('port I/O divergence')
@@ -149,18 +164,20 @@ def main():
         # Compare CPU-written pages at each boundary and the complete mapped
         # region periodically and at the final stop. The full comparisons catch
         # unexpected native writes to pages the original did not touch.
-        spans = [(0,MEMORY)] if comparisons % 100 == 0 else [(p*4096,4096) for p in sorted(dirty)]
+        spans = [(0,MEMORY)] if (comparisons+yields) % 100 == 0 else [(p*4096,4096) for p in sorted(dirty)]
         for address,size in spans:
             x,y = native.read(address,size),original.read(address,size)
             if x != y:
                 at = next(k for k,(a,b) in enumerate(zip(x,y)) if a != b)
                 raise AssertionError((comparisons,'memory',hex(address+at),x[at:at+16].hex(),y[at:at+16].hex()))
         dirty.clear()
-        comparisons += 1
+        if number:comparisons += 1
+        else:yields+=1
         stopped = []
         for host in hosts:
             try:
-                host.interrupt(number)
+                if number:host.interrupt(number)
+                if quantum:host.advance_blocks(native.lib.tp_blocks())
             except Stop as e:
                 stopped.append(str(e))
         for sel,base in hosts[0].bases.items():
@@ -169,13 +186,20 @@ def main():
             if len(stopped) != 2 or stopped[0] != stopped[1]:
                 raise AssertionError(('host divergence',stopped))
             status = stopped[0]; break
-    if number > 0 and native.read(0,MEMORY) != original.read(0,MEMORY):
+    if number >= 0 and native.read(0,MEMORY) != original.read(0,MEMORY):
         raise AssertionError('final full-memory mismatch')
+    for host in hosts:host.close()
+    if number>=0 and hosts[0].saved_files()!=hosts[1].saved_files():
+        raise AssertionError('scratch file output mismatch')
     result = {'status':status,'service_boundaries_compared':comparisons,'compiled_blocks':len(blocks),'pc':native.get('eip'),
               'output':hosts[0].output.decode('cp437'),'limits':'Shared DOS host, synthetic DOS4G launch contract; no independent DOS compatibility claim.'}
     result['frame'] = hosts[0].frame(args.out/'native-frame.png')
+    result['scratch']=[str(host.scratch) for host in hosts]
+    result['saved_files']=hosts[0].saved_files()
+    result['scheduling_boundaries_compared']=yields
+    result['executed_blocks']=hosts[0].blocks
     hosts[1].frame(args.out/'original-frame.png')
-    if number > 0 and result['frame']:
+    if number >= 0 and result['frame']:
         if (args.out/'native-frame.png').read_bytes() != (args.out/'original-frame.png').read_bytes():
             raise AssertionError('framebuffer/palette mismatch')
         result['frame_sha256'] = hashlib.sha256((args.out/'native-frame.png').read_bytes()).hexdigest()

@@ -84,6 +84,9 @@ def create_lifter(reference, image, output):
             for byte in i.bytes:
                 if byte not in (0xf0,0xf2,0xf3,0x66,0x67,0x26,0x2e,0x36,0x3e,0x64,0x65): break
                 prefixes.append(byte)
+            if mn.split()[-1] in strings:
+                if i.addr_size!=4 or any(p in prefixes for p in (0x26,0x2e,0x36,0x64,0x65)):
+                    raise lift.Unsupported('unimplemented string address/segment override')
             if mn in strings and any(p in prefixes for p in (0xf2,0xf3)):
                 # Capstone omits REPNE in the mnemonic for F2 MOVS/STOS,
                 # although the target CPU repeats these Watcom instructions.
@@ -92,6 +95,8 @@ def create_lifter(reference, image, output):
                 return 'c->tc = 0x%xu; SPILL; tp_interrupt(c, %du); return;' % (i.address + i.size, ops[0].imm)
             if mn in ('sti', 'cli'):
                 return 'flags_set(&f, %s, F_IF);' % ('F_IF' if mn == 'sti' else '0')
+            if mn=='popfd':
+                return '{ uint32_t v = R32S(esp); esp += 4; flags_set(&f,v,0xed5u); }'
             if mn == 'out':
                 return 'SPILL; tp_io(c, 1, %s, %du, %s); RELOAD;' % (self.rd(i,ops[0]),ops[1].size,self.rd(i,ops[1]))
             if mn == 'in':

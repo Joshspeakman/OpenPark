@@ -1,0 +1,10 @@
+{
+  "main_menu": {
+    "frame_sha256": "71d5e24d8a093a2b089c3265cb2d60e2097996ed27966cd5d4c1b76086536416"
+  },
+  "first_park": {
+    "blocks": 8000000,
+    "frame_sha256": "ad3273fc886d14342f9b0aa5ebc364f1f448a10c1dcdaafbc65bd0dee59ed470",
+    "profile_sha256": "efcfd83c68e45211a97a7378aafb3125d78c68676d4f4a86ff37bb9e5a6515b9"
+  }
+}

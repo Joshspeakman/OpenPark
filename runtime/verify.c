@@ -10,6 +10,8 @@ static Ctx state;
 static jmp_buf trap;
 static char error[256];
 static uint32_t interrupt_number;
+static uint32_t blocks_run;
+uint32_t tp_blocks(void) { return blocks_run; }
 static int (*io_callback)(int, unsigned, unsigned, unsigned);
 void tp_io_callback(int (*fn)(int,unsigned,unsigned,unsigned)) { io_callback = fn; }
 uint32_t tp_io(Ctx *c, int output, unsigned port, unsigned size, unsigned value) {
@@ -72,9 +74,11 @@ const char *tp_error(void) { return error; }
 int tp_dispatch(Ctx *c);
 int tp_run(uint32_t budget) {
     interrupt_number = 0;
+    blocks_run = 0;
     if (setjmp(trap)) return -1;
     while (budget--) {
         if (!tp_dispatch(&state)) return -2;
+        blocks_run++;
         if (interrupt_number) return (int)interrupt_number;
     }
     return 0;
