@@ -10,6 +10,7 @@
 int tp_audio_start(void);
 void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
+BOOL tp_launcher_run(void);
 
 static NSString *dataRoot(void) {
     NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
@@ -57,7 +58,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         self.wantsLayer = YES;
         self.layer.backgroundColor = NSColor.blackColor.CGColor;
         _screen = [CALayer layer];
-        _screen.magnificationFilter = kCAFilterNearest;
+        _screen.magnificationFilter = [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"] ? kCAFilterLinear : kCAFilterNearest;
         _screen.minificationFilter = kCAFilterLinear;
         _screen.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null]};
         [self.layer addSublayer:_screen];
@@ -69,6 +70,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (NSRect)screenRect {
     NSRect b = self.bounds;
     CGFloat w = b.size.width, h = b.size.height;
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"Stretch"]) return b;
     if (w * 3 > h * 4) w = h * 4 / 3; else h = w * 3 / 4;
     return NSMakeRect(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), floor(w), floor(h));
 }
@@ -107,7 +109,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     NSRect r = [self screenRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
-    [self setCursorHidden:inside && self.window.isKeyWindow];
+    [self setCursorHidden:inside && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     tp_host_mouse(fx, fy, _buttons);
@@ -206,6 +208,12 @@ static void *game_thread(void *arg) {
         return;
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
+    NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @10000}];
+    BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0;
+    if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
+    if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }
+    if (!getenv("TP_CYCLES")) tp_host_set_cycles([u doubleForKey:@"Cycles"]);
     [NSFileManager.defaultManager createDirectoryAtPath:_saves withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *logPath = [root stringByAppendingPathComponent:@"theme-park.log"];
     freopen(logPath.fileSystemRepresentation, "a", stderr);
@@ -225,15 +233,12 @@ static void *game_thread(void *arg) {
     _window.contentView = _view;
     [_window center];
     [_window setFrameAutosaveName:@"ThemeParkWindow"];
-    BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0;
     if (!selfTest) [_window makeKeyAndOrderFront:nil];     /* self-tests stay in the background */
     [_window makeFirstResponder:_view];
     _window.acceptsMouseMovedEvents = YES;
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"StartFullScreen"]) [_window toggleFullScreen:nil];
 
     {
-        NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-        [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES}];
         if ([u boolForKey:@"Sound"] && tp_audio_start() == 0)
             tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
     }
