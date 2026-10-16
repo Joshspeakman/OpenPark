@@ -1,0 +1,81 @@
+/* Development-only bounded native block host. No x86 interpreter or decoder. */
+#include "rt.h"
+#include <stdlib.h>
+#include <setjmp.h>
+#include <stdio.h>
+
+uint8_t *G_MEM;
+uint32_t tp_seg[6], tp_base[8192];
+static Ctx state;
+static jmp_buf trap;
+static char error[256];
+static uint32_t interrupt_number;
+static int (*io_callback)(int, unsigned, unsigned, unsigned);
+void tp_io_callback(int (*fn)(int,unsigned,unsigned,unsigned)) { io_callback = fn; }
+uint32_t tp_io(Ctx *c, int output, unsigned port, unsigned size, unsigned value) {
+    int result = io_callback ? io_callback(output,port&65535,size,value) : -1;
+    if (result < 0) {
+        snprintf(error,sizeof error,"port I/O failure: %x",port);
+        longjmp(trap,1);
+    }
+    return (uint32_t)result;
+}
+void tp_set_segment(unsigned n, unsigned selector) {
+    selector &= 65535;
+    if ((selector & 7) || (n == 3 && tp_base[selector >> 3])) {
+        snprintf(error, sizeof error, "unsupported segment %u=%x", n, selector);
+        longjmp(trap, 1);
+    }
+    tp_seg[n] = selector;
+}
+void rt_unhandled(Ctx *c, uint32_t pc, const char *why) {
+    snprintf(error, sizeof error, "%08x: %s", pc, why);
+    longjmp(trap, 1);
+}
+void tp_interrupt(Ctx *c, uint32_t number) { interrupt_number = number; }
+void rt_bus_lock(void) {}
+void rt_bus_unlock(void) {}
+void rt_raise_cpu_exception(Ctx *c, uint32_t pc, uint32_t code) {
+    rt_unhandled(c, pc, "CPU exception");
+}
+void rt_exception(Ctx *c, uint32_t pc, uint32_t code) {
+    rt_unhandled(c, pc, "CPU exception");
+}
+void rt_div_fault(Ctx *c, uint32_t pc) { rt_unhandled(c, pc, "division fault"); }
+void rt_cpuid(Ctx *c, uint32_t *a, uint32_t *b, uint32_t *x, uint32_t *d) {
+    rt_unhandled(c, c->tc, "CPUID");
+}
+void *tp_memory(void) {
+    if (!G_MEM) G_MEM = calloc(1, 64u * 1024u * 1024u);
+    return G_MEM;
+}
+void tp_reset(void) {
+    memset(&state, 0, sizeof state);
+    state.fcw = 0x37f;
+    memset(tp_seg, 0, sizeof tp_seg);
+    memset(tp_base, 0, sizeof tp_base);
+}
+uint32_t tp_get(unsigned i) {
+    if (i < 8) return ((uint32_t *)&state)[i];
+    if (i == 8) return flags_get(&state.f);
+    if (i == 9) return state.tc;
+    return tp_seg[i - 10];
+}
+void tp_set(unsigned i, uint32_t value) {
+    if (i < 8) ((uint32_t *)&state)[i] = value;
+    else if (i == 8) flags_set(&state.f, value, 0xffffffffu);
+    else if (i == 9) state.tc = value;
+    else tp_seg[i - 10] = value;
+}
+void tp_descriptor(unsigned selector, unsigned base) { tp_base[selector >> 3] = base; }
+const char *tp_error(void) { return error; }
+int tp_dispatch(Ctx *c);
+int tp_run(uint32_t budget) {
+    interrupt_number = 0;
+    if (setjmp(trap)) return -1;
+    while (budget--) {
+        if (!tp_dispatch(&state)) return -2;
+        if (interrupt_number) return (int)interrupt_number;
+    }
+    return 0;
+}

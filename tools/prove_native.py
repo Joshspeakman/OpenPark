@@ -40,6 +40,7 @@ def main():
         if hashlib.sha256((reference / name).read_bytes()).hexdigest() != sha:
             raise SystemExit(f'reference changed: {name}; review before updating its pin')
     sys.path.insert(0, str(reference / 'recomp/tools'))
+    sys.dont_write_bytecode = True
     import lift
     image = LE.read(args.exe)
     if image.apply_offset_fixups():

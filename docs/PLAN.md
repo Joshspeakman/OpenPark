@@ -1,8 +1,29 @@
 # Theme Park native macOS plan
 
 Target: the user's GOG `theme_park_enUS_1_0_33010.pkg`, recompiled into native
-Apple Silicon code. This initial session starts the project; a working game is
-not claimed. Ground rules: [CLAUDE.md](../CLAUDE.md).
+Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
+
+## Current verified milestone — 2026-10-16
+
+Native startup now reaches the title, nickname entry, main menu and the new-park
+player-details form. **2,518 compiled blocks, 12,818 matched DOS/BIOS service
+boundaries**, matching port traffic and a byte-identical 320×200 framebuffer.
+A separate native-only run with `python3 -S` reaches the same form and frame
+hash without importing Unicorn or Capstone (0.215 seconds for this accelerated
+test on this machine; not a real-time performance claim).
+
+The standard menu check passes 15 synthetic LE/DOS tests, 100 synthetic CPU cases,
+2,000 original routine comparisons, and 12,699 startup service comparisons.
+The ARM64 library links only libSystem. Test runs are headless, muted and scratch
+only. The project and generated outputs are entirely in theme-park-macos; no
+Freedom Force launcher is used.
+
+The game is **not yet a finished playable port**. The current host is Python
+development infrastructure. Mouse callback delivery, real PIT-rate scheduling,
+native window/input, gameplay/build operations, save/reload and audio have not
+passed acceptance. The DOS model is shared by the oracle/native harness and
+is not independently verified against DOS4GW. See [DOS contract](DOS-CONTRACT.md)
+and [progress report](reports/2026-10-16-native-startup.md).
 
 ## Confirmed input survey
 
@@ -45,19 +66,20 @@ every apparent service found in a speculative decode.
 | 0 | Owned input pins, scratch extraction, ground rules and source-only project | Done locally | Small; high |
 | 1 | Bounded LE mapping/fixups, executable census | Initial version done | Small for observed files; medium for arbitrary LE files |
 | 2 | ARM64 routine proofs using the shared lifter | Two integer/memory slices pass | Small initial proof; broad CPU coverage still needed |
-| 3 | Verified startup analysis and differential trace to first DOS service | Next | Medium; startup ABI and segment state unverified |
-| 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Not started | Large; high confidence this replaces the Win32 layer |
-| 5 | Framebuffer/palette presentation through a background Metal host, then menus | Not started | Medium–large; VGA/VESA access strategy (verify) |
-| 6 | Native input and simulation pacing; new park, build operations, save/load | Not started | Large integration phase; game-loop boundaries (verify) |
+| 3 | Verified startup analysis and differential trace to first DOS service | Passed through player details | Synthetic DOS4G launch contract; original-vs-native CPU agreement |
+| 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Observed startup services implemented | Keyboard and timer callbacks tested; mouse delivery pending |
+| 5 | Framebuffer/palette presentation through a background Metal host, then menus | Headless VGA frames/menu pass | Native window/Metal and VESA remain |
+| 6 | Native input and simulation pacing; new park, build operations, save/load | Scripted keyboard reaches setup form | Mouse, real-time pacing, gameplay/save acceptance remain |
 | 7 | Intro playback and HMI audio through native output | Not started | Large/uncertain; driver ABI and music formats (verify) |
 | 8 | Soak, original-behavior comparisons, launcher and packaging | Not started | After playable milestone; no installation authorized yet |
 
-The shared lifter currently classifies `int`, port I/O and several DOS-era
-instructions as unsupported Windows-path instructions. They need deliberate DOS
-service boundaries, not success stubs or an embedded CPU interpreter. Do not
-claim the game works because the native slice library loads.
+The DOS adapter implements interrupts, port I/O, selector state, segmented string
+operations and interrupt/far returns without invoking the shared lifter's game
+hooks. Traced basic blocks compile ahead of time. Self-modified block variants
+are selected by byte guards; an uncompiled variant stops explicitly. No runtime
+decoder or CPU interpreter is used by the native runner.
 
-## Verification and limits
+## Initial slice verification and limits (superseded by startup evidence above)
 
 - Seven synthetic LE tests pass, including every truncated prefix of the fixture,
   invalid bounds/objects, BSS, source lists, relative relocations, negative target
@@ -84,13 +106,20 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Next concrete step
 
-Trace the entry jump at 0x7e2cc into startup (0x7e346), establish the DOS4GW
-register/segment/PSP/environment contract, and compare a bounded startup prefix
-against the original x86 up to the first DOS/DPMI boundary. Add DOS service
-implementations only as that trace requires them. Extend instruction-form and
-routine tests before attempting the first framebuffer.
+Deliver mouse events through the registered guest callback, accept the player
+details and reach the first park. Continue differential verification through
+each new path. Replace synthetic timing with PIT-rate scheduling and move the
+development platform services into the native app host before packaging.
 
 ## Done so far
+
+- 2026-10-16 (Codex, continuation): implemented the observed DOS/DPMI host and
+  static DOS lifter adapter. Fixed selector width/stack behavior, F2 MOVSD repeat
+  decoding, self-modifying setup allocation control flow, file-handle reuse and
+  allocator resizing. Verified title, nickname input, main menu and player setup
+  against x86, including timer ISR/far-return chaining and framebuffer equality.
+  Added a native-only runner with no oracle/disassembler imports. All assets,
+  compiled game blocks, traces, frames and scratch files stay ignored locally.
 
 - 2026-10-16 (Codex): located and inspected the owned package; read the requested
   guide and reference ports. Established that this is a DOS/LE target. Added a
