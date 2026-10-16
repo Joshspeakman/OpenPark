@@ -1,0 +1,39 @@
+/* Native DOS/DPMI platform host for the recompiled Theme Park (C port of
+ * tools/dos.py). The compiled game blocks run on one thread; the app feeds
+ * input through the thread-safe calls below and reads the VGA frame. */
+#ifndef TP_HOST_H
+#define TP_HOST_H
+#include <stdint.h>
+
+typedef struct TpScript {          /* deterministic test input (tools/dos.py) */
+    struct { uint32_t at; uint32_t key; } keys[64];        /* poll:scan<<8|ascii */
+    struct { uint32_t at, x, y; } clicks[64];               /* poll:x:y, released 50000 blocks later */
+    struct { uint32_t at, x, y; } block_clicks[64];         /* block:x:y */
+    int nkeys, nclicks, nblock_clicks;
+} TpScript;
+
+/* deterministic: 1 = the verified scripted scheduling model (one timer tick
+ * per idle keyboard poll, retrace toggling per read, fixed clock); 0 = real time. */
+int  tp_host_init(const char *game_dir, const char *overlay_dir, int deterministic, const TpScript *script);
+/* Run for at most `blocks` compiled blocks (deterministic) or `ms` milliseconds
+ * (real time). Returns 0 to continue, 1 when the game exited, -1 on a stop. */
+int  tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms);
+const char *tp_host_status(void);
+int  tp_host_exit_code(void);
+uint64_t tp_host_blocks(void);
+
+/* VGA output: 320x200 mode 13h converted through the DAC palette. Returns 0
+ * when not in a graphics mode. */
+int  tp_host_frame_rgba(uint32_t *out /* 320*200 */);
+int  tp_host_png(const char *path, char sha256_hex[65]);
+
+/* Input (any thread). key = scan<<8 | ascii, as INT 16h returns it. */
+void tp_host_key(uint32_t key);
+void tp_host_shift(uint32_t flags);       /* BIOS shift-state byte (INT 16h AH=2) */
+void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
+void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
+void tp_host_quit(void);
+
+/* Saved files below the overlay (sha256), for tests. */
+void tp_host_list_saved(void (*fn)(const char *rel, const char *sha256_hex, void *), void *ctx);
+#endif
