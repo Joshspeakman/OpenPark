@@ -97,6 +97,14 @@ int main(int argc, char **argv) {
                 } else tp_host_key((uint32_t)strtoul(e, &e, 16));
                 k = *e ? e + 1 : e;
             }
+            static double next_fz; static int held;
+            if (!*k && getenv("TP_RT_FUZZ") && el >= next_fz) {     /* random clicks after the script */
+                static double hx, hy;
+                if (held) { tp_host_mouse(hx, hy, 0); held = 0; }
+                else { hx = rand() / (double)RAND_MAX * 0.999; hy = rand() / (double)RAND_MAX * 0.999;
+                       tp_host_mouse(hx, hy, 0); tp_host_mouse(hx, hy, rand() % 5 ? 1 : 2); held = 1; }
+                next_fz = el + 0.15;
+            }
             if (shots && el >= next_shot) {
                 char p[1024], h[65]; snprintf(p, sizeof p, "%s/rt-%03d.png", out, shot_n++);
                 tp_host_png(p, h); fprintf(stderr, "shot %s t=%.2f\n", p, el); next_shot += shots;
@@ -141,6 +149,7 @@ int main(int argc, char **argv) {
         }
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
+    if (r < 0 && getenv("TP_DUMP_ON_STOP")) tp_host_checkpoint(getenv("TP_DUMP_ON_STOP"));
     char png[1024], hex[65] = "";
     snprintf(png, sizeof png, "%s/frame.png", out);
     int have = tp_host_png(png, hex);

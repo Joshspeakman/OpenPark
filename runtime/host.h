@@ -33,7 +33,11 @@ void tp_host_shift(uint32_t flags);       /* BIOS shift-state byte (INT 16h AH=2
 void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
 void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
 void tp_host_quit(void);
-void tp_host_set_realtime(void);   /* switch a deterministic run to real time (tests) */
+void tp_host_set_realtime(void);
+/* Sound: the app attaches an output and pulls PCM; MIDI bytes go to tp_audio_midi (weak). */
+void tp_host_audio_attached(int on);
+void sb16_render(float *out, int frames, double out_rate);
+void tp_audio_midi(uint8_t byte);   /* switch a deterministic run to real time (tests) */
 /* Emulated CPU speed in thousands of x86 instructions per second (DOSBox "cycles"); 0 = unthrottled. */
 void tp_host_set_cycles(double per_ms);
 

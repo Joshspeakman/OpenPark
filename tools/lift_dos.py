@@ -27,6 +27,8 @@ def create_lifter(reference, image, output):
 
     class DOSLifter(lift.Lifter):
         guest_flow = True
+        patchable = staticmethod(lambda address: False)
+        code_linear = staticmethod(lambda address: address)
         hooks, overrides = {}, {}
 
         def collect(self, f, extra=()):
@@ -54,6 +56,15 @@ def create_lifter(reference, image, output):
             # The generic emitter's flat FS special case is replaced below.
             m = op.mem
             parts = []
+            names = [i.reg_name(r) for r in (m.base, m.index) if r]
+            if names and all(n in lift.R16 for n in names):
+                # 16-bit effective address (67h prefix): wraps at 64 KiB.
+                terms = ['(%s & 0xffffu)' % lift.R16[n] for n in names] + ['0x%xu' % (m.disp & 0xffff)]
+                offset = '((%s) & 0xffffu)' % ' + '.join(terms)
+                if lea:
+                    return offset
+                seg = i.reg_name(m.segment) if m.segment else ('ss' if 'bp' in names else 'ds')
+                return '(tp_base[tp_seg[%d] >> 3] + %s)' % (SEGS.index(seg), offset)
             for reg, scale in ((m.base, 1), (m.index, m.scale)):
                 if reg:
                     name = i.reg_name(reg)
@@ -103,6 +114,19 @@ def create_lifter(reference, image, output):
             if mn in ('lcall', 'ljmp') and len(ops) == 2:
                 push = 'esp -= 4; W32(esp, tp_seg[0]); esp -= 4; W32(esp, 0x%xu); ' % (i.address + i.size) if mn == 'lcall' else ''
                 return '{ %stp_set_segment(0, 0x%xu); c->tc = 0x%xu; SPILL; return; }' % (push, ops[0].imm & 0xffff, ops[1].imm & 0xffffffff)
+            # HMI drivers patch their own selector placeholders (mov r16,
+            # 0FFFFh) at run time: read such immediates from memory.
+            if mn == 'mov' and len(ops) == 2 and ops[1].type == lift.X.X86_OP_IMM and ops[0].size == 2 \
+                    and ops[1].imm & 0xffff == 0xffff and self.patchable(i.address):
+                return self.wr(i, ops[0], 'R16(0x%xu)' % self.code_linear(i.address + i.size - 2))
+            if mn == 'pushaw':
+                regs = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi')
+                body = ' '.join('W16(t - %d, %s);' % (2 * (k + 1), r) for k, r in enumerate(regs))
+                return '{ uint32_t t = esp; %s esp -= 16; }' % body
+            if mn == 'popaw':
+                regs = ('edi', 'esi', 'ebp', None, 'ebx', 'edx', 'ecx', 'eax')
+                body = ' '.join('%s = (%s & 0xffff0000u) | R16(esp + %d);' % (r, r, 2 * k) for k, r in enumerate(regs) if r)
+                return '{ %s esp += 16; }' % body
             if mn == 'int':
                 return 'c->tc = 0x%xu; SPILL; tp_interrupt(c, %du); return;' % (i.address + i.size, ops[0].imm)
             if mn in ('sti', 'cli'):
