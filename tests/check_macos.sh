@@ -25,7 +25,11 @@ if [[ "${3:-}" == --park ]]; then
   native_args=(--quantum 1000 --blocks 8000000)
 fi
 "$PYTHON" tools/trace_startup.py "$1" --out work/check-startup "${trace_args[@]}" "${input_args[@]}"
-"$PYTHON" tools/verify_startup.py "$1" --reference "$2" --trace work/check-startup/trace.json --out work/check-native --seconds 180
+# Whole-program build: every statically reachable block, traced extents kept.
+"$PYTHON" tools/build_game.py "$1" --reference "$2" --trace work/check-startup/trace.json \
+  --survey work/main-survey.json --out work/check-native
+"$PYTHON" tools/verify_startup.py "$1" --reference "$2" --trace work/check-startup/trace.json --out work/check-native \
+  --library work/check-native/game.dylib --seconds 300
 "$PYTHON" - <<'PY'
 import json
 from pathlib import Path
@@ -48,7 +52,7 @@ if [[ "${3:-}" != --park ]]; then
   verified_services=$("$PYTHON" -c 'import json; print(json.load(open("work/check-native/result.json"))["service_boundaries_compared"])')
   native_args=(--services "$verified_services")
 fi
-"$PYTHON" -S tools/run_native.py "$1" --library work/check-native/startup.dylib --out work/check-native-only \
+"$PYTHON" -S tools/run_native.py "$1" --library work/check-native/game.dylib --out work/check-native-only \
   "${native_args[@]}" "${input_args[@]}"
 "$PYTHON" - <<'PY'
 import json
@@ -60,5 +64,5 @@ assert a['frame_sha256']==b['frame_sha256'],(a,b)
 assert a['saved_files']==b['saved_files'],(a,b)
 print('PASS: identical native-only frame and scratch files, without oracle/disassembler')
 PY
-file work/check-native/startup.dylib
-otool -L work/check-native/startup.dylib
+file work/check-native/game.dylib
+otool -L work/check-native/game.dylib
