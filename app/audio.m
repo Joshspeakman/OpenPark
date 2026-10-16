@@ -32,6 +32,16 @@ void tp_audio_midi(uint8_t b) {
     have = 0;
 }
 
+void tp_audio_midi_reset(void) {
+    sysex = nil; status_byte = 0; have = 0;
+    if (!synth) return;
+    for (int ch = 0; ch < 16; ch++) {
+        [synth sendMIDIEvent:0xb0 | ch data1:120 data2:0];   /* all sound off */
+        [synth sendMIDIEvent:0xb0 | ch data1:123 data2:0];   /* all notes off */
+        [synth sendMIDIEvent:0xb0 | ch data1:121 data2:0];   /* reset controllers */
+    }
+}
+
 void tp_audio_set_volumes(float sfx, float music) {
     sfx_volume = sfx;
     if (synth) synth.volume = music;

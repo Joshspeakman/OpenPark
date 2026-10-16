@@ -198,6 +198,9 @@ static void carry(uint32_t error) {
  * The game's HMI MPU-401 driver writes MIDI bytes to 0x330. The app plays them
  * through macOS's General MIDI synthesizer (tp_audio_midi, weak here). */
 __attribute__((weak)) void tp_audio_midi(uint8_t byte) { (void)byte; }
+/* Silence the synth: on MPU-401 reset and when a program starts (the intro can
+ * be stopped mid-note by Escape; the game would otherwise inherit its notes). */
+__attribute__((weak)) void tp_audio_midi_reset(void) {}
 static uint8_t mpu_queue[16]; static int mpu_n; static uint32_t midi_bytes;
 static void mpu_ack(void) { if (mpu_n < 16) mpu_queue[mpu_n++] = 0xfe; }
 static int mpu_in(unsigned port) {
@@ -206,7 +209,11 @@ static int mpu_in(unsigned port) {
     int v = mpu_queue[0]; memmove(mpu_queue, mpu_queue + 1, --mpu_n); return v;
 }
 static void mpu_out(unsigned port, unsigned value) {
-    if (port == 0x331) { if (value == 0xff || value == 0x3f) mpu_ack(); return; }
+    if (port == 0x331) {
+        if (value == 0xff) tp_audio_midi_reset();
+        if (value == 0xff || value == 0x3f) mpu_ack();
+        return;
+    }
     midi_bytes++;
     tp_audio_midi((uint8_t)value);
 }
@@ -866,6 +873,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     pthread_mutex_lock(&input_lock); nkeys = 0; nraw = 0; mq_head = mq_tail = 0; pthread_mutex_unlock(&input_lock);
     port60 = 0;
     key_at = click_at = block_click_at = 0;
+    tp_audio_midi_reset();
     stopped = 0; exit_code = -1; mpu_n = 0; sb16_reset(); sb_irq_pending = 0; audio_pumped = 0;
     arena_init(&linear_arena, 0x400000, MEMORY, 4096);
     arena_init(&conventional, 0x40000, 0x90000, 16);
