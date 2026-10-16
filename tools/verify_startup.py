@@ -20,7 +20,7 @@ def build(image, reference, out, blocks, variants):
     sources = []
     # Collect direct fall-through entries too, but do not speculate recursively
     # into branches absent from the trace. Missing targets stop explicitly.
-    dispatch = 'int tp_dispatch(Ctx *c) { switch(c->tc) {\n'
+    dispatch = 'void tp_dispatch_init(void) {}\nconst uint32_t tp_block_count = %du;\nint tp_dispatch(Ctx *c) { switch(c->tc) {\n' % len(blocks)
     decoder = lifter.ins
     for address in sorted(blocks):
         dispatch += 'case 0x%xu:\n' % address
@@ -63,13 +63,14 @@ def main():
     ap.add_argument('--services',type=int,default=20000)
     ap.add_argument('--seconds',type=float,default=90)
     ap.add_argument('--quantum',type=int,default=0)
+    ap.add_argument('--library',type=Path,help='prebuilt whole-program library (tools/build_game.py)')
     args = ap.parse_args()
     if args.services<=0 or args.seconds<=0 or args.quantum<0:ap.error('invalid verification bound')
     args.out.mkdir(parents=True, exist_ok=True)
     image = load_image(args.exe)
     trace = json.loads(args.trace.read_text())
     blocks = set(trace['blocks'])
-    library = build(image, args.reference.resolve(), args.out, blocks,trace['variants'])
+    library = args.library or build(image, args.reference.resolve(), args.out, blocks,trace['variants'])
     native, original = Native(library), Original()
     hosts = [DOS(m, args.exe.parent, scratch_profile(args.out,name)) for m,name in ((native,'native'),(original,'original'))]
     for host in hosts:
@@ -191,7 +192,7 @@ def main():
     for host in hosts:host.close()
     if number>=0 and hosts[0].saved_files()!=hosts[1].saved_files():
         raise AssertionError('scratch file output mismatch')
-    result = {'status':status,'service_boundaries_compared':comparisons,'compiled_blocks':len(blocks),'pc':native.get('eip'),
+    result = {'status':status,'service_boundaries_compared':comparisons,'compiled_blocks':ctypes.c_uint32.in_dll(native.lib,'tp_block_count').value if args.library else len(blocks),'pc':native.get('eip'),
               'output':hosts[0].output.decode('cp437'),'limits':'Shared DOS host, synthetic DOS4G launch contract; no independent DOS compatibility claim.'}
     result['frame'] = hosts[0].frame(args.out/'native-frame.png')
     result['scratch']=[str(host.scratch) for host in hosts]

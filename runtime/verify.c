@@ -47,11 +47,21 @@ void rt_div_fault(Ctx *c, uint32_t pc) { rt_unhandled(c, pc, "division fault"); 
 void rt_cpuid(Ctx *c, uint32_t *a, uint32_t *b, uint32_t *x, uint32_t *d) {
     rt_unhandled(c, c->tc, "CPUID");
 }
+/* x87 80-bit load (same model as the pinned reference runtime's rt.c). */
+double rt_f80_load(const uint8_t *M, uint32_t a) {
+    uint64_t mant; uint16_t se; memcpy(&mant, M + a, 8); memcpy(&se, M + a + 8, 2);
+    int e = se & 0x7fff; double s = (se & 0x8000) ? -1.0 : 1.0;
+    if (e == 0 && mant == 0) return s * 0.0;
+    if (e == 0x7fff) return (mant << 1) ? NAN : s * INFINITY;
+    return s * ldexp((double)mant, e - 16383 - 63);
+}
 void *tp_memory(void) {
     if (!G_MEM) G_MEM = calloc(1, 64u * 1024u * 1024u);
     return G_MEM;
 }
+void tp_dispatch_init(void);
 void tp_reset(void) {
+    tp_dispatch_init();
     memset(&state, 0, sizeof state);
     state.fcw = 0x37f;
     memset(tp_seg, 0, sizeof tp_seg);
