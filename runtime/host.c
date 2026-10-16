@@ -319,7 +319,8 @@ static void advance_blocks(uint32_t count) {
         mouse_callback();
     }
     if (block_click_at < script.nblock_clicks && blocks >= script.block_clicks[block_click_at].at && (G(EFLAGS) & 0x200)) {
-        queue_mouse(script.block_clicks[block_click_at].x, script.block_clicks[block_click_at].y, 1);
+        queue_mouse(script.block_clicks[block_click_at].x, script.block_clicks[block_click_at].y,
+                    script.block_clicks[block_click_at].buttons ? script.block_clicks[block_click_at].buttons : 1);
         block_click_at++;
         release_due = blocks + 50000;
         mouse_callback();

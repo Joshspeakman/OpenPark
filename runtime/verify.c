@@ -63,6 +63,9 @@ void *tp_memory(void) {
     if (!G_MEM) {
         void *p = mmap(0, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
         G_MEM = p == MAP_FAILED ? calloc(1, 64u * 1024u * 1024u) : p;
+        /* Tests: TP_GUARD faults any access past the extender's 64 MiB. */
+        if (p != MAP_FAILED && getenv("TP_GUARD"))
+            mprotect(G_MEM + (64u << 20), (1ull << 32) - (64u << 20), PROT_NONE);
     }
     return G_MEM;
 }

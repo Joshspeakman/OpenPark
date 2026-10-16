@@ -8,7 +8,7 @@
 typedef struct TpScript {          /* deterministic test input (tools/dos.py) */
     struct { uint32_t at; uint32_t key; } keys[64];        /* poll:scan<<8|ascii */
     struct { uint32_t at, x, y; } clicks[64];               /* poll:x:y, released 50000 blocks later */
-    struct { uint32_t at, x, y; } block_clicks[4096];       /* block:x:y */
+    struct { uint32_t at, x, y, buttons; } block_clicks[4096]; /* block:x:y[:buttons] */
     int nkeys, nclicks, nblock_clicks;
 } TpScript;
 
