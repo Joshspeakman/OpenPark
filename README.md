@@ -4,13 +4,13 @@ A new Apple Silicon port of the user's own GOG Theme Park release. The target is
 an ARM64 app that recompiles the original game code, with native platform
 services. DOSBox, Wine and Rosetta are not part of the intended runtime.
 
-**Status:** `Theme Park Nightly.app` runs the game as native ARM64 code in
-a Cocoa window with keyboard and mouse, from the title through setup and into
-a running park, paced like GOG's DOSBox configuration. All 30,143 statically
-reachable blocks are compiled; the scripted first-park run matches the x86
-original for eight million blocks, and checkpoints from random play match it
-too. No sound or intro movie yet, and long random play has found open faults;
-see [the plan](docs/PLAN.md).
+**Status:** `Theme Park Nightly.app` runs the intro and the game as native
+ARM64 code with a launch window, keyboard and mouse, Sound Blaster 16 sound
+effects and General MIDI music, paced like GOG's DOSBox configuration. Saving
+and continuing work. The game's HMI sound drivers are compiled ahead of time
+like the rest of the code. The scripted first-park run and long random-play
+runs match the x86 original; see [the plan](docs/PLAN.md) for what is
+verified and what is not.
 
 ## Build and install the app
 
@@ -26,7 +26,9 @@ Game files are copied from the verified extraction to
 files go to `~/Games/ThemeParkNative/saves`; the log is
 `~/Games/ThemeParkNative/theme-park.log`. `TP_CYCLES` sets the emulated CPU
 speed in thousands of instructions per second (default 10000, as in GOG's
-DOSBox configuration). Control-click is the right mouse button.
+DOSBox configuration). Control-click is the right mouse button. Sound needs
+the driver images described in [tools/dump_drivers.md](tools/dump_drivers.md);
+without them the app runs silent.
 
 The supplied Mac package contains DOS/4GW LE executables. This requires a DOS
 platform layer; the Windows loaders in the other ports cannot load it directly.
