@@ -1101,6 +1101,7 @@ void tp_host_mouse_delta(double dx, double dy, uint32_t buttons) {
     int ix = (int)acc_x, iy = (int)acc_y; acc_x -= ix; acc_y -= iy;
     push_mouse(clampi(bx + ix, mouse.rx0, mouse.rx1), clampi(by + iy, mouse.ry0, mouse.ry1), buttons);
 }
+void tp_host_mouse_pos(int *x, int *y) { *x = mouse.x; *y = mouse.y; }   /* the driver's 640x400 space */
 void tp_host_quit(void) { quit_requested = 1; }
 void tp_host_set_realtime(void) { deterministic = 0; timer_next = rt_start = now_s(); gov_t0 = 0; }
 

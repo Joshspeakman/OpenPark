@@ -129,9 +129,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     NSRect r = [self screenRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
-    /* Zoomed, the game's cursor is drawn only in the panel; the Mac's points in the park. */
-    BOOL park = _zoomed && fy * 200 < TP_VIEW_WORLD_ROWS;
-    [self setCursorHidden:inside && !park && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
+    /* Zoomed, the view draws the game's cursor at the pointer (view.c), as the game does at 1x. */
+    [self setCursorHidden:inside && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     tp_view_mouse(fx, fy, _buttons);
