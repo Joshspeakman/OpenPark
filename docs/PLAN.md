@@ -148,6 +148,17 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Done so far
 
+- 2026-10-16 late (Claude Code): the user said the launcher and icon looked bad.
+  Decision: restyle both to the other ports' shared look instead of the busy
+  park backdrop. The launch window now follows Freedom Force/Brutal Half-Life
+  (banner with the title screen's logo box scaled in whole steps, faint
+  big-wheel motif, gold labels, pop-up menu fields, outlined group buttons,
+  Quit/Play, build line). The icon is made by `tools/tp_icon.m` (geometry and
+  Nightly band from Freedom Force's `ff_icon.m`): GOG's park planet without
+  its ring on a sky tile, fed to iconutil from 1024 px instead of a 256 px
+  upscale. The 16 s demo-park render is gone from the install. Checked by
+  rendering every launcher page and the icon at 1024/128/32 px.
+
 - 2026-10-16 evening (Claude Code): sound (HMI drivers compiled, SB16/MPU-401
   emulation, Core Audio), intro, launch window, save/load verified, DOS handle
   fix, lifter fixes, interrupt-entry oracle checks, soak. Reinstalled the app.
