@@ -30,6 +30,12 @@ DOSBox configuration). Control-click is the right mouse button. Sound needs
 the driver images described in [tools/dump_drivers.md](tools/dump_drivers.md);
 without them the app runs silent.
 
+The launch window and icon use Theme Park's store art (key art, logo, box art),
+downloaded once from GOG's public store API into `~/Games/ThemeParkNative/art`
+for this Mac only; it is never part of this repository. `TP_NO_DOWNLOADS=1`
+skips the download, and the app then uses the title screen and GOG's icon from
+the package.
+
 The supplied Mac package contains DOS/4GW LE executables. This requires a DOS
 platform layer; the Windows loaders in the other ports cannot load it directly.
 See [the plan and findings](docs/PLAN.md) and [reference provenance](docs/PROVENANCE.md).

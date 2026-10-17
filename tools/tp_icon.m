@@ -1,13 +1,14 @@
-// tp_icon <gog .ico or png> <out.png> [--nightly]: the app icon, made at install time (tools/build_app.sh) from the
-// park planet on GOG's icon in the player's own package, without GOG's cyan ring, on a sky tile in macOS icon
-// proportions (an 824 tile in 1024, corner radius 185), with the band of the other ports' Nightly apps when asked.
+// tp_icon <art> <out.png> [--nightly] [--box]: the app icon, made at install time (tools/build_app.sh) from the park
+// planet: on GOG's box art (--box, downloaded from GOG's store at install time, the sharper one) or on GOG's icon in
+// the player's own package (without its cyan ring), on a sky tile in macOS icon proportions (an 824 tile in 1024,
+// corner radius 185), with the band of the other ports' Nightly apps when asked.
 // Provenance: tile geometry, shading and the Nightly band follow ~/Projects/freedom-force-macos/recomp/tools/ff_icon.m
 // (same author, read-only reference) so the Dock matches the other ports. Build: clang -fobjc-arc -framework AppKit.
 #import <AppKit/AppKit.h>
 
 static NSColor *rgb(int r, int g, int b) { return [NSColor colorWithSRGBRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:1]; }
 
-/* The planet: GOG's 256-pixel icon with everything outside a soft circle cleared. */
+/* The planet: everything outside a soft circle (image pixels, top-down) cleared. */
 static NSImage *planet(NSImage *ico, CGFloat cx, CGFloat cy, CGFloat r0, CGFloat r1)
 {
     CGImageRef c = [ico CGImageForProposedRect:NULL context:nil hints:nil]; if (!c) return nil;
@@ -15,7 +16,7 @@ static NSImage *planet(NSImage *ico, CGFloat cx, CGFloat cy, CGFloat r0, CGFloat
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef g = CGBitmapContextCreate(px, w, h, 8, w * 4, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
     CGContextDrawImage(g, CGRectMake(0, 0, w, h), c);
-    CGFloat k = w / 256.0;
+    CGFloat k = 1;
     for (size_t y = 0; y < h; y++) for (size_t x = 0; x < w; x++) {   /* rows run top-down in the buffer */
         CGFloat d = hypot((x + 0.5) / k - cx, (y + 0.5) / k - cy), a = d <= r0 ? 1 : d >= r1 ? 0 : (r1 - d) / (r1 - r0);
         for (int i = 0; i < 4; i++) px[(y * w + x) * 4 + i] = (uint8_t)lround(px[(y * w + x) * 4 + i] * a);
@@ -29,11 +30,17 @@ static NSImage *planet(NSImage *ico, CGFloat cx, CGFloat cy, CGFloat r0, CGFloat
 int main(int argc, char **argv)
 {
     @autoreleasepool {
-        if (argc < 3) { fprintf(stderr, "usage: tp_icon <gog icon> <out.png> [--nightly]\n"); return 2; }
-        BOOL nightly = argc > 3 && !strcmp(argv[3], "--nightly");
+        if (argc < 3) { fprintf(stderr, "usage: tp_icon <art> <out.png> [--nightly] [--box]\n"); return 2; }
+        BOOL nightly = NO, box = NO;
+        for (int k = 3; k < argc; k++) { if (!strcmp(argv[k], "--nightly")) nightly = YES; if (!strcmp(argv[k], "--box")) box = YES; }
         NSImage *ico = [[NSImage alloc] initWithContentsOfFile:@(argv[1])];
         if (ico.size.width < 64) { fprintf(stderr, "tp_icon: no icon in %s\n", argv[1]); return 1; }
-        NSImage *globe = planet(ico, 128, 125, 82, 91);
+        CGImageRef ci = [ico CGImageForProposedRect:NULL context:nil hints:nil]; if (!ci) return 1;
+        CGFloat iw = CGImageGetWidth(ci), ih = CGImageGetHeight(ci), u = box ? iw / 342 : iw / 256;
+        /* the planet's centre and radius: on the 342 x 482 box art, or on the 256-pixel icon */
+        CGFloat cx = (box ? 171 : 128) * u, cy = (box ? 284 : 125) * u, r0 = (box ? 150 : 82) * u, r1 = (box ? 161 : 91) * u;
+        if (box && ih < 400 * u) return 1;
+        NSImage *globe = planet(ico, cx, cy, r0, r1);
         if (!globe) return 1;
         const CGFloat S = 1024;
         NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)S pixelsHigh:(NSInteger)S bitsPerSample:8 samplesPerPixel:4
@@ -52,7 +59,7 @@ int main(int argc, char **argv)
         CGFloat floor = nightly ? 293 : 100, room = 924 - floor;               /* the planet sits above the band */
         CGFloat d = MIN(room * 0.96, 680);
         NSRect to = NSMakeRect(512 - d / 2, floor + (room - d) / 2 - (nightly ? 6 : 0), d, d);
-        NSRect from = NSMakeRect(128 - 92, 256 - 125 - 92, 184, 184);           /* AppKit images run bottom-up */
+        NSRect from = NSMakeRect(cx - r1, ih - cy - r1, 2 * r1, 2 * r1);       /* AppKit images run bottom-up */
         NSShadow *s = [NSShadow new]; s.shadowColor = [NSColor colorWithWhite:0 alpha:0.35]; s.shadowOffset = NSMakeSize(0, -12); s.shadowBlurRadius = 28;
         [NSGraphicsContext saveGraphicsState]; [s set];
         [globe drawInRect:to fromRect:from operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:NO hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];

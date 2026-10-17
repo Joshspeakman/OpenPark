@@ -148,6 +148,19 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 
 ## Done so far
 
+- 2026-10-16 night (Claude Code): the user asked for the game's artwork from
+  ScreenScraper or Steam and a launcher like Dungeon Siege's. Theme Park is not
+  on Steam, and ScreenScraper's API needs developer credentials, so the art
+  comes from GOG's public store API (the store this copy is from), downloaded at
+  install time into `~/Games/ThemeParkNative/art` (key art, logo, box art; not
+  committed). The launch window now follows Dungeon Siege's layout: key art
+  banner with the logo and "Native Edition for macOS", a framed box of main
+  choices with a line under each value, big group buttons with summaries, a
+  group as a panel over the window, Quit/Play. Dungeon Siege's stone and wood
+  become the title screen's grass and fairground-bulb signs. The icon uses
+  the box art's planet (sharper than the 256 px .ico). Checked by rendering
+  every page and the icon; clicks were not made by a person.
+
 - 2026-10-16 late (Claude Code): the user said the launcher and icon looked bad.
   Decision: restyle both to the other ports' shared look instead of the busy
   park backdrop. The launch window now follows Freedom Force/Brutal Half-Life
