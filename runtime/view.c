@@ -185,9 +185,25 @@ static void native_check(int cx, int cy, int rows, const uint8_t *before) {
 typedef struct { int kind, a, b, c; uint32_t d; int e; } LogE;
 static LogE glog[20000], nlog[20000]; static int glog_n, nlog_n, logging;
 static void addlog(LogE *l, int *n, int kind, int a, int b, int c, uint32_t d, int e) { if (*n < 20000) l[(*n)++] = (LogE){kind, a, b, c, d, e}; }
+/* Pixel check of the native things layer: the screen as the things loop starts (0x11be5a)
+ * and ends (0x11c01a), and the clip window it draws in. */
+static uint8_t snap0[MAX_SCREEN + 65536], snap1[MAX_SCREEN + 65536]; static size_t snap_n; static int snapped;
+typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
+void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
+static NDTarget snap_t;
 void tp_view_nested_hook(void) {
     if (!logging) return;
     extern uint32_t tp_get(unsigned); uint32_t pc = tp_get(9), sp = tp_get(4);
+    if (pc == 0x11be5au || pc == 0x11c01au) {
+        size_t n = (size_t)r32(DISP_PITCH) * (size_t)SH; if (n > sizeof snap0) n = sizeof snap0;
+        memcpy(pc == 0x11be5au ? snap0 : snap1, M + r32(DISP_BUF), n); snap_n = n;
+        if (pc == 0x11be5au) {
+            snap_t = (NDTarget){NULL, n, (long)r32(0x1de5e0) * (long)r32(DISP_PITCH) + (long)r32(0x1de5d0), (long)r32(DISP_PITCH),
+                                (int)r32(0x1de5c8), (int)r32(0x1de5f0), (int)r32(0x1de5ec), M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0};
+            snapped = 1;
+        } else if (snapped == 1) snapped = 2;
+        return;
+    }
     if (pc == 0x11c22au) addlog(glog, &glog_n, 1, r16(sp + 4), (uint16_t)r16(sp + 8), (uint16_t)r16(sp + 12), 0, 0);
     else if (pc == 0x11c010u) addlog(glog, &glog_n, 3, 0, 0, 0, 0, 0);
     else if (pc == 0x180e88u || pc == 0x180f34u) {        /* the small font writes straight to the screen */
@@ -207,18 +223,18 @@ void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, void (*lg)
 static void things_check(int cx, int cy, int rows) {
     static long cells, compared, bad, missing_cls[0x400];
     /* walk both logs cell by cell */
-    int gi = 0, ni = 0;
+    int gi = 0, ni = 0, all_native = 1;
     while (gi < glog_n && glog[gi].kind != 1) gi++;           /* the landscape's blits come first */
     while (gi < glog_n && ni < nlog_n) {
-        if (glog[gi].kind != 1 || nlog[ni].kind != 1) { bad++; break; }
+        if (glog[gi].kind != 1 || nlog[ni].kind != 1) { bad++; all_native = 0; break; }
         int ok_cell = glog[gi].a == nlog[ni].a && glog[gi].b == nlog[ni].b && glog[gi].c == nlog[ni].c;
         int g1 = ++gi, n1 = ++ni;
         while (gi < glog_n && glog[gi].kind != 3) gi++;
         while (ni < nlog_n && nlog[ni].kind != 3) ni++;
         int miss = ni < nlog_n ? nlog[ni].a : 0;
         cells++;
-        if (!ok_cell) { bad++; if (bad < 5) fprintf(stderr, "native things: cell order differs (game %d at %d,%d)\n", glog[g1 - 1].a, glog[g1 - 1].b, glog[g1 - 1].c); }
-        else if (miss) missing_cls[miss & 0x3ff]++;
+        if (!ok_cell) { bad++; all_native = 0; if (bad < 5) fprintf(stderr, "native things: cell order differs (game %d at %d,%d)\n", glog[g1 - 1].a, glog[g1 - 1].b, glog[g1 - 1].c); }
+        else if (miss) { missing_cls[miss & 0x3ff]++; all_native = 0; }
         else {
             compared++;
             int same = gi - g1 == ni - n1;
@@ -227,7 +243,7 @@ static void things_check(int cx, int cy, int rows) {
                 same = a->kind == b->kind && a->a == b->a && a->b == b->b && a->c == b->c && a->d == b->d && (a->e & 0xff) == (b->e & 0xff);
             }
             if (!same) {
-                bad++; if (bad < 8) fprintf(stderr, "native things: cell (thing %d) draws differ: game %d calls, native %d\n", glog[g1 - 1].a, gi - g1, ni - n1);
+                bad++; all_native = 0; if (bad < 8) fprintf(stderr, "native things: cell (thing %d) draws differ: game %d calls, native %d\n", glog[g1 - 1].a, gi - g1, ni - n1);
                 if (bad == 1 && getenv("TP_NATIVE_THINGS_DUMP"))
                     for (int k = 0; k < gi - g1 || k < ni - n1; k++) {
                         LogE z = {0}, *a = k < gi - g1 ? &glog[g1 + k] : &z, *b = k < ni - n1 ? &nlog[n1 + k] : &z;
@@ -238,8 +254,34 @@ static void things_check(int cx, int cy, int rows) {
         }
         gi++; ni++;
     }
+    if (all_native && snapped == 2) {                     /* draw the native calls over the first snapshot */
+        static uint8_t work[sizeof snap0]; static long ppasses, pbad, pdiff, punsup, pblits;
+        memcpy(work, snap0, snap_n);
+        NDTarget t = snap_t; t.buf = work; t.size = snap_n;
+        int colour = 0;
+        for (int k = 0; k < nlog_n; k++) {
+            if (nlog[k].kind == 5) { colour = nlog[k].c; continue; }
+            if (nlog[k].kind == 2) {
+                static long nb; nb++; pblits++;
+                if (getenv("TP_NATIVE_BREAK") && nb % 50 == 0) continue;   /* (a self-test of the check) */
+                tp_native_draw_sprite(&t, M + nlog[k].d, nlog[k].c & 0xff, nlog[k].c >> 8, nlog[k].a, nlog[k].b, nlog[k].e, colour);
+                colour = 0;
+            }
+        }
+        long diff = 0, first = -1;
+        for (size_t k = 0; k < snap_n; k++) if (work[k] != snap1[k]) { if (first < 0) first = (long)k; diff++; }
+        ppasses++; punsup += t.unsupported;
+        if (diff) { pbad++; pdiff += diff; if (pbad < 6) fprintf(stderr, "native pixels: pass differs in %ld bytes, first at %ld,%ld\n", diff, first % t.pitch, first / t.pitch); }
+        if (ppasses % 200 == 0 || ppasses == 10)
+            fprintf(stderr, "native pixels: %ld fully native passes drawn (%ld blits), %ld differ (%ld bytes), %ld unsupported blits\n", ppasses, pblits, pbad, pdiff, punsup);
+    }
     for (; gi < glog_n; gi++) if (glog[gi].kind == 1) { bad++; if (bad < 8) fprintf(stderr, "native things: game has an extra cell (thing %d)\n", glog[gi].a); }
     for (; ni < nlog_n; ni++) if (nlog[ni].kind == 1) { bad++; if (bad < 8) fprintf(stderr, "native things: native has an extra cell (thing %d)\n", nlog[ni].a); }
+    if (getenv("TP_NATIVE_FLAGS")) {                      /* development: which blitter flags the things use */
+        static long hist[0x10000]; static long hp;
+        int first = 0; for (int k = 0; k < glog_n; k++) { if (glog[k].kind == 1) first = 1; if (first && glog[k].kind == 2) hist[glog[k].e & 0xffff]++; }
+        if (++hp % 500 == 0) { fprintf(stderr, "flags:"); for (int k = 0; k < 0x10000; k++) if (hist[k]) fprintf(stderr, " %#x x%ld", k, hist[k]); fprintf(stderr, "\n"); }
+    }
     static long passes; if (++passes % 100 == 0 || passes == 10) {
         fprintf(stderr, "native things: %ld passes, %ld cells, %ld compared, %ld differ; not native yet:", passes, cells, compared, bad);
         for (int k = 0; k < 0x400; k++) if (missing_cls[k]) fprintf(stderr, " %s%#x x%ld", k < 0x200 ? "class " : "", k, missing_cls[k]);
@@ -256,6 +298,7 @@ static int pass(int cx, int cy) {
         memcpy(keep_hooks, tp_hook_pcs, sizeof keep_hooks);
         tp_hook_pcs[5] = 0x11c22au; tp_hook_pcs[6] = 0x11c010u; tp_hook_pcs[7] = 0x15ed21u;
         tp_hook_pcs[3] = 0x180e88u; tp_hook_pcs[4] = 0x180f34u; tp_hook_pcs[2] = 0x111bd5u;
+        tp_hook_pcs[1] = 0x11be5au; tp_hook_pcs[0] = 0x11c01au; snapped = 0;
         tp_hooks_changed();                               /* (slots 2..4 are not reached inside render_park) */
         glog_n = 0; logging = 1; logged = 1;
     }
