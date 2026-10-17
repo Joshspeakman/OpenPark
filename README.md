@@ -26,7 +26,10 @@ Game files are copied from the verified extraction to
 files go to `~/Games/ThemeParkNative/saves`; the log is
 `~/Games/ThemeParkNative/theme-park.log`. `TP_CYCLES` sets the emulated CPU
 speed in thousands of instructions per second (default 10000, as in GOG's
-DOSBox configuration). Control-click is the right mouse button. Sound needs
+DOSBox configuration). Control-click is the right mouse button. Zoom the park
+with a pinch or ⌘-scroll (⌘= / ⌘- / ⌘0 in the View menu), move around with
+scroll or the arrow keys while zoomed; R in the park switches the game to its
+640x480 mode (runtime/view.c, docs/PLAN.md "Engine rebuild"). Sound needs
 the driver images described in [tools/dump_drivers.md](tools/dump_drivers.md);
 without them the app runs silent.
 
