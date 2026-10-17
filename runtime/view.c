@@ -8,8 +8,9 @@
  *
  * Per frame, at three points of the game's main loop (host hooks, verify.c):
  *   FRAME_RENDER  before the game renders the park: passes for the visible area
- *   AFTER_RENDER  after it: the real frame's park area into the canvas (it has
- *                 the cursor-dependent parts, such as a building being placed)
+ *   AFTER_RENDER  after it and the park-anchored extras the game draws next
+ *                 (0x14de1a: the tile preview of the tool under the cursor):
+ *                 the real frame's park area into the canvas
  *   PRESENT       the back buffer goes to the screen: what differs from the
  *                 park area is interface, kept as an overlay; publish
  * Pointer events in the park are mapped back by moving the game's camera so the
@@ -19,7 +20,9 @@
  * how they were found):
  *   0x11b837  render_park(cam_x, cam_y, rows): landscape into its cache when
  *             dirty, the cache into the back buffer, then everything on it
- *   0x113b9a  the game's per-frame call of render_park; 0x113beb its return
+ *   0x113b9a  the game's per-frame call of render_park, from 0x111e4e, which
+ *             then calls 0x14de1a (park-anchored extras) and returns to
+ *             0x111e90, or skips it and goes on at 0x111e98
  *   0x180210  the copy of the back buffer to the screen (320x200); it draws
  *             the game's own cursor into the back buffer first
  *   0x1d667a  camera x, 0x1d6666 camera y (int16; the game keeps x 4..51,
@@ -43,13 +46,21 @@ uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
 int tp_host_png_rgba(const char *path, const uint32_t *px, int w, int h);
 void tp_host_mouse(double fx, double fy, uint32_t buttons);
-extern uint32_t tp_hook_pcs[4];
+void tp_host_mouse_pos(int *x, int *y);
+extern uint32_t tp_hook_pcs[8];
+void tp_hooks_changed(void);
 extern int tp_hook_which;
 extern uint64_t tp_insns, tp_rep;
 
 #define RENDER_PARK  0x11b837u
 #define FRAME_RENDER 0x113b9au
-#define AFTER_RENDER 0x113bebu
+#define BEFORE_EXTRAS 0x111e88u
+#define AFTER_RENDER 0x111e90u
+#define AFTER_SKIP   0x111e98u
+/* The extras also draw the screen's furniture: the date (top left) and the
+ * advisor buttons (top right). Those rectangles of the park are taken before
+ * the extras, so they stay interface. */
+static const int hud[][4] = {{0, 0, 64, 12}, {248, 0, 320, 16}};
 #define PRESENT      0x180210u
 #define CAM_X        0x1d667au
 #define CAM_Y        0x1d6666u
@@ -104,10 +115,15 @@ static uint8_t pub_canvas[CW * CH];
 static uint16_t pub_overlay[SW * WORLD_H];        /* 0xffff: no interface there */
 static uint32_t pub_pal[256];
 static double pub_time;
+#define CUR 64                                    /* the game's cursor, cut out of its last frame */
+static uint16_t pub_cursor[CUR * CUR]; static int pub_cur_x, pub_cur_y, pub_cur_ok;   /* offset from the hotspot */
+static double ptr_fx = -1, ptr_fy = -1;           /* the app's pointer (screen 0..1) */
 static int pub_cx, pub_cy;
 
 /* ---- emulation thread ---- */
 static uint8_t canvas[CW * CH], world_only[SW * WORLD_H];
+static uint8_t pre_cursor[SW * 200]; static int pre_ok, pre_hx, pre_hy;   /* back buffer before the cursor */
+static uint8_t pre_extras[SW * WORLD_H]; static int have_pre_extras;
 static int active, have_world, in_frame;
 static int16_t real_cx, real_cy;
 
@@ -219,6 +235,13 @@ static void hooks(int on) {
     tp_hook_pcs[0] = FRAME_RENDER;
     tp_hook_pcs[1] = on ? AFTER_RENDER : 0xffffffffu;
     tp_hook_pcs[2] = on ? PRESENT : 0xffffffffu;
+    tp_hook_pcs[3] = on ? AFTER_SKIP : 0xffffffffu;
+    tp_hook_pcs[4] = on ? BEFORE_EXTRAS : 0xffffffffu;
+    if (getenv("TP_VIEW_PROBE")) {   /* development: the back buffer after more steps of the frame */
+        static const uint32_t probe[] = {0x13e149, 0x14e75e, 0x14e6c7};
+        for (int k = 0; k < 3; k++) tp_hook_pcs[5 + k] = on ? probe[k] : 0xffffffffu;
+    }
+    tp_hooks_changed();
 }
 
 /* Called by the host when the game reaches a hooked address. */
@@ -227,7 +250,7 @@ void tp_view_hook(void) {
     pthread_mutex_lock(&lock);
     int w = want; double vx = vis_x, vy = vis_y, vw = SW / vis_z, vh = WORLD_H / vis_z;
     pthread_mutex_unlock(&lock);
-    static int dbg = -1; if (dbg < 0) dbg = getenv("TP_VIEW_DEBUG") ? 400 : 0;
+    static int dbg = -1; if (dbg < 0) dbg = getenv("TP_VIEW_DEBUG_HOOKS") ? 400 : 0;
     if (dbg > 0) { dbg--; fprintf(stderr, "view hook %d want %d active %d lowres %d\n", tp_hook_which, w, active, lowres()); }
     if (!lowres()) { if (active) { active = 0; hooks(0); } return; }
     switch (tp_hook_which) {
@@ -239,13 +262,47 @@ void tp_view_hook(void) {
         else if (active) render_visible(vx, vy, vw, vh, 0);
         in_frame = active;
         break;
-    case 1:                                               /* AFTER_RENDER: the real frame's park */
+    case 1: case 3:                                       /* AFTER_RENDER (or AFTER_SKIP): the real frame's park */
+        if (tp_hook_which == 3 && !in_frame) break;       /* already taken after the extras */
         in_frame = 0;
         if (!active) break;
         real_cx = r16(CAM_X); real_cy = r16(CAM_Y);
+        if (tp_hook_which == 1 && have_pre_extras) {      /* the furniture's rectangles from before the extras */
+            uint8_t *bb = M + r32(DISP_BUF);
+            static uint8_t keep[SW * WORLD_H]; memcpy(keep, bb, sizeof keep);
+            for (unsigned r = 0; r < sizeof hud / sizeof hud[0]; r++)
+                for (int y = hud[r][1]; y < hud[r][3]; y++)
+                    memcpy(bb + y * SW + hud[r][0], pre_extras + y * SW + hud[r][0], (size_t)(hud[r][2] - hud[r][0]));
+            memcpy(world_only, bb, sizeof world_only);
+            blit_to_canvas(real_cx, real_cy, 0, SW, 0, WORLD_H);
+            memcpy(bb, keep, sizeof keep);                /* the game's frame goes on as it drew it */
+            have_world = 1; have_pre_extras = 0;
+            break;
+        }
+        { static int dumped; if (getenv("TP_VIEW_DUMP") && ++dumped == 30) {   /* development: the back buffer at capture */
+            uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * 200);
+            const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * 200; i++) px[i] = pal[bb[i]];
+            tp_host_png_rgba(getenv("TP_VIEW_DUMP"), px, SW, 200); free(px);
+            fprintf(stderr, "view dump at hook %d\n", tp_hook_which); } }
+        if (getenv("TP_VIEW_DEBUG")) { int mx, my; tp_host_mouse_pos(&mx, &my); fprintf(stderr, "view frame: camera %d,%d mouse %d,%d\n", real_cx, real_cy, mx / 2, my / 2); }
         memcpy(world_only, M + r32(DISP_BUF), sizeof world_only);
         blit_to_canvas(real_cx, real_cy, 0, SW, 0, WORLD_H);
         have_world = 1;
+        break;
+    case 4:                                               /* BEFORE_EXTRAS */
+        if (active && in_frame) { memcpy(pre_extras, M + r32(DISP_BUF), sizeof pre_extras); have_pre_extras = 1; }
+        break;
+    case 5: case 6: case 7:                              /* development probes */
+        { static int n[8]; if (getenv("TP_VIEW_DUMP") && ++n[tp_hook_which] == 30) {
+            char path[512]; snprintf(path, sizeof path, "%s.%d.png", getenv("TP_VIEW_DUMP"), tp_hook_which);
+            uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * 200);
+            const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * 200; i++) px[i] = pal[bb[i]];
+            tp_host_png_rgba(path, px, SW, 200); free(px); } }
+        if (active && have_world) {
+            const uint8_t *bb = M + r32(DISP_BUF); int d = 0;
+            for (int i = 0; i < SW * WORLD_H; i++) d += bb[i] != world_only[i];
+            static int shown; if (shown++ < 60) fprintf(stderr, "view probe %d (%#x): %d park pixels changed\n", tp_hook_which, tp_hook_pcs[tp_hook_which], d);
+        }
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
         if (!active || !have_world) break;
@@ -253,6 +310,22 @@ void tp_view_hook(void) {
         pthread_mutex_lock(&lock);
         const uint8_t *bb = M + r32(DISP_BUF);
         for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
+        if (pre_ok) {   /* the screen now = the last back buffer + the cursor drawn at the last mouse position */
+            const uint8_t *vga = M + 0xa0000;
+            int x0 = SW, y0 = 200, x1 = -1, y1 = -1;
+            for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < 200 && y < pre_hy + CUR / 2; y++)
+                for (int x = pre_hx - CUR / 2 < 0 ? 0 : pre_hx - CUR / 2; x < SW && x < pre_hx + CUR / 2; x++)
+                    if (vga[y * SW + x] != pre_cursor[y * SW + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+            if (x1 >= 0) {
+                for (int i = 0; i < CUR * CUR; i++) pub_cursor[i] = 0xffff;
+                for (int y = y0; y <= y1 && y - y0 < CUR; y++)
+                    for (int x = x0; x <= x1 && x - x0 < CUR; x++)
+                        if (vga[y * SW + x] != pre_cursor[y * SW + x]) pub_cursor[(y - y0) * CUR + x - x0] = vga[y * SW + x];
+                pub_cur_x = x0 - pre_hx; pub_cur_y = y0 - pre_hy; pub_cur_ok = 1;
+            }
+        }
+        memcpy(pre_cursor, bb, sizeof pre_cursor); pre_ok = 1;
+        { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx / 2; pre_hy = my / 2; }
         memcpy(pub_canvas, canvas, sizeof canvas);
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now();
@@ -275,7 +348,17 @@ void tp_view_poll(void) {
     pthread_mutex_unlock(&lock);
     for (int i = 0; i < n; i++) {
         double fx = q[i].fx, fy = q[i].fy;
-        if (on && fy * 200 < WORLD_H) {
+        int ui = 0;                                       /* the game's interface under the pointer: straight through */
+        if (on) {
+            int ox = (int)(fx * SW), oy = (int)(fy * 200);
+            pthread_mutex_lock(&lock);
+            for (int dy = -2; dy <= 2 && !ui; dy++) for (int dx = -2; dx <= 2 && !ui; dx++) {
+                int x = ox + dx, y = oy + dy;
+                if (x >= 0 && x < SW && y >= 0 && y < WORLD_H && pub_overlay[y * SW + x] != 0xffff) ui = 1;
+            }
+            pthread_mutex_unlock(&lock);
+        }
+        if (on && !ui && fy * 200 < WORLD_H) {
             double px = vx + fx * SW / z, py = vy + fy * 200 / z;          /* canvas point */
             int cx = r16(CAM_X), cy = r16(CAM_Y);
             double sx = px - cam_ox(cx, cy), sy = py - cam_oy(cy);
@@ -289,6 +372,7 @@ void tp_view_poll(void) {
             }
             if (sx < 0) sx = 0; if (sx > SW - 1) sx = SW - 1;
             if (sy < 0) sy = 0; if (sy > WORLD_H - 1) sy = WORLD_H - 1;
+            if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view poll: canvas %.0f,%.0f camera %d,%d -> screen %.0f,%.0f\n", px, py, r16(CAM_X), r16(CAM_Y), sx, sy);
             tp_host_mouse(sx / SW, sy / 200, q[i].buttons);
         } else tp_host_mouse(fx, fy, q[i].buttons);
     }
@@ -300,7 +384,7 @@ void tp_view_poll(void) {
 static int enabled;
 void tp_view_enable(int main_game) {
     pthread_mutex_lock(&lock); enabled = main_game; if (!enabled) want = 0; pthread_mutex_unlock(&lock);
-    if (!main_game) for (int h = 0; h < 4; h++) tp_hook_pcs[h] = 0xffffffffu;
+    if (!main_game) { for (int h = 0; h < 8; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
     active = 0; have_world = 0; in_frame = 0;
 }
 int tp_view_set(int on, double cx, double cy, double zoom) {
@@ -313,7 +397,7 @@ int tp_view_set(int on, double cx, double cy, double zoom) {
         restore_cx = nx < GAME_CX0 ? GAME_CX0 : nx > GAME_CX1 ? GAME_CX1 : nx;
         restore = 1;
     }
-    if (on) tp_hook_pcs[0] = FRAME_RENDER;
+    if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); }
     want = on; vis_z = zoom > 0.05 ? zoom : 0.05;
     vis_x = cx - SW / 2.0 / vis_z; vis_y = cy - WORLD_H / 2.0 / vis_z;
     pthread_mutex_unlock(&lock);
@@ -333,7 +417,7 @@ int tp_view_live(void) {
 /* A pointer event, in the game screen's 0..1 coordinates (as tp_host_mouse). */
 void tp_view_mouse(double fx, double fy, uint32_t buttons) {
     pthread_mutex_lock(&lock);
-    int on = want;
+    int on = want; ptr_fx = fx; ptr_fy = fy;
     if (on && evn < 256) evq[evn++] = (Ev){fx, fy, buttons};
     pthread_mutex_unlock(&lock);
     if (!on) tp_host_mouse(fx, fy, buttons);
@@ -375,6 +459,17 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int s
                 r += c & 255; g += (c >> 8) & 255; b += (c >> 16) & 255;
             }
             o[x] = 0xff000000u | ((b / 4) << 16) | ((g / 4) << 8) | (r / 4);
+        }
+    }
+    /* The game's cursor at the pointer, at the screen's scale (in the panel the frame has it already). */
+    if (pub_cur_ok && ptr_fy >= 0 && ptr_fy * 200 < WORLD_H) {
+        double k = (double)ow / SW;
+        int hx = (int)(ptr_fx * ow), hy = (int)(ptr_fy * oh);
+        for (int y = 0; y < CUR; y++) for (int x = 0; x < CUR; x++) {
+            uint16_t u = pub_cursor[y * CUR + x]; if (u == 0xffff) continue;
+            int bx = hx + (int)((pub_cur_x + x) * k), by = hy + (int)((pub_cur_y + y) * (double)oh / 200);
+            for (int yy = by; yy < by + (int)ceil((double)oh / 200); yy++) for (int xx = bx; xx < bx + (int)ceil(k); xx++)
+                if (xx >= 0 && yy >= 0 && xx < ow && yy < oh * WORLD_H / 200) out[(size_t)yy * ow + xx] = pub_pal[u];
         }
     }
     pthread_mutex_unlock(&lock);
