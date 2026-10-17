@@ -383,6 +383,16 @@ own per frame (TP_NATIVE_PASS=2 and the draw-call checks keep the game's
 sequence). TP_VIEW_SEAMS (neighbouring passes compared where both are
 complete): 0 differences, test park and demo park.
 
+Guest-free test (the player's request: crowds hid problems from the screen-capture
+counter): a copy of the test park with the gates closed until it was empty
+(work/playtest/data-empty), paused, full screen, slow real-pointer circles at
+zoom 1, 0.6, 0.4 and 0.25, screen captured: 0 popping blocks. It found one more
+flash: the game presents up to 2 frames without drawing the park in normal play
+(after a camera move), and the menu rule above switched to the game's screen
+after 2, so for a frame the window showed the game's own 4:3 screen. Now the
+switch waits 150 ms without the park (still long before anyone can click).
+Unpaused, the only change flagged was a ride sign scrolling its name.
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what
