@@ -125,8 +125,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _groups = @[@"Display", @"Sound", @"Controls", @"Files"];
         _display[0] = setting(@"Screen", @"StartFullScreen", @[@NO, @YES], @[@"Window", @"Full Screen"],
                               @[@"A window you can resize; ⌃⌘F switches", @"The whole display; ⌃⌘F switches"]);
-        _display[1] = setting(@"Pixels", @"SmoothPixels", @[@NO, @YES], @[@"Sharp", @"Smooth"],
-                              @[@"Square pixels, as the game drew them", @"Softened as they are scaled up"]);
+        _display[1] = setting(@"Pixels", @"SmoothPixels", @[@0, @1, @2], @[@"Sharp", @"Smooth", @"CRT"],
+                              @[@"Square pixels, as the game drew them", @"Softened as they are scaled up", @"Soft, with a 1994 monitor's scanlines"]);
         _display[2] = setting(@"Aspect", @"Stretch", @[@NO, @YES], @[@"4:3", @"Fill the Window"],
                               @[@"The shape a 1994 monitor gave it", @"Stretched to the window's shape"]);
         _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"],
@@ -394,11 +394,13 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSArray *rows = @[
         @[@"Click", @"Select, build, place"], @[@"Right- or Control-click", @"Cancel, rotate, close panels"],
         @[@"Pinch or ⌘-scroll", @"Zoom the park in and out"], @[@"⌘=  ⌘−  ⌘0", @"Zoom in, zoom out, actual size"],
-        @[@"Scroll or arrows", @"Move around when zoomed"], @[@"R in the park", @"The game's 640 × 480 mode, and back"],
+        @[@"Scroll, arrows, drag", @"Move the park view (middle- or Option-drag)"], @[@"Hold Tab", @"Fast forward"],
+        @[@"R in the park", @"The game's 640 × 480 mode, and back"], @[@"⌘E", @"Save a picture of the whole park"],
+        @[@"Game controller", @"Sticks move; A, B click; shoulders zoom"],
         @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘Q", @"Quit (save in the game first)"],
     ];
     for (NSUInteger i = 0; i < rows.count; i++) {
-        CGFloat y = p.origin.y + 90 + 41 * i;
+        CGFloat y = p.origin.y + 88 + 34 * i;
         label([rows[i][0] uppercaseString], heavy(16), gold(), NSMakeRect(p.origin.x + 50, y, 300, 26), NSTextAlignmentLeft, 1.5, YES);
         label(rows[i][1], plain(17), cream(), NSMakeRect(p.origin.x + 350, y, p.size.width - 390, 26), NSTextAlignmentLeft, 0.4, YES);
     }
