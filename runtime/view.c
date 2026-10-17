@@ -87,7 +87,7 @@ extern uint64_t tp_insns, tp_rep;
 
 /* Geometry of the screen mode the game is in: 320x200 (s = 1) or its
  * 640x480 SVGA mode (s = 2, VESA 101h). Camera steps and the art scale with s. */
-typedef struct { int s, sw, sh, wh, ux, uyx, uy, tx0, tx1, ty1, stx, sty, ox, oy, cw, ch; } Geo;
+typedef struct { int s, sw, sh, wh, ux, uyx, uy, tx0, tx1, ty1, stx, sty, ox, oy, cw, ch, ph, pt, pb, rt, rb; } Geo;
 static Geo G;                       /* the emulation thread's (tp_view_hook) */
 #define SW G.sw                     /* screen width */
 #define SH G.sh                     /* screen height */
@@ -98,6 +98,11 @@ static Geo G;                       /* the emulation thread's (tp_view_hook) */
 #define TX0 G.tx0                   /* the part of a pass trusted to be complete: */
 #define TX1 G.tx1                   /* objects of cells outside the pass are cut */
 #define TY1 G.ty1                   /* off near its edges, so passes overlap */
+#define PH G.ph                     /* a native pass's height: taller than the screen, so things below are drawn */
+#define PT G.pt                     /* its trusted rows: below what objects anchored above the pass would cover */
+#define PB G.pb                     /* (they are not drawn), above where things of rows below would be cut */
+#define RT G.rt                     /* the real frame's trusted rows (the game draws only its own rows) */
+#define RB G.rb
 #define OX G.ox
 #define OY G.oy
 #define CW G.cw
@@ -120,8 +125,19 @@ static Geo geo(int s) {
     Geo g; if (s != 2) s = 1;
     g.s = s; g.sw = 320 * s; g.sh = s == 1 ? 200 : 480; g.wh = s == 1 ? 178 : 436;
     g.ux = 24; g.uyx = 8; g.uy = 16;
-    g.stx = s == 1 ? 12 : 24; g.sty = s == 1 ? 7 : 20;
-    g.tx0 = 16; g.tx1 = g.tx0 + g.stx * g.ux; g.ty1 = g.sty * g.uy;
+    /* The trusted part of a pass (TP_VIEW_TRUST measures it: passes one camera step apart disagree up
+     * to ~45 px in from the sides, where objects of cells outside the view are cut, and from ~100 rows
+     * down, where tall objects of cells below the drawn rows are): 64 px in at the sides; rows below. */
+    g.stx = s == 1 ? 8 : 21;
+    g.tx0 = 64; g.tx1 = g.tx0 + g.stx * g.ux;
+    /* Vertically: the renderer draws an object from the cell at its back, so a ride whose cell is above a
+     * view's top row is not drawn at all though it hangs down into the view (measured: up to ~64 rows), and
+     * at the bottom things of rows beyond those drawn are missing. Native passes are drawn taller (more
+     * rows into a taller buffer); the game's own frame only has its screen. */
+    g.ph = g.wh + 192; g.pt = 80; g.pb = g.ph - 112;
+    g.sty = (g.pb - g.pt) / g.uy; g.pb = g.pt + g.sty * g.uy;
+    g.rt = 80; g.rb = g.wh - 72; if (g.rb < g.rt + 16) g.rb = g.rt + 16;
+    g.ty1 = g.rb;
     g.ox = -(g.ux * CXMIN + g.uyx * CYMIN); g.oy = -(g.uy * CYMIN);
     g.cw = g.ux * CXMAX + g.uyx * CYMAX + g.sw + g.ox; g.ch = g.uy * CYMAX + g.wh + g.oy;
     return g;
@@ -171,8 +187,8 @@ static uint8_t canvas[MAX_CANVAS], world_only[MAX_SCREEN];
 static uint8_t pre_cursor[MAX_SCREEN]; static int pre_ok, pre_hx, pre_hy;   /* back buffer before the cursor */
 static uint8_t pre_extras[MAX_SCREEN]; static int have_pre_extras;
 static uint8_t pre_tool[MAX_SCREEN];             /* the back buffer as the tool preview starts */
-static uint8_t pre_weather[MAX_SCREEN], weather[MAX_SCREEN]; static int weather_n;   /* what the weather drew (0: nothing) */
-static uint8_t pub_weather[MAX_SCREEN]; static int pub_weather_n;
+static uint8_t pre_weather[MAX_SCREEN], weather[MAX_SCREEN], weather_rep[MAX_SCREEN]; static int weather_n;   /* what the weather drew (0: nothing) */
+static uint8_t pub_weather[MAX_SCREEN], pub_weather_rep[MAX_SCREEN]; static int pub_weather_n;
 static volatile int tool_shown;                   /* the last frame had a tool preview */
 static int16_t fr_cx, fr_cy;                     /* the camera as the frame began */
 static long skipped_moved;                        /* frames left out: the camera moved while drawn */
@@ -334,7 +350,7 @@ static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx)
     if (kind == 4) { if (tp_native_text) tp_native_draw_small_text(&st->t, M, a, b, tp_native_text, c); else st->fail = 1; return; }
     if (kind == 3 && a) st->fail = 1;
 }
-static uint8_t np_cache[MAX_SCREEN + 65536], np_out[MAX_SCREEN + 65536];
+static uint8_t np_cache[640 * 720], np_out[640 * 720];
 static int native_pass(int cx, int cy, int rows) {
     static long why[4]; static int dbg = -1; if (dbg < 0) dbg = getenv("TP_VIEW_DEBUG") != NULL;
     if (dbg) { static double l; if (now() - l > 1) { l = now(); fprintf(stderr, "native pass bails: clip %ld frame_mode %ld sel %ld (sel %d kind %#x)\n", why[0], why[1], why[2],
@@ -343,11 +359,15 @@ static int native_pass(int cx, int cy, int rows) {
     if (r16(0x1d667c)) { why[1]++; return -1; }                                           /* (FRAME_MODE: scaled drawing) */
     uint16_t sel = (uint16_t)r16(0x1d6678);
     if (sel) { int k = M[r32(0x1d3b10) + (uint32_t)sel * 0xc8 + 0xc]; if (k == 0x2c || k == 0x2e) { why[2]++; return -1; } }   /* (0x164940) */
-    size_t n = (size_t)clipinfo.pitch * (size_t)SH; if (n > sizeof np_cache) return -1;
+    size_t n = (size_t)clipinfo.pitch * (size_t)SH, nt = (size_t)clipinfo.pitch * (size_t)PH;
+    if (nt > sizeof np_cache) return -1;
     memcpy(np_cache, M + r32(LAND_CACHE), n);             /* (the landscape leaves a few pixels at the map's edge as they were) */
-    if (tp_native_landscape(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, WORLD_H) != 0) return -1;
-    memcpy(np_out, np_cache, n);
-    NPState st = {{np_out, n, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, clipinfo.clip_h, clipinfo.clip_r,
+    memset(np_cache + n, 0, nt - n);
+    int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32;
+    int rows_t = (PH * (G.s == 1 ? 2 : 1) + th - 1) / th + 3; if (rows_t > rows) rows = rows_t;   /* (rows in 640-space units) */
+    if (tp_native_landscape(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, PH) != 0) return -1;
+    memcpy(np_out, np_cache, nt);
+    NPState st = {{np_out, nt, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, PH, clipinfo.clip_r,
                    M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0}, 0, 0};
     tp_native_things(M, cx, cy, rows, np_draw, &st);
     return st.fail || st.t.unsupported ? -1 : 0;
@@ -426,35 +446,28 @@ static void blit_to_canvas(int cx, int cy, int x0, int x1, int y0, int y1) {
 
 /* The real frame's complete part into the canvas, less the screen's furniture (the date, the
  * advisor buttons: interface, though the game draws them with the park at times). */
+/* The game's own frame is complete only in a thin band (RT..RB: rides anchored above its top row are not
+ * drawn, nor things of rows below its bottom), and its edges move with the camera, which follows the
+ * pointer: rides crossing them popped in and out. The native passes draw everything the frame has
+ * (people's thought bubbles too), so the park picture is passes only; the frame is still used for what
+ * the game draws over the park (interface, tool previews, weather). TP_VIEW_REAL=1: the band as before. */
 static void blit_real(int cx, int cy) {
-    int hr[4], y0 = 0;
-    for (int r = 0; hud_rect(r, hr); r++) if (hr[3] > y0) y0 = hr[3];
-    blit_to_canvas(cx, cy, TX0, TX1, y0, TY1);
-    for (int y = 0; y < y0; y++) {                        /* the rows beside the furniture */
-        int x = TX0;
-        while (x < TX1) {
-            int stop = TX1, skip_to = -1;
-            for (int r = 0; hud_rect(r, hr); r++) if (y >= hr[1] && y < hr[3]) {
-                if (x >= hr[0] && x < hr[2]) skip_to = hr[2] > skip_to ? hr[2] : skip_to;
-                else if (hr[0] > x && hr[0] < stop) stop = hr[0];
-            }
-            if (skip_to >= 0) { x = skip_to; continue; }
-            blit_to_canvas(cx, cy, x, stop, y, y + 1); x = stop;
-        }
-    }
+    static int on = -1; if (on < 0) on = getenv("TP_VIEW_REAL") != NULL;
+    if (!on) return;
+    blit_to_canvas(cx, cy, TX0, TX1, RT, RB);          /* (the furniture is above RT) */
 }
 
 /* The grid of passes covering the canvas. */
 typedef struct { int16_t cx, cy; int x0, y0, x1, y1; } Pass;
-static Pass grid[512]; static int ngrid, rr;
+static Pass grid[512]; static uint8_t drawn[512]; static int ngrid, rr;
 static void make_grid(void) {
-    ngrid = 0;
-    for (int cy = CYMIN, last = 0; !last; cy += STEP_Y) {
-        if (cy >= CYMAX) { cy = CYMAX; last = 1; }       /* the bottom row: the whole height */
+    ngrid = 0; memset(drawn, 0, sizeof drawn);
+    for (int cy = CYMIN - (PT + UY - 1) / UY; ; cy += STEP_Y) {
+        if (cam_oy(cy) + PT >= CH) break;
         for (int cx = (int)floor((double)(-UYX * cy - OX - TX0) / UX); ; cx += STEP_X) {
             int x0 = cam_ox(cx, cy) + TX0;
             if (x0 >= CW || ngrid == 512) break;
-            grid[ngrid++] = (Pass){(int16_t)cx, (int16_t)cy, x0, cam_oy(cy), x0 + (TX1 - TX0), cam_oy(cy) + (last ? WORLD_H : TY1)};
+            grid[ngrid++] = (Pass){(int16_t)cx, (int16_t)cy, x0, cam_oy(cy) + PT, x0 + (TX1 - TX0), cam_oy(cy) + PB};
         }
     }
 }
@@ -513,7 +526,7 @@ static void edge_compare(int cx, int cy) {
     if (!edge_fresh) return; edge_fresh = 0;
     static long rows[480], cols[640], frames; int bx = cam_ox(cx, cy), by = cam_oy(cy);
     long nd = 0;
-    for (int y = 0; y < TY1 && y < WORLD_H; y++) for (int x = TX0; x < TX1 && x < SW; x++) {   /* the trusted part */
+    for (int y = RT; y < RB && y < WORLD_H; y++) for (int x = TX0; x < TX1 && x < SW; x++) {   /* the trusted part */
         int X = bx + x, Y = by + y; if (X < 0 || Y < 0 || X >= CW || Y >= CH) continue;
         if (canvas[(size_t)Y * CW + X] != world_only[y * SW + x]) { rows[y]++; cols[x]++; nd++; }
     }
@@ -565,13 +578,18 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
      * its sides and bottom (an entrance's arch whose cell is below), so passes draw those parts. */
     int rx0 = cam_ox(rcx, rcy) + TX0, ry0 = cam_oy(rcy), rx1 = cam_ox(rcx, rcy) + TX1, ry1 = ry0 + TY1;
     int start = rr;
+    for (int k = 0; k < ngrid; k++) {                    /* newly visible passes never drawn: now, whatever the budget */
+        Pass *p = &grid[k];
+        if (drawn[k] || p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
+        if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
+        pass_src = NULL; drawn[k] = 1;
+    }
     for (int k = 0; k < ngrid; k++) {
         Pass *p = &grid[(start + k) % ngrid];
         if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
-        if (!all && !edge_check() && p->x0 >= rx0 && p->x1 <= rx1 && p->y0 >= ry0 && p->y1 <= ry1 && !under_furniture(p, rcx, rcy))
-            continue;                                     /* the real frame has it */
-        if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, 0, p->y1 - p->y0);
-        pass_src = NULL;                                  /* (other copies are of the real frame) */
+        (void)rx0; (void)rx1; (void)ry0; (void)ry1;      /* (passes cover the real view too: its frame is trusted only in a band) */
+        if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
+        pass_src = NULL; drawn[(start + k) % ngrid] = 1;  /* (other copies are of the real frame) */
         rr = (start + k + 1) % ngrid;
         if (now() - t0 > budget) break;
     }
@@ -594,7 +612,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
 static void verify_canvas(void) {
     static long frames, badf; static int dumps; frames++;
     int vx0 = (int)vis_x, vy0 = (int)vis_y, vx1 = vx0 + (int)((vis_lw > 0 ? vis_lw : SW) / vis_z), vy1 = vy0 + (int)(SH / vis_z);
-    int rcx = real_cx, rcy = real_cy, rx0 = cam_ox(rcx, rcy) + TX0, rx1 = cam_ox(rcx, rcy) + TX1, ry0 = cam_oy(rcy), ry1 = ry0 + TY1;
+    int rcx = real_cx, rcy = real_cy, rx0 = cam_ox(rcx, rcy) + TX0, rx1 = cam_ox(rcx, rcy) + TX1, ry0 = cam_oy(rcy) + RT, ry1 = cam_oy(rcy) + RB;
     int worst = 0, wk = -1; long sum = 0; static long total_sum;
     for (int k = 0; k < ngrid; k++) {
         Pass *p = &grid[k];
@@ -602,7 +620,7 @@ static void verify_canvas(void) {
         int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32;
         if (native_pass(p->cx, p->cy, ((G.s == 1 ? 400 : 480) + th0 - 1) / th0) != 0) continue;
         int bx = cam_ox(p->cx, p->cy), by = cam_oy(p->cy), n = 0;
-        for (int y = 0; y < p->y1 - p->y0; y++) for (int x = TX0; x < TX1; x++) {
+        for (int y = PT; y < PB; y++) for (int x = TX0; x < TX1; x++) {
             int X = bx + x, Y = by + y; if (X < 0 || Y < 0 || X >= CW || Y >= CH) continue;
             if (Y >= ry0 && Y < ry1 && X >= rx0 && X < rx1) continue;   /* the real frame's (hover, tools) */
             n += canvas[(size_t)Y * CW + X] != np_out[y * SW + x];
@@ -618,17 +636,57 @@ static void verify_canvas(void) {
         Pass *p = &grid[wk];
         int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32;
         native_pass(p->cx, p->cy, ((G.s == 1 ? 400 : 480) + th0 - 1) / th0);
-        int h = p->y1 - p->y0, bx = cam_ox(p->cx, p->cy), by = cam_oy(p->cy);
+        int h = PB - PT, bx = cam_ox(p->cx, p->cy), by = cam_oy(p->cy) + PT;
         uint32_t *px = malloc(4 * SW * h * 2);
         for (int y = 0; y < h; y++) for (int x = 0; x < SW; x++) {
             int X = bx + x, Y = by + y; uint8_t c = X >= 0 && Y >= 0 && X < CW && Y < CH ? canvas[(size_t)Y * CW + X] : 0;
-            px[y * SW + x] = pub_pal[c]; px[(h + y) * SW + x] = pub_pal[np_out[y * SW + x]];
+            px[y * SW + x] = pub_pal[c]; px[(h + y) * SW + x] = pub_pal[np_out[(PT + y) * SW + x]];
         }
         char path[600]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_VERIFY"), dumps++);
         tp_host_png_rgba(path, px, SW, h * 2); free(px);
         fprintf(stderr, "view verify: pass %d,%d off by %d px (dumped %s); real camera %d,%d, seen %d,%d, coherent %d\n",
                 p->cx, p->cy, worst, path, rcx, rcy, seen_cx, seen_cy, coherent);
     }
+}
+/* Development (TP_VIEW_TRUST): where are passes complete? Native passes one camera step apart (same
+ * state) must agree where both are trusted; disagreements by position in the pass say how wide the
+ * untrusted margins really are. */
+static void trust_check(void) {
+    static uint8_t a[640 * 720]; static long hx[640], hy[720], cmp;
+    int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32; int rows = ((G.s == 1 ? 400 : 480) + th0 - 1) / th0;
+    static const int st[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (int cy = GAME_CY0; cy <= GAME_CY1; cy += 3) for (int cx = GAME_CX0; cx <= GAME_CX1; cx += 3) {
+        if (native_pass(cx, cy, rows) != 0) continue;
+        memcpy(a, np_out, (size_t)SW * PH);
+        for (int k = 0; k < 4; k++) {
+            int dx = st[k][0], dy = st[k][1];
+            if (native_pass(cx + dx, cy + dy, rows) != 0) continue;
+            int ox = UX * dx + UYX * dy, oy = UY * dy;      /* b's screen point (x, y) is a's (x + ox, y + oy) */
+            int mid = 0;
+            for (int y = 0; y < PH; y++) for (int x = 0; x < SW; x++) {
+                int ax = x + ox, ay = y + oy; if (ax < 0 || ay < 0 || ax >= SW || ay >= PH) continue;
+                cmp++;
+                if (np_out[y * SW + x] != a[ay * SW + ax]) { hx[x]++; hy[y]++; hx[ax]++; hy[ay]++;
+                    if (x >= TX0 && x < TX1 && y >= PT && y < PB && ax >= TX0 && ax < TX1 && ay >= PT && ay < PB) mid++; }
+            }
+            static int dumps; if (mid > 200 && dumps < 3 && getenv("TP_VIEW_TRUST_DUMP")) {
+                uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * PH * 3);
+                for (int y = 0; y < PH; y++) for (int x = 0; x < SW; x++) {
+                    int ax = x + ox, ay = y + oy, in = ax >= 0 && ay >= 0 && ax < SW && ay < PH;
+                    uint8_t bv = np_out[y * SW + x], av = in ? a[ay * SW + ax] : 0;
+                    px[y * SW + x] = pal[av]; px[(PH + y) * SW + x] = pal[bv];
+                    px[(2 * PH + y) * SW + x] = in && av != bv && x >= TX0 && x < TX1 && y >= PT && y < PB && ax >= TX0 && ax < TX1 && ay >= PT && ay < PB ? 0xffff00ffu : (pal[bv] & 0xff3f3f3fu);
+                }
+                char path[600]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_TRUST_DUMP"), dumps++);
+                tp_host_png_rgba(path, px, SW, PH * 3); free(px);
+                fprintf(stderr, "view trust: %d differ in the trusted parts, cameras %d,%d and %d,%d: %s\n", mid, cx, cy, cx + dx, cy + dy, path);
+            }
+        }
+    }
+    fprintf(stderr, "view trust: %ld pixels compared; disagreements by x:", cmp);
+    for (int x = 0; x < SW; x += 4) { long n = hx[x] + hx[x + 1] + hx[x + 2] + hx[x + 3]; if (n) fprintf(stderr, " %d:%ld", x, n); }
+    fprintf(stderr, "\n  by y:"); for (int y = 0; y < PH; y += 4) { long n = 0; for (int k = 0; k < 4 && y + k < PH; k++) n += hy[y + k]; if (n) fprintf(stderr, " %d:%ld", y, n); }
+    fprintf(stderr, "\n");
 }
 static void hooks(int on) {
     tp_hook_pcs[0] = FRAME_RENDER;
@@ -671,6 +729,8 @@ void tp_view_hook(void) {
     case 0:                                               /* FRAME_RENDER */
         if (getenv("TP_VIEW_DEBUG")) { static double l; static int c; c++; if (now() - l > 1) { fprintf(stderr, "view: %d game frames/s\n", c); c = 0; l = now(); } }
         hires_step(sc);
+        { static int tc = -1; if (tc < 0) tc = getenv("TP_VIEW_TRUST") ? atoi(getenv("TP_VIEW_TRUST")) : 0;
+          static int nf; if (tc && active && ++nf == tc) trust_check(); }
         { static int force = -2; if (force == -2) force = getenv("TP_DEV_WEATHER") ? atoi(getenv("TP_DEV_WEATHER")) : -1;
           if (force >= 0) M[WEATHER_FLAGS] = (uint8_t)force; }   /* development: 1 rain, 2 particles, 4 storm */
         if (in_frame) break;                              /* an interrupt returned here: same frame */
@@ -790,9 +850,12 @@ void tp_view_hook(void) {
         tp_hook_pcs[tp_hook_which] = 0xffffffffu; tp_hooks_changed();
         if (active) {
             const uint8_t *bb = M + r32(DISP_BUF); int n = weather_n, rain_only = tp_hook_which == 9;
-            if (!n) memset(weather, 0, (size_t)SW * WORLD_H);
+            if (!n) { memset(weather, 0, (size_t)SW * WORLD_H); memset(weather_rep, 0, (size_t)SW * WORLD_H); }
             for (int i = 0; i < SW * WORLD_H; i++)
-                if (bb[i] != pre_weather[i] && (!rain_only || (bb[i] & 0xf8) == RAIN_COLOUR)) { weather[i] = bb[i]; n++; }
+                if (bb[i] != pre_weather[i]) {        /* rain and particles repeat beside the column; lightning does not */
+                    weather[i] = bb[i]; weather_rep[i] = !rain_only || (bb[i] & 0xf8) == RAIN_COLOUR; n++; world_only[i] = bb[i];
+                }
+            /* (into world_only too: the weather is not interface; the compositor lays its own layer over the view) */
             weather_n = n;
             if (getenv("TP_VIEW_DEBUG")) { static int k; if (k++ < 6) { int h[256] = {0}, tot = 0;
                 for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] != pre_weather[i]) { h[bb[i]]++; tot++; }
@@ -824,12 +887,16 @@ void tp_view_hook(void) {
             for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < SH && y < pre_hy + CUR / 2; y++)
                 for (int x = pre_hx - CUR / 2 < 0 ? 0 : pre_hx - CUR / 2; x < SW && x < pre_hx + CUR / 2; x++)
                     if (vga[y * SW + x] != pre_cursor[y * SW + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-            if (x1 >= 0) {
+            /* Only a pointer-sized change is the cursor (the game's are at most about 24 x 28): a bigger one has
+             * park changes in it too, which would be drawn at the pointer, unzoomed; then the last cursor stays. */
+            if (x1 >= 0 && x1 - x0 < 28 && y1 - y0 < 32) {
                 for (int i = 0; i < CUR * CUR; i++) pub_cursor[i] = 0xffff;
                 for (int y = y0; y <= y1 && y - y0 < CUR; y++)
                     for (int x = x0; x <= x1 && x - x0 < CUR; x++)
                         if (vga[y * SW + x] != pre_cursor[y * SW + x]) pub_cursor[(y - y0) * CUR + x - x0] = vga[y * SW + x];
                 pub_cur_x = x0 - pre_hx; pub_cur_y = y0 - pre_hy; pub_cur_ok = 1;
+                if (getenv("TP_VIEW_CURSOR")) { static int big; if (x1 - x0 > 24 || y1 - y0 > 28) { if (big++ < 20) fprintf(stderr, "view cursor: box %dx%d at %d,%d (pointer %d,%d)\n", x1 - x0 + 1, y1 - y0 + 1, x0, y0, pre_hx, pre_hy); }
+                    static long n; if (++n % 300 == 0) fprintf(stderr, "view cursor: %ld captures, %d too big\n", n, big); }
             }
         }
         memcpy(pre_cursor, bb, (size_t)SW * SH); pre_ok = 1;
@@ -869,8 +936,8 @@ void tp_view_hook(void) {
           }
           for (int i = 0; i < SW * WORLD_H; i++) if (hole[i]) pub_overlay[i] = bb[i]; }
         if (getenv("TP_VIEW_OVERLAY")) { static int k, dumped; k++;
-            int n = 0; for (int i = 0; i < SW * WORLD_H; i++) n += pub_overlay[i] != 0xffff;
-            if (n > 800 && dumped < 6 && k % 7 == 0) {       /* development: frames with much "interface" over the park */
+            int n = 0; for (int i = 16 * SW; i < SW * (WORLD_H - 50); i++) n += pub_overlay[i] != 0xffff;   /* (below the date, above the advisor) */
+            if (n > atoi(getenv("TP_VIEW_OVERLAY_MIN") ?: "800") && dumped < 6 && k % 7 == 0) {       /* development: frames with much "interface" over the park */
                 uint32_t *px = malloc(4 * SW * WORLD_H * 2);
                 for (int i = 0; i < SW * WORLD_H; i++) { px[i] = pub_pal[bb[i]]; px[SW * WORLD_H + i] = pub_overlay[i] != 0xffff ? pub_pal[pub_overlay[i]] : 0xff202020u; }
                 char path[600]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_OVERLAY"), dumped++);
@@ -880,7 +947,7 @@ void tp_view_hook(void) {
             for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] != 0xffff) { n++; int x = i % SW, y = i / SW; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             fprintf(stderr, "view overlay: %d px, %d,%d..%d,%d\n", n, x0, y0, x1, y1); } }
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
-        pub_weather_n = weather_n; if (weather_n) memcpy(pub_weather, weather, (size_t)SW * WORLD_H);
+        pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now();
@@ -1076,10 +1143,10 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
                 uint16_t u = pub_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pub_pal[u]; continue; }
             }
-            /* Beside the 4:3 column (widescreen): the weather the game drew in it, repeated. */
-            if (pub_weather_n && (ix < 0 || ix >= g.sw)) {
-                int wx = ((ix % g.sw) + g.sw) % g.sw, wy = iy % g.wh;
-                if (pub_weather[wy * g.sw + wx]) { o[x] = pub_pal[pub_weather[wy * g.sw + wx]]; continue; }
+            /* The weather the game drew (screen space): over the whole view, repeated beside the 4:3 column. */
+            if (pub_weather_n) {                                       /* (the panel and interface came first) */
+                int wx = ((ix % g.sw) + g.sw) % g.sw, wy = iy % g.wh, in_col = ix >= 0 && ix < g.sw && iy < g.wh, k = wy * g.sw + wx;
+                if (pub_weather[k] && (in_col || pub_weather_rep[k])) { o[x] = pub_pal[pub_weather[k]]; continue; }
             }
             double px = vx + lx / z;
             if (ss == 1 && !smooth) {
