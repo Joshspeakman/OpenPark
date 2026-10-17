@@ -375,6 +375,14 @@ being drawn, so the window kept showing the park and clicks went through the
 park mapping to the wrong place; now it switches to the game's screen from the
 second present without the park (a click on a menu's tick buys at once).
 
+Also: a thing drawn by two passes (a ride car across their seam) took its
+random choices (an overloaded ride's car jitter, 0x11d... classE; a show's
+bystanders) from the game's generator as it ran through each pass, so the two
+halves could differ; for display each thing now draws them from a seed of its
+own per frame (TP_NATIVE_PASS=2 and the draw-call checks keep the game's
+sequence). TP_VIEW_SEAMS (neighbouring passes compared where both are
+complete): 0 differences, test park and demo park.
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what

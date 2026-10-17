@@ -381,6 +381,8 @@ static int native_pass(int cx, int cy, int rows) {
     /* (only TX0..TX1 x PT..PB of a pass is used: the rest of its landscape is left out, ~3x faster) */
     double tq1 = now();
     memcpy(np_out, np_cache, nt);
+    { extern int tp_native_stable_rng; static int mode = -1; if (mode < 0) mode = getenv("TP_NATIVE_PASS") ? atoi(getenv("TP_NATIVE_PASS")) : 1;
+      tp_native_stable_rng = mode == 1 && !getenv("TP_NATIVE_THINGS"); }   /* (checks compare with the game: its sequence) */
     NPState st = {{np_out, nt, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, PH, clipinfo.clip_r,
                    M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0}, 0, 0};
     tp_native_things(M, cx, cy, rows, np_draw, &st);
@@ -711,6 +713,28 @@ static void trust_check(void) {
     fprintf(stderr, "\n  by y:"); for (int y = 0; y < PH; y += 4) { long n = 0; for (int k = 0; k < 4 && y + k < PH; k++) n += hy[y + k]; if (n) fprintf(stderr, " %d:%ld", y, n); }
     fprintf(stderr, "\n");
 }
+/* Development (TP_VIEW_SEAMS): a thing drawn by two passes must look the same in both. For neighbouring
+ * visible passes (same state, this frame), compare the overlap of their complete parts. */
+static void seam_check(void) {
+    static uint8_t a[640 * 720]; static long frames, bad, px;
+    int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32; int rows = ((G.s == 1 ? 400 : 480) + th0 - 1) / th0;
+    int cx = r16(CAM_X), cy = r16(CAM_Y), worst = 0;
+    static const int st[3][2] = {{1, 0}, {0, 1}, {1, 1}};
+    for (int k = 0; k < 3; k++) {
+        if (native_pass(cx, cy, rows) != 0) return;
+        memcpy(a, np_out, (size_t)SW * PH);
+        int dx = st[k][0], dy = st[k][1];
+        if (native_pass(cx + dx, cy + dy, rows) != 0) return;
+        int ox = UX * dx + UYX * dy, oy = UY * dy, n = 0;
+        for (int y = PT; y < PB; y++) for (int x = TX0; x < TX1; x++) {
+            int ax = x + ox, ay = y + oy; if (ax < TX0 || ax >= TX1 || ay < PT || ay >= PB) continue;
+            n += np_out[y * SW + x] != a[ay * SW + ax];
+        }
+        if (n > worst) worst = n;
+    }
+    frames++; px += worst; if (worst > 0) bad++;
+    if (frames % 120 == 0) fprintf(stderr, "view seams: %ld frames, %ld with a difference, %.1f px a frame\n", frames, bad, (double)px / frames);
+}
 static void hooks(int on) {
     tp_hook_pcs[0] = FRAME_RENDER;
     tp_hook_pcs[1] = on ? AFTER_RENDER : 0xffffffffu;
@@ -981,7 +1005,8 @@ void tp_view_hook(void) {
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1;
-        if (getenv("TP_VIEW_VERIFY")) verify_canvas();    /* development: the picture against fresh native passes */
+        if (getenv("TP_VIEW_VERIFY")) verify_canvas();
+        if (getenv("TP_VIEW_SEAMS")) seam_check();    /* development: the picture against fresh native passes */
         pthread_mutex_unlock(&lock);
         break;
     }
