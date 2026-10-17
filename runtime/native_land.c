@@ -157,6 +157,49 @@ static int next_frame(int f) { return (uint16_t)r16(r32(FRAMES) + (uint32_t)f * 
 static int tick_is(int mask) { return (M[0x1d3afc] & mask) == 0; }
 static int anim_77a4;                                   /* 0x1d77a4: one animation shared by class 8 sub-kind 0x3f */
 
+/* 0x11feb5: the cars of a ride on top of its stack (class 0x12 sub-kinds 0x13, 0x15): the frame's
+ * first element h above (x, y), then from there each car in the chain (word 0x7a) as the
+ * frame's other elements, the car frame (word 0x90 when the first car's byte 0x12 > 1) stepped
+ * on by the car's word 0x7c, each seat showing the car's rider (word 0x47) as class 0x0e does;
+ * kind 1 adds a part (deco 0x2dc). Unchecked sprite offsets are drawn as the game does. */
+static int train_draw(uint32_t t, int x, int y, int h) {
+    uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES), things = r32(THINGS), deco = r32(DECO_TABLE);
+    uint32_t fr = frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8, e0 = elems + (uint32_t)(uint16_t)r16(fr) * 10;
+    if (M[FRAME_MODE] & 8) return 0;                                  /* (the game draws nothing in scaled mode) */
+    log_blit(sprites + (uint16_t)r16(e0), (int16_t)(x + r16(e0 + 2)), (int16_t)(y + h + r16(e0 + 4)), (uint16_t)r16(e0 + 6));
+    y += h;
+    if (M[things + (uint32_t)(uint16_t)r16(t + 0x7a) * 0xc8 + 0x12] > 1) fr = frames + (uint32_t)(uint16_t)r16(t + 0x90) * 8;
+    int guard = 0;
+    for (uint32_t car = things + (uint32_t)(uint16_t)r16(t + 0x7a) * 0xc8; car > things; car = things + (uint32_t)(uint16_t)r16(car + 0x7a) * 0xc8) {
+        if (++guard > 256) return 0x413;
+        uint32_t f2 = fr;
+        for (int k = (uint16_t)r16(car + 0x7c); (uint16_t)k && r16(f2 + 6); k--) f2 = frames + (uint32_t)(uint16_t)r16(f2 + 6) * 8;
+        uint32_t e = elems + (uint32_t)(uint16_t)r16(elems + (uint32_t)(uint16_t)r16(f2) * 10 + 8) * 10;
+        for (int g = 0; e > elems && g < 256; e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, g++) {
+            int fl = (uint16_t)r16(e + 6);
+            if (fl & 0x80) {
+                uint32_t rider = things + (uint32_t)(uint16_t)r16(car + 0x47) * 0xc8;
+                if (rider <= things) continue;
+                if (M[rider + 0x59]) {
+                    for (int i = 0; i < 0x2f; i++) if (r16(0x1b9a78 + (uint32_t)i * 2) == r16(e)) {
+                        uint32_t ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[rider + 0x59] * 0x5e + (uint32_t)i * 2), os = sprites + (uint16_t)r16(e);
+                        int bx = (int16_t)x - (M[ns + 4] >> 1) + (M[os + 4] >> 1), by = y - M[ns + 5] + M[os + 5];
+                        log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+                        break;
+                    }
+                } else {
+                    uint32_t s = sprites + (uint16_t)r16(e);
+                    if (s > sprites) log_blit(s, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl);
+                }
+            } else log_blit(sprites + (uint16_t)r16(e), (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl);
+        }
+    }
+    if (r16(t + 0x16) == 1) {
+        uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)(uint16_t)r16(deco + 0x2dc) * 8) * 10;
+        log_blit(sprites + (uint16_t)r16(e), (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), (uint16_t)r16(e + 6));
+    }
+    return 0;
+}
 /* Class 0x12 (0x11f205): a base frame, a stack of repeated frames (count byte 0x79,
  * a step per level), then the animated top frame (word 10); kind word 0x16, sub-kind
  * byte 0x44, from the record table at 0x1b4399. Returns nonzero if a part is not native. */
@@ -178,7 +221,7 @@ static int class12(uint32_t t, int x, int y) {
         int n = (uint16_t)((sub == 0xc || sub == 0xf) ? M[t + 0x79] - 1 : M[t + 0x79]);
         int i = 0;
         for (; (uint16_t)i < (uint16_t)n && i < 4096; i++) frame_logged(f8, xx, (int16_t)(yy - (i * step) / div));
-        if (M[t + 0xc] == 0x13 || M[t + 0xc] == 0x15) return 0x212;          /* 0x11feb5: not native yet */
+        if (M[t + 0xc] == 0x13 || M[t + 0xc] == 0x15) return train_draw(t, xx, yy, (int16_t)-(((uint16_t)i + 1) * step / div));
         if (r16(t + 0xa)) {
             int f = (uint16_t)r16(t + 0xa); if (tick_is(3)) f = next_frame(f);
             frame_logged(f, xx, (int16_t)(yy - ((M[t + 0x79] + 1) * step) / div));
@@ -208,8 +251,8 @@ static uint32_t find_in_cell(uint32_t cell, int cls) {
 static int class2(uint32_t t, int x, int y) {
     int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8;
     uint32_t deco = r32(DECO_TABLE), frames = r32(FRAMES), map = r32(MAP_PTR), things = r32(THINGS);
-    static const uint8_t common[] = {0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x14, 0x1e, 0x20, 0x22, 0x28, 0x2a, 0x2c, 0x2e, 0x34,
-                                     0x38, 0x3a, 0x3c, 0x3e, 0x40, 0x42, 0x4a, 0x4c};
+    static const uint8_t common[] = {0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x14, 0x18, 0x1a, 0x1e, 0x20, 0x22, 0x28, 0x2a, 0x2c, 0x2e,
+                                     0x34, 0x38, 0x3a, 0x3c, 0x3e, 0x40, 0x42, 0x4a, 0x4c};   /* (0x08, 0x18, 0x1a play sounds first) */
     int is_common = 0;
     for (unsigned k = 0; k < sizeof common; k++) if (common[k] == sub) is_common = 1;
     if (sub == 0x10) {                                           /* 0x11cab7: an offset from a direction table, then common */
@@ -222,14 +265,37 @@ static int class2(uint32_t t, int x, int y) {
         if ((uint16_t)r16(0x1b44d9 + (uint32_t)M[cell + 2] * 4) != 0x40) return 0;
         is_common = 1;
     }
-    if (!is_common) {
-        static const uint8_t none[] = {0x75};                    /* (0x75 and unknown keys draw nothing) */
-        if (sub == none[0]) return 0;
-        int known = sub == 0x18 || sub == 0x1a || sub == 0x32 || sub == 0x36 || sub == 0x44 || sub == 0x46 || sub == 0x48 || sub == 0x4e;
-        return known ? 0x200 | sub : 0;
-    }
     int px = (int16_t)(x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
     int py = (int16_t)(y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
+    if (!is_common) {
+        if (sub == 0x36) {                                       /* 0x11cb51: the figure with its own sprites in the seats */
+            uint32_t elems = r32(ELEMENTS), sprites = r32(SPRITES);
+            int scaled = r16(FRAME_MODE) == 8;                   /* (then the game draws nothing here) */
+            for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8) * 10, g = 0; e > elems && g < 256;
+                 e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, g++) {
+                int fl = (uint16_t)r16(e + 6);
+                if (fl & 0x80) {
+                    for (int i = 0; i < 0x2f; i++) if (r16(0x1b9a78 + (uint32_t)i * 2) == r16(e)) {
+                        if (!scaled) {
+                            uint32_t ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[t + 0x59] * 0x5e + (uint32_t)i * 2), os = sprites + (uint16_t)r16(e);
+                            int bx = (int16_t)px - (M[ns + 4] >> 1) + (M[os + 4] >> 1), by = py - M[ns + 5] + M[os + 5];
+                            log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+                        }
+                        break;
+                    }
+                } else if (!scaled) log_blit(sprites + (uint16_t)r16(e), (int16_t)(px + r16(e + 2)), (int16_t)(py + r16(e + 4)), fl);
+            }
+            return 0;
+        }
+        if (sub == 0x32) {                                       /* 0x11d4c6: the figure raised by word 0x5f */
+            int h = (uint16_t)r16(t + 0x5f);
+            frame_logged((uint16_t)r16(t + 0xa), px, (int16_t)(py - ((M[SCREEN_MODE] & 8) ? h >> 1 : h)));
+            return 0;
+        }
+        if (sub == 0x44 || sub == 0x46 || sub == 0x48)           /* 0x11d5c5, 0x11d764: a scaled frame (0x167182): not native */
+            return r16(FRAME_MODE) == 8 ? 0 : 0x302;
+        return 0;                                                /* (0x4e plays a sound; 0x75 and unknown keys draw nothing) */
+    }
     if (sub == 0xc && find_in_cell(map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4), 0x1a)) py = (int16_t)(py - 8);
     if ((M[0x1b14cc] & 7) && (M[t + 5] & 0x80)) frame_logged((uint16_t)r16(deco + 0x46c), px, py);
     frame_logged((uint16_t)r16(t + 0xa), px, py);
@@ -445,6 +511,44 @@ static int class14(uint32_t t, int x, int y) {
     }
     return missing;
 }
+/* Class 0x0a (0x11ecd6), sub-kinds 2 and 4 (others draw nothing): placed like people, the frame
+ * (word 10) with its seats showing the rider (word 0x47) from table 0x1b9d68 (23 sprites per
+ * kind of visitor), word 0x5f a frame over it, and a mark (deco 0x49c) while the record's
+ * entry (byte 0x67 of 0x1d3c62 + word 0x16, into 0x1d3c04) has word 0 clear. */
+static int classA(uint32_t t, int x, int y) {
+    int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
+    if (sub != 2 && sub != 4) return 0;
+    uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES), things = r32(THINGS), deco = r32(DECO_TABLE);
+    int px = (int16_t)((int16_t)x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
+    int py = (int16_t)((int16_t)y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
+    uint32_t rec = 0x1d3c62 + (uint32_t)(uint16_t)r16(t + 0x16);
+    uint32_t rider = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
+    for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8) * 10, g = 0; e > elems && g < 256;
+         e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, g++) {
+        int fl = (uint16_t)r16(e + 6);
+        uint32_t os = sprites + (uint16_t)r16(e);
+        if (fl & 0x80) {
+            if (rider <= things) continue;
+            if (M[rider + 0x59]) {
+                for (int i = 0; i < 0x17; i++) if (r16(0x1b9d68 + (uint32_t)i * 2) == r16(e)) {
+                    if (r16(FRAME_MODE) != 8) {
+                        uint32_t ns = sprites + (uint16_t)r16(0x1b9d68 + (uint32_t)M[rider + 0x59] * 0x2e + (uint32_t)i * 2);
+                        int bx = (int16_t)px - (M[ns + 4] >> 1) + (M[os + 4] >> 1), by = py - M[ns + 5] + M[os + 5];
+                        log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+                    }
+                    break;
+                }
+            } else if (os > sprites) log_blit(os, (int16_t)(px + r16(e + 2)), (int16_t)(py + r16(e + 4)), fl);
+        } else {
+            if (r16(FRAME_MODE) == 8) { missing = 0x30a; continue; }   /* scaled (0x166dfa): not native */
+            log_blit(os, (int16_t)(px + r16(e + 2)), (int16_t)(py + r16(e + 4)), fl);
+        }
+    }
+    if (r16(t + 0x5f)) frame_logged((uint16_t)r16(t + 0x5f), px, py);
+    int c = (int8_t)M[rec + 0x67];
+    if (c != -1 && !r16((uint32_t)(0x1d3c04 + c * 0xe))) frame_logged((uint16_t)r16(deco + 0x49c), px, py);
+    return missing;
+}
 static int rem_7be8;                                    /* 0x1d7be8: the last bystander pose picked by a kind-8 ride */
 /* The ride renderer (0x169840): the ride's frame (word 10) with its seats filled. The rider
  * chain (word 0x47 links, at most 36) goes into 40 slots by the ride's kind (byte 0xb3 of the
@@ -636,6 +740,9 @@ static int cell_things(int idx, int x, int y) {
             if (m && !missing) missing = m;
         } else if (cls == 0x12) {
             int m = class12(t, x, y);
+            if (m && !missing) missing = m;
+        } else if (cls == 0xa) {
+            int m = classA(t, x, y);
             if (m && !missing) missing = m;
         } else if (cls == 4) {
             int m = class4(t, x, y);
