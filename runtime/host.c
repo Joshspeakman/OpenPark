@@ -343,6 +343,8 @@ static void queue_mouse(int x, int y, uint32_t buttons) {
 static void mouse_callback(void) {
     if (!pending_mouse) return;
     pending_mouse = 0;
+    if (getenv("TP_MOUSE_DEBUG")) fprintf(stderr, "mouse event %#x buttons %u at %d,%d mask %#x%s\n", pm_event, mouse.buttons, mouse.x, mouse.y, mouse.cb_mask,
+                                        !mouse.has_cb || !(pm_event & mouse.cb_mask) ? " DROPPED" : "");
     if (!mouse.has_cb || !(pm_event & mouse.cb_mask)) return;
     if (!has_base[mouse.cb_sel] || bases[mouse.cb_sel] != 0) stop("nonflat mouse callback selector");
     uint32_t saved[16] = {0xf010, G(CS), G(GS), G(FS), G(ES), G(DS), G(EDI), G(ESI), G(EBP), G(ESP), G(EBX), G(EDX),
