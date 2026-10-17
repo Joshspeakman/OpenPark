@@ -151,6 +151,12 @@ static void frame_logged(int f, int x, int y) {
         e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10;
     }
 }
+/* The renderer advances animations as it draws (frame word 6 = the next frame). The native
+ * renderer leaves the game's state alone and computes what the game would draw instead. */
+static int next_frame(int f) { return (uint16_t)r16(r32(FRAMES) + (uint32_t)f * 8 + 6); }
+static int tick_is(int mask) { return (M[0x1d3afc] & mask) == 0; }
+static int anim_77a4;                                   /* 0x1d77a4: one animation shared by class 8 sub-kind 0x3f */
+
 /* Class 0x12 (0x11f205): a base frame, a stack of repeated frames (count byte 0x79,
  * a step per level), then the animated top frame (word 10); kind word 0x16, sub-kind
  * byte 0x44, from the record table at 0x1b4399. Returns nonzero if a part is not native. */
@@ -173,7 +179,10 @@ static int class12(uint32_t t, int x, int y) {
         int i = 0;
         for (; (uint16_t)i < (uint16_t)n && i < 4096; i++) frame_logged(f8, xx, (int16_t)(yy - (i * step) / div));
         if (M[t + 0xc] == 0x13 || M[t + 0xc] == 0x15) return 0x212;          /* 0x11feb5: not native yet */
-        if (r16(t + 0xa)) frame_logged((uint16_t)r16(t + 0xa), xx, (int16_t)(yy - ((M[t + 0x79] + 1) * step) / div));
+        if (r16(t + 0xa)) {
+            int f = (uint16_t)r16(t + 0xa); if (tick_is(3)) f = next_frame(f);
+            frame_logged(f, xx, (int16_t)(yy - ((M[t + 0x79] + 1) * step) / div));
+        }
         return 0;
     }
     if (typ == 3) {
@@ -199,7 +208,7 @@ static uint32_t find_in_cell(uint32_t cell, int cls) {
 static int class2(uint32_t t, int x, int y) {
     int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8;
     uint32_t deco = r32(DECO_TABLE), frames = r32(FRAMES), map = r32(MAP_PTR), things = r32(THINGS);
-    static const uint8_t common[] = {0x02, 0x04, 0x06, 0x0a, 0x0c, 0x14, 0x1e, 0x20, 0x22, 0x28, 0x2a, 0x2c, 0x2e, 0x34,
+    static const uint8_t common[] = {0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x14, 0x1e, 0x20, 0x22, 0x28, 0x2a, 0x2c, 0x2e, 0x34,
                                      0x38, 0x3a, 0x3c, 0x3e, 0x40, 0x42, 0x4a, 0x4c};
     int is_common = 0;
     for (unsigned k = 0; k < sizeof common; k++) if (common[k] == sub) is_common = 1;
@@ -216,7 +225,7 @@ static int class2(uint32_t t, int x, int y) {
     if (!is_common) {
         static const uint8_t none[] = {0x75};                    /* (0x75 and unknown keys draw nothing) */
         if (sub == none[0]) return 0;
-        int known = sub == 0x08 || sub == 0x18 || sub == 0x1a || sub == 0x32 || sub == 0x36 || sub == 0x44 || sub == 0x46 || sub == 0x48 || sub == 0x4e;
+        int known = sub == 0x18 || sub == 0x1a || sub == 0x32 || sub == 0x36 || sub == 0x44 || sub == 0x46 || sub == 0x48 || sub == 0x4e;
         return known ? 0x200 | sub : 0;
     }
     int px = (int16_t)(x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
@@ -226,8 +235,7 @@ static int class2(uint32_t t, int x, int y) {
     frame_logged((uint16_t)r16(t + 0xa), px, py);
     int items = (uint16_t)r16(t + 0x52);
     if (items) {
-        /* the counter (word 0x8c) steps after drawing every 8th tick: read it as it was then */
-        int counter = (uint16_t)r16(t + 0x8c) - ((M[0x1d3afc] & 7) == 0 ? 1 : 0);
+        int counter = (uint16_t)r16(t + 0x8c);                  /* (stepped after drawing, every 8th tick) */
         for (int i = 0; items; i++, items >>= 1) {
             if (!(items & 1) || !r16(0x1b53a2 + (uint32_t)i * 2)) continue;
             uint32_t f = frames + (uint32_t)(uint16_t)r16(deco + (uint32_t)(uint16_t)r16(0x1b53a2 + (uint32_t)i * 2) * 2) * 8;
@@ -237,7 +245,6 @@ static int class2(uint32_t t, int x, int y) {
     }
     if (M[t + 0xb9]) frame_logged((uint16_t)r16(deco + (uint32_t)(uint16_t)r16(t + 0xb7) * 2), px, py);
     int missing = 0;
-    if (r16(0x1d6670) == 8 && r16(0x1de5ac)) missing = 0x2ff;   /* the hover test can draw (0x120ff5): not native */
     uint32_t sel = things + (uint32_t)(uint16_t)r16(0x1d6678) * 0xc8;
     if (sel == t) {
         uint32_t fr = frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
@@ -246,7 +253,113 @@ static int class2(uint32_t t, int x, int y) {
     }
     return missing;
 }
-/* One cell's things (0x11c22a). Returns 0 if every thing in it is native, else the first class that is not. */
+/* Class 8, staff (0x11e9a7): placed like people; sub-kind (byte 12, key table 0x11e9b3)
+ * 0x3f has a shared extra animation, 0x0c..0x10 also play a sound (not drawing), the rest
+ * a marker (deco 0x500) for some jobs, the selection arrow, a mark for sub-kind 0x3c. */
+static int class8(uint32_t t, int x, int y) {
+    int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8;
+    uint32_t deco = r32(DECO_TABLE), frames = r32(FRAMES), things = r32(THINGS);
+    int px = (int16_t)(x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
+    int py = (int16_t)(y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
+    if (sub == 0x3f) {
+        frame_logged((uint16_t)r16(t + 0xa), px, py);
+        if ((int16_t)r16(t + 0x14) > 0x708) {
+            if (!anim_77a4) anim_77a4 = (uint16_t)r16(deco + 0x52a);
+            else if (tick_is(3)) anim_77a4 = next_frame(anim_77a4);
+            frame_logged(anim_77a4, px, py);
+        }
+        return 0;
+    }
+    if (!(sub >= 2 && sub <= 0x3e && !(sub & 1) && sub != 0x20 && sub != 0x28 && sub != 0x2a)) return 0;
+    frame_logged((uint16_t)r16(t + 0xa), px, py);
+    if (r16(0x1d35ec + (uint32_t)M[t + 0x59] * 0x36) == 0x16 && (int16_t)r16(t + 0x9c) != -1)
+        frame_logged((uint16_t)r16(deco + 0x500), px, py);
+    if (things + (uint32_t)(uint16_t)r16(0x1d6678) * 0xc8 == t)
+        frame_logged((uint16_t)r16(deco + 0x284), px, (int16_t)(py - M[frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8 + 3]));
+    else if (sub == 0x3c) frame_logged((uint16_t)r16(deco + 0x4a0), px, py);
+    return 0;
+}
+/* 0x120beb: elements [skip, skip + count) of a frame. */
+static void frame_part(int f, int skip, int count, int x, int y) {
+    uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
+    uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10;
+    for (; e > elems && (uint16_t)skip; skip--) e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10;
+    if (r16(FRAME_MODE)) return;                                     /* (other modes: not native) */
+    for (; e > elems && (uint16_t)count; count--) {
+        uint32_t spr = sprites + (uint16_t)r16(e);
+        if (spr > sprites) log_blit(spr, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), (uint16_t)r16(e + 6));
+        e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10;
+    }
+}
+/* 0x13f49e with flag 0: text in the sprite font ([0x1d3b64], character map 0x1b51c1), each
+ * glyph in one colour (0x111bd5); punctuation sits lower. */
+static void text_solid(int x, int y, const uint8_t *str, int colour) {
+    uint32_t font = r32(0x1d3b64); int lo = M[SCREEN_MODE] & 1;
+    for (; *str; str++) {
+        if (*str == ' ') { x = (int16_t)(x + (lo ? 8 : 4)); continue; }
+        int g = M[0x1b51c1 + *str];
+        if (g) {
+            int dy = 0;
+            if (*str == ',' || *str == '.') dy = M[0x1d7765] - M[font + (uint32_t)g * 6 + 5];
+            else if (*str == '-') dy = M[0x1d7765] / 2;
+            else if (*str == '+' || *str == ':') dy = 2;
+            if (dlog) dlog(5, (uint16_t)x, (uint16_t)(y + dy), colour, font + (uint32_t)g * 6, 0, dctx);
+            log_blit(font + (uint32_t)g * 6, (int16_t)x, (int16_t)(y + dy), 0x40);   /* (0x111bd5 blits it, flags 0x40: one colour) */
+        }
+        x = (int16_t)(x + M[font + (uint32_t)g * 6 + 4] + (lo ? 2 : 1));
+    }
+}
+static int cell_things(int idx, int x, int y);
+/* Class 0x14, the entrance (0x11f8f8): sub-kind 2 walks like people; 6 is the gate with the
+ * park's name scrolling over it (and the cells four to either side drawn again over it);
+ * 8 a frame with up to three parts; the rest one frame from the deco table. */
+static int class14(uint32_t t, int x, int y) {
+    int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8;
+    uint32_t deco = r32(DECO_TABLE), map = r32(MAP_PTR);
+    int f = (uint16_t)r16(t + 0xa), missing = 0;
+    if (sub == 2) {
+        int px = (int16_t)(x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
+        int py = (int16_t)(y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
+        frame_logged(f, px, py);
+    } else if (sub == 6) {
+        int px = (int16_t)(x + ((tw << 7) >> 8) + (hires ? 4 : 8)), py = (int16_t)(y + (hires ? 8 : 0x10));
+        int lit = M[r32(0x1d3818) + 0x18] != 0;
+        frame_logged((uint16_t)r16(deco + (lit ? (f == 0x13f ? 0x27a : 0x27c) : (f == 0x13f ? 0x27e : 0x440))), px, py);
+        if (!r16(0x1d6652)) {
+            uint32_t cell = map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4);
+            if (f == 0x13f) {
+                uint32_t str = lit ? r32(0x1d3814) + 0x20 : r32(r32(0x1d7bd0) + 0x19c);
+                int len = 0; while (len < 4096 && M[str + len]) len++;
+                if (len) {
+                    uint8_t win[13]; int k = (uint16_t)r16(0x1d6656) % len;
+                    for (int i = 0; i < 12; i++, k = (k + 1) % len) win[i] = M[str + k];
+                    win[12] = 0;
+                    int dx = 0x1c, dy = -100; if (M[SCREEN_MODE] & 8) { dx /= 2; dy /= 2; }
+                    text_solid((int16_t)(px + dx), (int16_t)(py + dy), win, lit ? M[0x1d7772] : M[0x1d7783]);
+                }
+                if ((int16_t)x + tw * 4 >= 0x280) {
+                    int16_t n = r16(cell + 0x10); uint16_t nx = (uint16_t)((int16_t)x + tw * 4);
+                    if (dlog) dlog(1, n, nx, (uint16_t)y, 0, 0, dctx);
+                    int m = cell_things(n, nx, (uint16_t)y); if (m) missing = m;
+                }
+            } else if ((int16_t)x - tw * 4 < 0) {
+                int16_t n = r16(cell - 0x10); uint16_t nx = (uint16_t)((int16_t)x - tw * 4);
+                if (dlog) dlog(1, n, nx, (uint16_t)y, 0, 0, dctx);
+                int m = cell_things(n, nx, (uint16_t)y); if (m) missing = m;
+            }
+        }
+    } else {
+        int px = (int16_t)(x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)), py = (int16_t)(y + (hires ? 0xf : 0x1f));
+        if (sub == 8) {
+            frame_logged((uint16_t)r16(deco + 0x158), px, py);
+            for (int i = 0; i < 3; i++)
+                if (r16(t + 0x69 + (uint32_t)i * 2)) frame_part((uint16_t)r16(deco + 0x15a), (uint16_t)(i * 4 + M[t + 0x66 + i]), 1, px, py);
+        } else frame_logged((uint16_t)r16(deco + (uint32_t)f * 2), px, py);
+    }
+    return missing;
+}
+/* (The renderer's hover test, 0x120ff5, is not drawing: passes turn it off, view.c.)
+ * One cell's things (0x11c22a). Returns 0 if every thing in it is native, else the first class that is not. */
 static int cell_things(int idx, int x, int y) {
     int tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
     while (idx) {
@@ -258,10 +371,15 @@ static int cell_things(int idx, int x, int y) {
         uint32_t t = r32(THINGS) + (uint32_t)idx * 0xc8;
         int cls = M[t + 4];
         if (cls == 0x18) {
-            if (r16(0x1de5ac) && M[t + 0xc] == 2) { if (!missing) missing = 0x118; }   /* + 0x120ff5 first: not native yet */
-            /* (its animation step happens in the game's own pass; the frame is read as it left it) */
-            frame_logged((uint16_t)r16(t + 0xa), (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)),
+            int f = (uint16_t)r16(t + 0xa); if (tick_is(0xf)) f = next_frame(f);   /* advanced, then drawn */
+            frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)),
                          (int16_t)((uint16_t)y + (hires ? 0xf : 0x1f)));
+        } else if (cls == 0x14) {
+            int m = class14(t, x, y);
+            if (m && !missing) missing = m;
+        } else if (cls == 8) {
+            int m = class8(t, x, y);
+            if (m && !missing) missing = m;
         } else if (cls == 2) {
             int m = class2(t, x, y);
             if (m && !missing) missing = m;
@@ -275,7 +393,7 @@ static int cell_things(int idx, int x, int y) {
 }
 /* The things loop for camera (cx0, cy0): cell markers and draw calls to the log. */
 void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg, void *ctx) {
-    M = mem; dlog = lg; dctx = ctx;
+    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4);
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR);
     uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
