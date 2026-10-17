@@ -29,6 +29,7 @@ static void saved(const char *rel, const char *hex, void *ctx) {
 #include <signal.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <math.h>
 extern uint8_t *G_MEM;
 uint32_t tp_get(unsigned i);
 static void on_fault(int sig, siginfo_t *si, void *uc) {
@@ -45,6 +46,7 @@ struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 #define intro_dispatch_init 0
 #endif
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
+static double hl_wide = 1;   /* the z step's widescreen factor (s steps compose at it) */
 int main(int argc, char **argv) {
     struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
@@ -89,6 +91,7 @@ int main(int argc, char **argv) {
     mkdir(out, 0755);
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
+    if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));
     if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
     int r;
     if (realtime) {
@@ -104,16 +107,19 @@ int main(int argc, char **argv) {
                     int via = *e == 'v';
                     double x = strtod(e + 2, &e); double y = strtod(e + 1, &e); unsigned b = (unsigned)strtoul(e + 1, &e, 10);
                     if (via) tp_view_mouse(x / 640, y / 400, b); else tp_host_mouse(x / 640, y / 400, b);
-                } else if (*e == 'z') {                  /* z:zoom:cx:cy (canvas; cx < 0: the game's view centre) */
-                    double z = strtod(e + 2, &e), cx = strtod(e + 1, &e), cy = strtod(e + 1, &e);
-                    { int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh); }
+                } else if (*e == 'z') {                  /* z:zoom:cx:cy[:wide] (canvas; cx < 0: the game's view centre;
+                                                            wide: layout width over screen width, e.g. 1.33 for 16:9) */
+                    double z = strtod(e + 2, &e), cx = strtod(e + 1, &e), cy = strtod(e + 1, &e), wide = 1;
+                    if (*e == ':' && e[1] != ',' && e[1]) wide = strtod(e + 1, &e);
+                    int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh);
                     if (cx < 0) tp_view_camera_center(&cx, &cy);
-                    tp_view_enable(1); tp_view_set(z != 1, cx, cy, z);
+                    tp_view_enable(1); tp_view_set(z != 1 || wide > 1, cx, cy, z, sw * wide); hl_wide = wide;
                 } else if (*e == 's') {                  /* s:name: the composited zoomed picture, 1280x800 */
                     char name[256]; int n = 0; e += 2; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
                     static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
                     tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
-                    int ow = fw == 640 ? 1280 : 1280, oh = fw == 640 ? 960 : 800;
+                    int oh = fw == 640 ? 960 : 800, ow = (int)lround(oh * 4.0 / 3.0 * hl_wide * (fw == 640 ? 1 : 1.0)) ;
+                    if (fw == 320) ow = (int)lround(1280 * hl_wide);
                     uint32_t *big = malloc(4 * ow * oh); tp_view_compose(big, ow, oh, frame, fw, fh, 0);
                     char p[1024]; snprintf(p, sizeof p, "%s/%s.png", out, name);
                     int tp_host_png_rgba(const char *, const uint32_t *, int, int); tp_host_png_rgba(p, big, ow, oh); free(big);

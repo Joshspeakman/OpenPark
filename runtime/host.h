@@ -34,6 +34,8 @@ void tp_host_key_raw(uint8_t scan, int down);  /* make/break codes for programs 
 void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
 void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
 void tp_host_quit(void);
+void tp_host_pause(int on);
+void tp_host_set_args(const char *args);      /* the program's command tail, before tp_host_init (" -l1": German) */                   /* hold the game (window hidden or minimised) */
 void tp_host_set_realtime(void);
 /* Sound: the app attaches an output and pulls PCM; MIDI bytes go to tp_audio_midi (weak). */
 void tp_host_audio_attached(int on);
@@ -48,9 +50,11 @@ int  tp_host_checkpoint(const char *path);   /* state snapshot for tools/spotche
  * renderer, shown at any zoom. Canvas coordinates are pixels of the park picture
  * at the scale of the game's screen mode (tp_view_geometry). */
 void tp_view_enable(int main_game);           /* only for MAIN.EXE's code (not the intro) */
-int  tp_view_set(int on, double cx, double cy, double zoom);   /* (cx, cy): canvas point at the park area's centre; 0: not now */
+int  tp_view_set(int on, double cx, double cy, double zoom, double layout_w);   /* (cx, cy): canvas point at the park area's centre;
+                                              layout_w: the picture's width in screen pixels (> screen: widescreen); 0: not now */
 void tp_view_camera_center(double *cx, double *cy);          /* where the game's own view is */
 void tp_view_canvas_size(double *w, double *h);
+int  tp_view_camera_moves(void);              /* changes when the game moves its camera itself: recentre there */
 int  tp_view_live(void);                      /* the zoomed picture is current (the park is on screen) */
 void tp_view_mouse(double fx, double fy, uint32_t buttons);  /* as tp_host_mouse; mapped when zoomed */
 void tp_view_geometry(int *sw, int *sh, int *wh);   /* the screen in the game's mode now: size and park rows */
@@ -59,6 +63,10 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
 /* The frame in either video mode: 320x200 (13h) or 640x480 (VESA 101h, the game's [R] toggle). */
 int  tp_host_frame_size(int *w, int *h);
 int  tp_host_frame_rgba_any(uint32_t *out, int max_pixels);
+
+void tp_view_request_poster(void);            /* "Save Park Picture": render the whole park once */
+int  tp_view_take_poster(uint32_t **rgba, int *w, int *h);   /* 1 when ready; the pixels are the caller's to free */
+void tp_view_request_hires(int on);           /* press the game's R once its park is up (start in 640x480) */
 
 /* Saved files below the overlay (sha256), for tests. */
 void tp_host_list_saved(void (*fn)(const char *rel, const char *sha256_hex, void *), void *ctx);
