@@ -109,7 +109,7 @@ const char *tp_error(void) { return error; }
 int tp_dispatch(Ctx *c);
 /* The host learns when execution reaches one address (the far-callback
  * epilogue) without changing block scheduling. */
-uint64_t tp_insns;
+uint64_t tp_insns, tp_rep;   /* executed x86 instructions; REP repetitions among them */
 /* Development breakpoint (TP_BREAK=hex address): prints registers. */
 uint32_t tp_break_pc = 0xffffffffu; int tp_break_hits;
 uint32_t tp_break_list[32]; int tp_break_count[32], tp_break_n;

@@ -140,6 +140,29 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 `work/config-survey.json`, `work/native-proof/result.json`,
 `work/native-proof/proof.dylib`, `work/check.log`.
 
+## Engine rebuild (CorsixTH-style) — plan, 2026-10-17
+
+The user wants the engine rebuilt the way CorsixTH rebuilt Theme Hospital, starting
+with real-time zoom. Approach: keep the verified recompiled game as the reference
+and replace subsystems natively one at a time, each checked against the original
+(differential, as everywhere else in this port), until the original code is no
+longer needed for that part.
+
+1. Survey (started). Sprite banks are Bullfrog TAB/DAT, decoded by
+   `tools/sprites.py` (MBLK = 244 isometric ground blocks, MSPR = 3,301 sprites,
+   HPANEL = panel). In memory the game loads each .DAT raw and turns its .TAB into
+   6-byte {pointer, width, height} entries (MBLK at 0x400678 in the scripted park),
+   reached through a descriptor at 0x1d3b90 used by about 46 blocks: the way into
+   the world renderer. Still to find: the map cell layout (not a plain byte grid),
+   the camera, draw order, and the people/ride animation tables (MSPR + .ANI/.INF).
+2. Native world renderer: draw the park from the game's live memory with the
+   original sprites. Acceptance: at 1x it matches the game's own 320x200 world view
+   pixel for pixel on many checkpoints (the panel stays the game's).
+3. Real-time zoom: the native renderer draws any scale or area (pinch / scroll
+   wheel / keys), the game's panel composited at 1x; clicks in the world are mapped
+   back to the game's coordinates. First user-visible feature.
+4. Then, as CorsixTH did: hi-res UI, widescreen, the simulation pieces one by one.
+
 ## Next concrete step
 
 1. The user's first session: keyboard, mouse, full screen, sound balance.
@@ -147,6 +170,16 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
 
 ## Done so far
+
+- 2026-10-17 (Claude Code): the user found "slow" about 20% too fast. Cause: the
+  governor counted a REP string instruction once, where GOG's DOSBox (normal core,
+  cycles=fixed 10000) charges every MOVS/STOS/LODS repetition (core_normal/
+  string.h; SCAS/CMPS are free) plus an I/O delay per port access. Repetitions are
+  ~48% of a running park's count, so old "Original" ran ~1.9x GOG's speed:
+  measured over 90 s of the scripted park, 18 game months old vs 9.6 counted the
+  DOSBox way. Counting now matches DOSBox; the launcher's speeds are Original
+  (exact), 1.25x, 1.5x, 2x, 4x, and a saved old Original moves to 1.5x once
+  (about 20% slower than before, the user's estimate). `--park` check green.
 
 - 2026-10-16 night (Claude Code): the user asked for the game's artwork from
   ScreenScraper or Steam and a launcher like Dungeon Siege's. Theme Park is not

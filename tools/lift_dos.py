@@ -173,10 +173,14 @@ def create_lifter(reference, image, output):
                 if op == 'cmps':
                     body += ' esi += d;'
             if rep:
-                stop = ''
+                # DOSBox's normal core (GOG's cycles=fixed 10000) charges a cycle per
+                # repetition of MOVS/STOS/LODS (not SCAS/CMPS: core_normal/string.h);
+                # the governor counts them the same way (tp_insns, tp_rep).
                 if op in ('scas','cmps'):
                     stop = 'if (%s) break;' % ('CC_E' if rep == 'repne' else '!CC_E')
-                body = 'while (ecx) { %s ecx--; %s }' % (body,stop)
+                    body = 'while (ecx) { %s ecx--; %s }' % (body,stop)
+                else:
+                    body = 'tp_insns += ecx; tp_rep += ecx; while (ecx) { %s ecx--; }' % body
             return '{ uint32_t d = f.df ? (uint32_t)-%d : %du; %s }' % (size,size,body)
 
     result = DOSLifter('', str(analysis))
