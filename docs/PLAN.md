@@ -345,6 +345,28 @@ drawn with the park (otherwise lost). Screen captures: popping blocks while
 circling near the top 409 → 74 in 40 frames (the rest is the pointer itself);
 TP_VIEW_VERIFY 0 bad frames.
 
+## The game's top bar, and flashing chunks (2026-10-17, later)
+
+- Top bar: with the pointer at the screen's top edge the game draws a bar across
+  the top (light blue, 8 rows, under the date) and scrolls its camera up. The
+  park view never let the pointer reach the game's top (it moves the camera to
+  keep the pointer inside the real view), and the game draws the bar before the
+  extras, so it counted as park. Now the layout's top 2 rows of the screen
+  column pass the pointer straight to the game (and the bar's 8 rows while it is
+  open), the camera is held where it was while the pointer is there (the game's
+  scrolling undone before its render), and the bar's rows are interface while
+  open. Checked headless and in full screen with the real pointer (the macOS
+  menu bar still slides down above it).
+- Flashing chunks: passes were refreshed within a 12 ms budget a frame; in a
+  full-screen zoomed-out view more passes are visible than fit, so some showed
+  their area from earlier frames and jumped when refreshed. Now every visible
+  pass is refreshed every frame, and passes are cheaper: the landscape (0.6 of
+  0.62 ms a pass) skips sprites wholly outside the used part (TX0..TX1 x
+  PT..PB): 0.26 ms. TP_NATIVE_PASS=2 now compares the rows where the game's
+  pass is complete (PT..RB: its pass lacks things of rows below it, which the
+  taller native pass has): 0 differing pixels, demo park 320x200 and 640x480
+  and the test park.
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what

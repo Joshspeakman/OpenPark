@@ -142,6 +142,13 @@ static Geo geo(int s) {
     g.cw = g.ux * CXMAX + g.uyx * CYMAX + g.sw + g.ox; g.ch = g.uy * CYMAX + g.wh + g.oy;
     return g;
 }
+/* The game's top bar: with the pointer at the screen's top edge it draws a bar across the top (with the date,
+ * before the extras: so it is interface by its rows) and scrolls its camera up. In the park view the pointer reaches it only through the zone
+ * below; the game's scrolling is undone while it is there (tp_view_poll, FRAME_RENDER). */
+#define TOPBAR_H 8                  /* its height (rows, with its dark edge) */
+#define TOPBAR_OPEN 2               /* the pointer this near the layout's top (in the screen column) opens it */
+static volatile int topbar;                       /* the pointer is on the top bar */
+static int16_t topbar_cx, topbar_cy;              /* the camera to hold meanwhile */
 static int hud_rect(int k, int *r) {               /* the furniture's rectangles in this mode */
     if (k == 0) { r[0] = 0; r[1] = 0; r[2] = 64; r[3] = 12; return 1; }
     if (k == 1) { r[0] = SW - 72; r[1] = 0; r[2] = SW; r[3] = 16; return 1; }
@@ -204,6 +211,7 @@ static int16_t real_cx, real_cy;
  * the camera back; the landscape cache is marked dirty for the game's frame. */
 /* Development: the native landscape (native_land.c) against the game's cache after each pass. */
 int tp_native_landscape(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t *buf, int pitch, int w, int h);
+int tp_native_landscape_part(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t *buf, int pitch, int w, int h, int wx0, int wy0, int wx1, int wy1);
 int tp_native_blit_flags(const uint8_t *mem);
 static void native_check(int cx, int cy, int rows, const uint8_t *before) {
     static int on = -1; if (on < 0) on = getenv("TP_NATIVE_CHECK") != NULL;
@@ -367,11 +375,16 @@ static int native_pass(int cx, int cy, int rows) {
     memset(np_cache + n, 0, nt - n);
     int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32;
     int rows_t = (PH * (G.s == 1 ? 2 : 1) + th - 1) / th + 3; if (rows_t > rows) rows = rows_t;   /* (rows in 640-space units) */
-    if (tp_native_landscape(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, PH) != 0) return -1;
+    double tq0 = now();
+    if (tp_native_landscape_part(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, PH, TX0, PT, TX1, PB) != 0) return -1;
+    /* (only TX0..TX1 x PT..PB of a pass is used: the rest of its landscape is left out, ~3x faster) */
+    double tq1 = now();
     memcpy(np_out, np_cache, nt);
     NPState st = {{np_out, nt, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, PH, clipinfo.clip_r,
                    M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0}, 0, 0};
     tp_native_things(M, cx, cy, rows, np_draw, &st);
+    if (getenv("TP_VIEW_PROF")) { static double tl, tt, last; static long np; double tq2 = now(); tl += tq1 - tq0; tt += tq2 - tq1; np++;
+        if (tq2 - last > 2) { last = tq2; fprintf(stderr, "view prof: %ld passes, landscape %.3f ms, things %.3f ms a pass\n", np, tl / np * 1e3, tt / np * 1e3); tl = tt = 0; np = 0; } }
     return st.fail || st.t.unsupported ? -1 : 0;
 }
 static const uint8_t *pass_src;
@@ -423,12 +436,12 @@ static int pass(int cx, int cy) {
     if (tp_hook_pcs[7] == 0x11be5au && !capture_clip) { tp_hook_pcs[7] = 0xffffffffu; tp_hooks_changed(); }
     if (native_ok && native_mode == 2 && r >= 0) {        /* check: the native picture against the game's */
         static long cp, cbad, cpx; long diff = 0; int fx = -1, fy = -1; const uint8_t *g = M + r32(DISP_BUF);
-        for (int y = 0; y < WORLD_H; y++) for (int x = TX0; x < TX1; x++) {
+        for (int y = PT; y < RB; y++) for (int x = TX0; x < TX1; x++) {   /* (where the game's pass is complete: it lacks things of rows below its own) */
             if (x < 0 || x >= SW) continue;
             if (np_out[y * SW + x] != g[y * SW + x]) { if (!diff) { fx = x; fy = y; } diff++; }
         }
         cp++; if (diff) { cbad++; cpx += diff; if (cbad < 6) fprintf(stderr, "native pass: camera %d,%d differs in %ld pixels (first %d,%d)\n", cx, cy, diff, fx, fy);
-            if (cbad < 3) for (int y = 0; y < WORLD_H; y++) for (int x = TX0; x < TX1; x++) if (x >= 0 && x < SW && np_out[y * SW + x] != g[y * SW + x])
+            if (cbad < 3) for (int y = PT; y < RB; y++) for (int x = TX0; x < TX1; x++) if (x >= 0 && x < SW && np_out[y * SW + x] != g[y * SW + x])
                 fprintf(stderr, "   %d,%d native %d (landscape %d) game %d, game cache %d\n", x, y, np_out[y * SW + x], np_cache[y * SW + x], g[y * SW + x], M[r32(LAND_CACHE) + y * SW + x]); }
         if (cp % 200 == 0 || cp == 10) fprintf(stderr, "native pass: %ld checked, %ld differ (%ld pixels); %ld native, %ld game passes\n", cp, cbad, cpx, np_count, gp_count);
     }
@@ -461,7 +474,7 @@ static void blit_real(int cx, int cy) {
 
 /* The grid of passes covering the canvas. */
 typedef struct { int16_t cx, cy; int x0, y0, x1, y1; } Pass;
-static Pass grid[512]; static uint8_t drawn[512]; static int ngrid, rr;
+static Pass grid[512]; static uint8_t drawn[512]; static int ngrid, rr, rr_done;
 static void make_grid(void) {
     ngrid = 0; memset(drawn, 0, sizeof drawn);
     for (int cy = CYMIN - (PT + UY - 1) / UY; ; cy += STEP_Y) {
@@ -586,15 +599,22 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
         pass_src = NULL; drawn[k] = 1;
     }
+    rr_done = 0;
     for (int k = 0; k < ngrid; k++) {
         Pass *p = &grid[(start + k) % ngrid];
         if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
         (void)rx0; (void)rx1; (void)ry0; (void)ry1;      /* (passes cover the real view too: its frame is trusted only in a band) */
         if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
-        pass_src = NULL; drawn[(start + k) % ngrid] = 1;  /* (other copies are of the real frame) */
+        pass_src = NULL; drawn[(start + k) % ngrid] = 1; rr_done++;   /* (other copies are of the real frame) */
         rr = (start + k + 1) % ngrid;
-        if (now() - t0 > budget) break;
+        (void)budget;   /* every visible pass, every frame: a pass left for a later frame shows that area from another
+                         * moment (people and rides jump when it catches up: flashing chunks); the frame rate gives instead */
     }
+    if (getenv("TP_VIEW_DEBUG")) { static double l; static long fr, partial, vis_total, done_total;
+        int vis = 0, done = 0;
+        for (int k = 0; k < ngrid; k++) { Pass *p = &grid[k]; if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue; vis++; }
+        done = rr_done; fr++; vis_total += vis; done_total += done; if (done < vis) partial++;
+        if (now() - l > 1) { l = now(); fprintf(stderr, "view: %ld frames, %ld partial (visible passes %.1f, refreshed %.1f a frame)\n", fr, partial, (double)vis_total / fr, (double)done_total / fr); fr = partial = vis_total = done_total = 0; } }
     tp_insns = insns; tp_rep = reps; edge_fresh = 1;
     if (state_saved) state_restore();                         /* (the dirty flag is among the globals) */
     lazy_save = 0;
@@ -753,6 +773,9 @@ void tp_view_hook(void) {
                 }
             }
         }
+        if (topbar && active) {                           /* the pointer is on the top bar: undo the game's scrolling */
+            if (r16(CAM_X) != topbar_cx || r16(CAM_Y) != topbar_cy) { w16(CAM_X, topbar_cx); w16(CAM_Y, topbar_cy); w16(LAND_DIRTY, 1); }
+        }
         if (active || w) {                                /* the game moved its camera (a jump to an event, its keys) */
             int16_t cx = r16(CAM_X), cy = r16(CAM_Y);
             if (cx != seen_cx || cy != seen_cy) {
@@ -898,6 +921,7 @@ void tp_view_hook(void) {
         if (!have_world) { pthread_mutex_unlock(&lock); break; }
         have_world = 0;
         for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
+        if (topbar) for (int i = 0; i < SW * TOPBAR_H; i++) pub_overlay[i] = bb[i];   /* the top bar is drawn with the park: all interface */
         {   /* The date is usually drawn by the extras (so world_only lacks it: interface), but at times with the
              * park: then nothing differs there. Only in that case, the date's rectangle is what differs from
              * the passes' park (not the whole time: the game's frame lacks rides anchored above its top). */
@@ -977,6 +1001,10 @@ void tp_view_poll(void) {
         double lx = q[i].fx * lw, ly = q[i].fy * SH;      /* layout point */
         double cxs = lx - col;                            /* ... in the screen column */
         int incol = cxs >= 0 && cxs < SW, ui = incol && ly >= WORLD_H;   /* the panel, or the game's interface: through */
+        if (on && incol && (ly < TOPBAR_OPEN || (topbar && ly < TOPBAR_H))) {   /* the top bar: straight to the game, camera held */
+            if (!topbar) { topbar = 1; topbar_cx = r16(CAM_X); topbar_cy = r16(CAM_Y); }
+            ui = 1;
+        } else if (topbar && !(q[i].buttons & 3)) topbar = 0;
         if (on && incol && !ui) {
             int ox = (int)cxs, oy = (int)ly;
             pthread_mutex_lock(&lock);
