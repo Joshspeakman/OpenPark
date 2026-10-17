@@ -173,13 +173,19 @@ tools/survey_callgraph.py), function disassembly from a checkpoint
 (TP_SHOT_CKPT -> tools/survey_disasm.py), sprite banks located by content
 (tools/sprites.py decodes them), the renderer reached through the MBLK descriptor.
 
+Done since (2026-10-17): the game's cursor and tool previews in the zoomed picture
+(the park layer is taken after 0x14de1a, which draws park-anchored extras; the date
+and advisor-button rectangles stay interface); clicks on the game's windows go
+straight through; the 640x480 SVGA mode (R in the park; host VESA 101h through
+DPMI 0300h and INT 10h 4F02h/4F05h, 64 KiB banked window). Measured: the art is the
+same size in both modes (camera steps (24, 0) and (8, 16) in either), 640x480 just
+shows more; pass row count comes from the game's row height [0x1d6654].
+
 Next stages:
-2. 640x480: the game has an SVGA mode ([0x1de5f6] = 8). Host VESA banking and a
-   640x480 frame, then passes at that scale give twice the detail when zoomed in.
-3. The game's cursor drawn into the zoomed picture (tool feedback).
-4. Native renderer behind the same interface: ground blocks from the 64x64 map
+3. Native renderer behind the same interface: ground blocks from the 64x64 map
    (4-byte cells at [0x1d3b08], byte 2 = block), then things, verified pixel for
-   pixel against passes; then widescreen, hi-res UI, the simulation piece by piece.
+   pixel against passes; then widescreen (a wider SVGA picture), hi-res UI, the
+   simulation piece by piece.
 
 ## Next concrete step
 
@@ -188,6 +194,11 @@ Next stages:
 3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
 
 ## Done so far
+
+- 2026-10-17 (Claude Code): zoom shows the game's cursor and tool previews, game
+  windows take clicks while zoomed, and the game's 640x480 mode works (R in the
+  park; VESA in the host) with zoom in both modes. Launcher Controls page lists
+  the zoom keys. `--park` check green.
 
 - 2026-10-17 (Claude Code): real-time zoom, engine rebuild stage 1 (runtime/view.c,
   section above). Pinch / ⌘-scroll / ⌘= ⌘- ⌘0 zoom, scroll or arrows pan, edge pan;

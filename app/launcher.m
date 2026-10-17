@@ -359,11 +359,12 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (void)drawControlsIn:(NSRect)p {
     NSArray *rows = @[
         @[@"Click", @"Select, build, place"], @[@"Right- or Control-click", @"Cancel, rotate, close panels"],
-        @[@"Mouse at a screen edge", @"Scroll the park"], @[@"Typing", @"Goes to the game as on a PC keyboard"],
+        @[@"Pinch or ⌘-scroll", @"Zoom the park in and out"], @[@"⌘=  ⌘−  ⌘0", @"Zoom in, zoom out, actual size"],
+        @[@"Scroll or arrows", @"Move around when zoomed"], @[@"R in the park", @"The game's 640 × 480 mode, and back"],
         @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘Q", @"Quit (save in the game first)"],
     ];
     for (NSUInteger i = 0; i < rows.count; i++) {
-        CGFloat y = p.origin.y + 96 + 46 * i;
+        CGFloat y = p.origin.y + 90 + 41 * i;
         label([rows[i][0] uppercaseString], heavy(16), gold(), NSMakeRect(p.origin.x + 50, y, 300, 26), NSTextAlignmentLeft, 1.5, YES);
         label(rows[i][1], plain(17), cream(), NSMakeRect(p.origin.x + 350, y, p.size.width - 390, 26), NSTextAlignmentLeft, 0.4, YES);
     }
