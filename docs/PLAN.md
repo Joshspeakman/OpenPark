@@ -191,11 +191,34 @@ Learned: the game keeps sprite sizes doubled in its tables and works in a
 640-wide space; 320x200 halves positions and sizes in the blitter; 640x480
 uses a smaller row height ([0x1d6654]), so the art is the same size in both.
 
-Next stages:
-3b. Things (rides, shops, people) natively: 0x11c22a (per cell), 0x11dd27,
-    0x11f8f8, 0x169840 and their blitter variants (ghost table [0x1ba2f8],
-    scaling), each checked against passes the same way; then the native
-    renderer replaces passes, and widescreen, hi-res UI and the simulation.
+Stage 3b (in progress): things (rides, shops, people), runtime/native_land.c
+`tp_native_things`. Checked by draw calls, not pixels: with TP_NATIVE_THINGS
+the host logs, during each pass, the game's calls to the per-cell function
+0x11c22a, the blitter core 0x15ed21, the small font (0x180e88/0x180f34) and
+the one-colour glyph blit 0x111bd5 (text does not all go through the
+blitter); the native code runs first, on the state the game draws from, and
+its calls are compared cell by cell (sprite, position, size, flags; extra
+cells at either end count as differences). The renderer changes state as it
+draws (animation steps, a shared animation 0x1d77a4, people's counters, its
+random generator 0x118b92); the native code leaves the state alone and
+models those instead. Native: the traversal, static scenery, classes 2
+(people, common path + sub-kind 8), 8 (staff), 0x0e (ride cars with riders),
+0x12 (stacked rides), 0x14 (entrance, scrolling park name), 0x18. Not yet:
+classes 4, 6/0x1c (a scrolling sign through the small font), 0x0a, 0x11feb5
+(class 0x12 sub-kinds 0x13/0x15), people sub-kinds 0x18/0x1a/0x32/0x36/0x44..
+0x4e, scaled frames (FRAME_MODE 8). Results, 0 differ in each: demo park
+320x200 29,102 cells (88% of cells native), demo 640x480 71,432, a new game
+with the mouse over the park 3,826 of 3,826. Nothing visible yet: the native
+code only produces the call list; the next step is drawing it (the
+landscape's blitter) and a pixel check of fully native passes, then
+replacing passes.
+Found on the way: the renderer also picks the thing under the mouse
+(0x120ff5, gated by [0x1de5ac]) and tests clicks ([0x1de5a0]); on a click it
+can open that thing's window (0x135f21). Passes draw with another camera, so
+they now turn both off (view.c `pass`). Passes also trigger the renderer's
+sound effects for what they draw (0x180fe0); the native renderer will not.
+
+Later: the native renderer replaces passes; widescreen, hi-res UI, simulation.
 
 ## Next concrete step
 
@@ -210,7 +233,10 @@ Next stages:
   Park Picture, language choice, SoundFont music, drag pan, CRT scanlines, game
   controllers; the view no longer slows the game (landscape cache restored,
   passes throttled; measured equal game-day rate); native landscape layer
-  (stage 3 start), pixel-exact against the game.
+  (stage 3 start), pixel-exact against the game. Stage 3b things (section
+  above): most classes native, checked by draw calls; passes no longer pick
+  under the mouse or take clicks. Two 300 s fuzz soaks (seeds 3, 7) with the
+  wide view at 0.6: no stops, state unchanged by passes at all 40 checks each.
 
 - 2026-10-17 (Claude Code): zoom shows the game's cursor and tool previews, game
   windows take clicks while zoomed, and the game's 640x480 mode works (R in the
