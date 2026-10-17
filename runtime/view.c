@@ -164,12 +164,32 @@ static int16_t real_cx, real_cy;
 
 /* Renders the park with the camera at (cx, cy) into the back buffer and puts
  * the camera back; the landscape cache is marked dirty for the game's frame. */
+/* Development: the native landscape (native_land.c) against the game's cache after each pass. */
+int tp_native_landscape(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t *buf, int pitch, int w, int h);
+int tp_native_blit_flags(const uint8_t *mem);
+static void native_check(int cx, int cy, int rows, const uint8_t *before) {
+    static int on = -1; if (on < 0) on = getenv("TP_NATIVE_CHECK") != NULL;
+    if (!on) return;
+    static uint8_t mine[MAX_SCREEN]; static long passes, bad_passes, bad_px, deco;
+    uint32_t pitch = r32(DISP_PITCH); int w = (int)r32(0x1de5c8), h = WORLD_H;   /* the landscape stops above the panel */
+    memcpy(mine, before, (size_t)pitch * SH);
+    int d = tp_native_landscape(M, cx, cy, rows, mine, (int)pitch, w, h);
+    const uint8_t *game = M + r32(LAND_CACHE); long n = 0; int fx = -1, fy = -1;
+    for (int i = 0; i < (int)pitch * h; i++) if (mine[i] != game[i]) { if (!n) { fx = i % pitch; fy = i / pitch; } n++; }
+    passes++; if (n) { bad_passes++; bad_px += n; } if (d > 0) deco += d;
+    if (n && bad_passes <= 5) fprintf(stderr, "native landscape: camera %d,%d differs in %ld pixels (first %d,%d), flags %d, %d decorated cells\n",
+                                       cx, cy, n, fx, fy, tp_native_blit_flags(M), d);
+    if (passes % 200 == 0 || passes == 20) fprintf(stderr, "native landscape: %ld passes, %ld differ (%ld pixels), %ld decorated cells left out\n", passes, bad_passes, bad_px, deco);
+}
 static int pass(int cx, int cy) {
     int16_t ox = r16(CAM_X), oy = r16(CAM_Y);
+    static uint8_t before[MAX_SCREEN]; int checking = getenv("TP_NATIVE_CHECK") != NULL;
+    if (checking) memcpy(before, M + r32(LAND_CACHE), (size_t)r32(DISP_PITCH) * SH);
     w16(CAM_X, (int16_t)cx); w16(CAM_Y, (int16_t)cy); w16(LAND_DIRTY, 1);
     int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32;
     uint32_t args[3] = {(uint32_t)cx, (uint32_t)cy, (uint32_t)(((G.s == 1 ? 400 : 480) + th - 1) / th)};   /* rows, as 0x113b9a */
     int64_t r = tp_host_guest_call(RENDER_PARK, args, 3, 50000000);
+    if (checking && r >= 0) native_check(cx, cy, (int)args[2], before);
     w16(CAM_X, ox); w16(CAM_Y, oy); w16(LAND_DIRTY, 1);
     return r < 0 ? -1 : 0;
 }

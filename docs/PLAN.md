@@ -181,11 +181,21 @@ DPMI 0300h and INT 10h 4F02h/4F05h, 64 KiB banked window). Measured: the art is 
 same size in both modes (camera steps (24, 0) and (8, 16) in either), 640x480 just
 shows more; pass row count comes from the game's row height [0x1d6654].
 
+Stage 3 started (2026-10-17 night): runtime/native_land.c draws the landscape
+layer natively (the loop 0x11b8fe..0x11bd47, the plain/mirrored blitter
+0x15ed21, composite frames 0x1209b5 and the cell decorations), from the game's
+own data in memory. TP_NATIVE_CHECK compares it with the game's landscape cache
+after every pass: 0 differing pixels over 2,200 passes of the scripted park,
+1,400 of the busy demo park (decorations included) and 600 in 640x480.
+Learned: the game keeps sprite sizes doubled in its tables and works in a
+640-wide space; 320x200 halves positions and sizes in the blitter; 640x480
+uses a smaller row height ([0x1d6654]), so the art is the same size in both.
+
 Next stages:
-3. Native renderer behind the same interface: ground blocks from the 64x64 map
-   (4-byte cells at [0x1d3b08], byte 2 = block), then things, verified pixel for
-   pixel against passes; then widescreen (a wider SVGA picture), hi-res UI, the
-   simulation piece by piece.
+3b. Things (rides, shops, people) natively: 0x11c22a (per cell), 0x11dd27,
+    0x11f8f8, 0x169840 and their blitter variants (ghost table [0x1ba2f8],
+    scaling), each checked against passes the same way; then the native
+    renderer replaces passes, and widescreen, hi-res UI and the simulation.
 
 ## Next concrete step
 
@@ -194,6 +204,13 @@ Next stages:
 3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
 
 ## Done so far
+
+- 2026-10-17 night (Claude Code, the user away; budget: under 40% of tokens):
+  widescreen park, Tab fast forward, start in 640x480, pause when hidden, Save
+  Park Picture, language choice, SoundFont music, drag pan, CRT scanlines, game
+  controllers; the view no longer slows the game (landscape cache restored,
+  passes throttled; measured equal game-day rate); native landscape layer
+  (stage 3 start), pixel-exact against the game.
 
 - 2026-10-17 (Claude Code): zoom shows the game's cursor and tool previews, game
   windows take clicks while zoomed, and the game's 640x480 mode works (R in the
