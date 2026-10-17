@@ -8,6 +8,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <ImageIO/ImageIO.h>
+#import <GameController/GameController.h>
 #include <pthread.h>
 #include "host.h"
 int tp_audio_start(void);
@@ -52,6 +53,10 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 
 @interface GameView : NSView
 - (void)zoomTo:(double)z at:(NSPoint)p;
+- (void)panBy:(double)dx :(double)dy;
+- (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b;
+- (void)zoomIn:(id)sender;
+- (void)zoomOut:(id)sender;
 @end
 
 @implementation GameView {
@@ -59,6 +64,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     uint32_t _pixels[640 * 480];
     double _lastLW;                      /* the layout width last given to view.c */
     int _camMoves;                       /* tp_view_camera_moves seen */
+    BOOL _panning; NSPoint _panFrom;     /* dragging the park view */
+    CALayer *_scan; int _scanRows;       /* CRT scanlines (Display > Pixels > CRT) */
     int _sw, _sh, _wh;                   /* the game's screen now: size, park rows (tp_view_geometry) */
     NSTrackingArea *_tracking;
     BOOL _cursorHidden;
@@ -80,6 +87,10 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         _screen.minificationFilter = kCAFilterLinear;
         _screen.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null]};
         [self.layer addSublayer:_screen];
+        _scan = [CALayer layer];
+        _scan.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null], @"hidden": [NSNull null]};
+        _scan.magnificationFilter = kCAFilterLinear; _scan.hidden = YES;
+        [self.layer addSublayer:_scan];
         _zoom = 1;
     }
     return self;
@@ -108,6 +119,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     [super layout];
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     _screen.frame = _live ? [self viewRect] : [self screenRect];
+    _scan.frame = _screen.frame;
     [CATransaction commit];
 }
 - (void)present {
@@ -136,6 +148,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         px = _big; w = _bigW; h = _bigH;
     }
     if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; }
+    [self updateScanlines:fh];
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs,
                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
@@ -144,6 +157,25 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     _screen.contents = (__bridge id)img;
     [CATransaction commit];
     CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs);
+}
+/* CRT: a dark line under every row of the game's screen, over the picture (smooth pixels). */
+- (void)updateScanlines:(int)rows {
+    BOOL crt = [NSUserDefaults.standardUserDefaults integerForKey:@"SmoothPixels"] == 2;
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    _scan.hidden = !crt;
+    if (crt && rows != _scanRows) {
+        _scanRows = rows;
+        int h = rows * 4; uint32_t *px = calloc((size_t)h, 4);
+        for (int y = 0; y < h; y++) px[y] = (y % 4 == 3) ? 0x70000000u : (y % 4 == 2 ? 0x30000000u : 0);
+        CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGContextRef ctx = CGBitmapContextCreate(px, 1, h, 8, 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        CGImageRef img = CGBitmapContextCreateImage(ctx);
+        _scan.contents = (__bridge id)img;
+        CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
+    }
+    if (crt) _scan.frame = _screen.frame;
+    _screen.magnificationFilter = [NSUserDefaults.standardUserDefaults integerForKey:@"SmoothPixels"] ? kCAFilterLinear : kCAFilterNearest;
+    [CATransaction commit];
 }
 - (void)updateTrackingAreas {
     if (_tracking) [self removeTrackingArea:_tracking];
@@ -170,6 +202,11 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     if (_live) tp_view_mouse(fx, fy, _buttons);      /* mapped into the park */
     else tp_host_mouse(fx, fy, _buttons);            /* the game's own screen */
+}
+
+/* A pointer from elsewhere (a game controller), in 0..1 of what is shown. */
+- (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b {
+    if (_live) tp_view_mouse(fx, fy, b); else tp_host_mouse(fx, fy, b);
 }
 
 /* ---- the park view: zoom and widescreen ---- */
@@ -256,21 +293,32 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)zoomOut:(id)sender { [self zoomTo:_zoom / 1.25 at:NSMakePoint(NAN, NAN)]; }
 - (void)zoomActual:(id)sender { [self zoomTo:1 at:NSMakePoint(NAN, NAN)]; }
 - (void)mouseMoved:(NSEvent *)e { [self sendMouse:e]; }
-- (void)mouseDragged:(NSEvent *)e { [self sendMouse:e]; }
+- (void)mouseDragged:(NSEvent *)e { if (_panning) [self dragPan:e]; else [self sendMouse:e]; }
 - (void)rightMouseDragged:(NSEvent *)e { [self sendMouse:e]; }
-- (void)otherMouseDragged:(NSEvent *)e { [self sendMouse:e]; }
+- (void)otherMouseDragged:(NSEvent *)e { if (_panning) [self dragPan:e]; else [self sendMouse:e]; }
 - (void)mouseExited:(NSEvent *)e { [self setCursorHidden:NO]; _mouseIn = NO; }
 - (void)mouseEntered:(NSEvent *)e { [self sendMouse:e]; }
 - (void)mouseDown:(NSEvent *)e {
+    if (_live && (e.modifierFlags & NSEventModifierFlagOption)) { [self startPan:e]; return; }   /* Option-drag pans too */
     /* Control-click acts as the right button for one-button trackpads. */
     _buttons |= (e.modifierFlags & NSEventModifierFlagControl) ? 2 : 1;
     [self sendMouse:e];
 }
-- (void)mouseUp:(NSEvent *)e { _buttons &= ~3u; [self sendMouse:e]; }
+- (void)mouseUp:(NSEvent *)e {
+    if (_panning) { _panning = NO; return; } _buttons &= ~3u; [self sendMouse:e]; }
 - (void)rightMouseDown:(NSEvent *)e { _buttons |= 2; [self sendMouse:e]; }
 - (void)rightMouseUp:(NSEvent *)e { _buttons &= ~2u; [self sendMouse:e]; }
-- (void)otherMouseDown:(NSEvent *)e { _buttons |= 4; [self sendMouse:e]; }
-- (void)otherMouseUp:(NSEvent *)e { _buttons &= ~4u; [self sendMouse:e]; }
+- (void)otherMouseDown:(NSEvent *)e {
+    if (_live) { [self startPan:e]; return; }          /* the park view: the middle button drags it (the game does not use it) */
+    _buttons |= 4; [self sendMouse:e];
+}
+- (void)otherMouseUp:(NSEvent *)e { if (_panning) { _panning = NO; return; } _buttons &= ~4u; [self sendMouse:e]; }
+- (void)startPan:(NSEvent *)e { _panning = YES; _panFrom = [self convertPoint:e.locationInWindow fromView:nil]; }
+- (void)dragPan:(NSEvent *)e {                        /* the park follows the pointer */
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    [self panBy:-(p.x - _panFrom.x) :(p.y - _panFrom.y)];
+    _panFrom = p;
+}
 - (void)keyDown:(NSEvent *)e {
     if (e.modifierFlags & NSEventModifierFlagCommand) { [super keyDown:e]; return; }
     unsigned short kc = e.keyCode;
@@ -498,8 +546,33 @@ static void *game_thread(void *arg) {
     }
 }
 
+/* A game controller: left stick moves the pointer, A and B click (left, right), the right stick
+ * moves the park view, the shoulder buttons zoom, Menu is Escape. */
+- (void)pollController {
+    GCExtendedGamepad *g = GCController.controllers.firstObject.extendedGamepad;
+    if (!g) return;
+    static double px = 0.5, py = 0.4; static BOOL a, b, ls, rs, menu;
+    float lx = g.leftThumbstick.xAxis.value, ly = g.leftThumbstick.yAxis.value;
+    BOOL moved = NO;
+    if (fabsf(lx) > 0.15 || fabsf(ly) > 0.15) {
+        px = fmin(fmax(px + lx * 0.010, 0), 0.999); py = fmin(fmax(py - ly * 0.013, 0), 0.999); moved = YES;
+    }
+    BOOL na = g.buttonA.pressed, nb = g.buttonB.pressed;
+    if (moved || na != a || nb != b) [_view pointerAt:px :py buttons:(na ? 1u : 0u) | (nb ? 2u : 0u)];
+    a = na; b = nb;
+    float rx = g.rightThumbstick.xAxis.value, ry = g.rightThumbstick.yAxis.value;
+    if (fabsf(rx) > 0.15 || fabsf(ry) > 0.15) [_view panBy:rx * 14 :-ry * 14];
+    if (g.leftShoulder.pressed && !ls) [_view zoomOut:nil];
+    if (g.rightShoulder.pressed && !rs) [_view zoomIn:nil];
+    ls = g.leftShoulder.pressed; rs = g.rightShoulder.pressed;
+    BOOL nm = g.buttonMenu.pressed;
+    if (nm && !menu) { tp_host_key(0x011b); tp_host_key_raw(1, 1); tp_host_key_raw(1, 0); }
+    menu = nm;
+}
+
 - (void)tick {
     [self runTestScript];
+    [self pollController];
     [_view present];
     if (game_done) {
         [_timer invalidate];
