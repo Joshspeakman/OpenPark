@@ -19,6 +19,7 @@
  * Coordinates are in the game's 640-wide space. */
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #define MAP_PTR     0x1d3b08u   /* 64x64 cells of 4 bytes */
 #define BLOCK_TABLE 0x1d3b90u   /* MBLK: 6-byte entries {u32 data, u8 width, u8 height}, doubled sizes */
@@ -710,6 +711,44 @@ static int class4(uint32_t t, int x, int y) {
     }
     return missing;
 }
+/* Class 6 and 0x1c, ride signs (0x11c5e9): a frame, then the ride's name and price ("%s %d.%d  ",
+ * 0x1b00f0: the name at 0x1cced0 + word 0x16 of the ride, byte 0xc6 in tenths) scrolling
+ * through six characters of the small font. The ride's scroll counter (byte 0xbb) steps every
+ * 8th tick as each of its signs is drawn, before the text is cut (a per-pass count here). */
+extern const uint8_t *tp_native_text;
+static struct { uint32_t ride; int n; } bumps[64]; static int nbumps;
+static int class6(uint32_t t, int x, int y) {
+    int tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, lo = M[SCREEN_MODE] & 1;
+    if (!r16(t + 0xa)) return 0;
+    int px = x + ((tw << 7) >> 8) + (hires ? 7 : 0xf), py = y + (hires ? 0xf : 0x1f);
+    frame_logged((uint16_t)r16(t + 0xa), (int16_t)px, (int16_t)py);
+    uint32_t ride = r32(THINGS) + (uint32_t)(uint16_t)r16(t + 0x16) * 0xc8;
+    uint32_t rec = 0x1cced0 + (uint16_t)r16(ride + 0x16);
+    char name[201]; int k = 0; for (; k < 200 && M[rec + k]; k++) name[k] = (char)M[rec + k]; name[k] = 0;
+    char buf[256]; snprintf(buf, sizeof buf, "%s %d.%d  ", name, M[rec + 0xc6] / 10, M[rec + 0xc6] % 10);
+    int len = (int)strlen(buf);
+    int bump = 0;
+    if (tick_is(7)) {
+        int i = 0; while (i < nbumps && bumps[i].ride != ride) i++;
+        if (i == nbumps && nbumps < 64) bumps[nbumps++] = (typeof(bumps[0])){ride, 0};
+        if (i < 64) bump = ++bumps[i].n;
+    }
+    static uint8_t win[7];
+    int off = (uint8_t)(M[ride + 0xbb] + bump) % len;
+    for (int i = 0; i < 6; i++, off = (off + 1) % len) win[i] = (uint8_t)buf[off];
+    win[6] = 0;
+    uint32_t tab = r16(rec + 0x2e) == 0x26a ? 0x1b16d0 : 0x1b16c8;
+    int dx = (int8_t)M[tab + (uint32_t)M[t + 0x12] * 2], dy = (int8_t)M[tab + (uint32_t)M[t + 0x12] * 2 + 1];
+    if (M[SCREEN_MODE] & 8) { dx /= 2; dy /= 2; }
+    int tx = (int16_t)(dx + px), ty = (int16_t)(dy + py);
+    int lim = (M[SCREEN_MODE] & 8) ? 0x1e0 : 0x190;
+    if (tx > 0 && tx < 0x280 - (lo ? 8 : 4) * 6 && ty > 0 && ty < lim - (lo ? 0xc : 6)) {
+        uint32_t h = 2166136261u; for (int i = 0; i < 6 && win[i]; i++) h = (h ^ win[i]) * 16777619u;
+        tp_native_text = win;
+        if (dlog) dlog(4, tx, ty, M[0x1d7773], h, lo ? 1 : 0, dctx);
+    }
+    return 0;
+}
 /* (The renderer's hover test, 0x120ff5, is not drawing: passes turn it off, view.c.)
  * One cell's things (0x11c22a). Returns 0 if every thing in it is native, else the first class that is not. */
 static int cell_things(int idx, int x, int y) {
@@ -726,6 +765,9 @@ static int cell_things(int idx, int x, int y) {
             int f = (uint16_t)r16(t + 0xa); if (tick_is(0xf)) f = next_frame(f);   /* advanced, then drawn */
             frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)),
                          (int16_t)((uint16_t)y + (hires ? 0xf : 0x1f)));
+        } else if (cls == 6 || cls == 0x1c) {
+            int m = class6(t, x, y);
+            if (m && !missing) missing = m;
         } else if (cls == 0xe) {
             int m = classE(t, x, y);
             if (m && !missing) missing = m;
@@ -754,7 +796,7 @@ static int cell_things(int idx, int x, int y) {
 }
 /* The things loop for camera (cx0, cy0): cell markers and draw calls to the log. */
 void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg, void *ctx) {
-    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
+    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); nbumps = 0; rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR);
     uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
