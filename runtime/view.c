@@ -190,6 +190,8 @@ static void addlog(LogE *l, int *n, int kind, int a, int b, int c, uint32_t d, i
 static uint8_t snap0[MAX_SCREEN + 65536], snap1[MAX_SCREEN + 65536]; static size_t snap_n; static int snapped;
 typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
 void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
+void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, const uint8_t *str, int colour);
+extern const uint8_t *tp_native_text;
 static NDTarget snap_t;
 static struct { int ok, mode; long base, pitch; int clip_w, clip_h, clip_r; } clipinfo;   /* the things' clip window */
 static int capture_clip;
@@ -225,7 +227,12 @@ void tp_view_nested_hook(void) {
         addlog(glog, &glog_n, 2, (int)ebx, (int)ecx, (int)(edx & 0xffff), esi, (uint16_t)r16(0x1becbc));
     }
 }
-static void native_logger(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) { (void)ctx; addlog(nlog, &nlog_n, kind, a, b, c, d, e); }
+static uint8_t nlog_text[20000][16];
+static void native_logger(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
+    (void)ctx;
+    if (kind == 4 && nlog_n < 20000 && tp_native_text) { int k = 0; for (; k < 15 && tp_native_text[k]; k++) nlog_text[nlog_n][k] = tp_native_text[k]; nlog_text[nlog_n][k] = 0; }
+    addlog(nlog, &nlog_n, kind, a, b, c, d, e);
+}
 void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, void (*lg)(int, int, int, int, uint32_t, int, void *), void *ctx);
 static void things_check(int cx, int cy, int rows) {
     static long cells, compared, bad, missing_cls[0x400];
@@ -268,6 +275,7 @@ static void things_check(int cx, int cy, int rows) {
         int colour = 0;
         for (int k = 0; k < nlog_n; k++) {
             if (nlog[k].kind == 5) { colour = nlog[k].c; continue; }
+            if (nlog[k].kind == 4) { tp_native_draw_small_text(&t, M, nlog[k].a, nlog[k].b, nlog_text[k], nlog[k].c); continue; }
             if (nlog[k].kind == 2) {
                 static long nb; nb++; pblits++;
                 if (getenv("TP_NATIVE_BREAK") && nb % 50 == 0) continue;   /* (a self-test of the check) */
@@ -303,7 +311,8 @@ static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx)
     NPState *st = ctx;
     if (kind == 5) { st->colour = c; return; }
     if (kind == 2) { tp_native_draw_sprite(&st->t, M + d, c & 0xff, c >> 8, a, b, e, st->colour); st->colour = 0; return; }
-    if ((kind == 3 && a) || kind == 4) st->fail = 1;
+    if (kind == 4) { if (tp_native_text) tp_native_draw_small_text(&st->t, M, a, b, tp_native_text, c); else st->fail = 1; return; }
+    if (kind == 3 && a) st->fail = 1;
 }
 static uint8_t np_cache[MAX_SCREEN + 65536], np_out[MAX_SCREEN + 65536];
 static int native_pass(int cx, int cy, int rows) {

@@ -168,3 +168,25 @@ void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, i
         }
     }
 }
+
+/* The small font (0x180e88 at 320x200, 0x180f34 at 640x480): glyphs of 6 rows of 3 pixels
+ * from 6 bytes each at 0x1ba2fc + 6 * (c - 0x20), each row byte one of 8 patterns, written
+ * in one colour straight into the screen (the screen's own origin, not the clip window's;
+ * no clipping); 4 pixels further for each character. 320x200 halves the position. */
+void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, const uint8_t *str, int colour) {
+    static const uint8_t pat[8] = {4, 2, 6, 1, 5, 3, 7, 0};   /* pixel bits (1 = left, 2 = middle, 4 = right) */
+    long d = t->lowres ? (long)((unsigned)(int16_t)y >> 1) * 0x140 + (long)((unsigned)(int16_t)x >> 1) : (long)(int16_t)y * 0x280 + (int16_t)x;
+    for (; *str; str++) {
+        const uint8_t *g = mem + 0x1ba2fc + 6 * (int)(*str - 0x20);
+        for (int r = 0; r < 6; r++, d += t->pitch) {
+            int b = g[r];
+            if ((b & 1) || b > 14) { t->unsupported++; continue; }
+            int p = pat[b >> 1];
+            if (p & 1) put(t, d, (uint8_t)colour);
+            if (p & 2) put(t, d + 1, (uint8_t)colour);
+            if (p & 4) put(t, d + 2, (uint8_t)colour);
+        }
+        d += 4 - 6 * t->pitch;
+    }
+}
+const uint8_t *tp_native_text;                  /* the string of the last small-font call (native_land.c) */
