@@ -1,0 +1,128 @@
+/* Native landscape: the first piece of Theme Park's renderer rebuilt in C
+ * (docs/PLAN.md, "Engine rebuild", stage 3). It draws what the game's
+ * render_park (0x11b837) draws into its landscape cache when the camera moves:
+ * the ground block of every map cell, row by row, from the game's own data in
+ * memory (map, block sprites, camera geometry), with a native sprite blitter.
+ * It is checked byte for byte against the game's cache (TP_NATIVE_CHECK, view.c).
+ *
+ * Transcribed from MAIN.EXE (work/survey/render2.txt):
+ *   0x11b8fe..0x11bd47  the landscape loop: for each of `rows` map rows from
+ *       the camera, cells right to left, 48-pixel steps (word [0x1d663a]),
+ *       staggered a third of a step per row; a cell's ground block is entry
+ *       (byte 2 + 1) of the 6-byte block table [0x1d3b90], drawn so its foot
+ *       is on the row line; cells off the 64x64 map get block 0 (grass);
+ *       flag bits of byte 3 add decorations (not yet: they are reported)
+ *   0x15ec9c / 0x15ed21  the sprite blitter: {pointer, width, height} entry;
+ *       in 320x200 (word [0x1de5f6] bit 0) positions and the table's doubled
+ *       sizes are halved; Bullfrog RLE (n > 0 copy n, n < 0 skip -n, 0 = end
+ *       of row), clipped to the display window ([0x1de5c8] x [0x1de5f0]).
+ * Coordinates are in the game's 640-wide space. */
+#include <stdint.h>
+#include <string.h>
+
+#define MAP_PTR     0x1d3b08u   /* 64x64 cells of 4 bytes */
+#define BLOCK_TABLE 0x1d3b90u   /* MBLK: 6-byte entries {u32 data, u8 width, u8 height}, doubled sizes */
+#define TILE_W      0x1d663au   /* word: 48 */
+#define TILE_H      0x1d6654u   /* word: row height */
+#define VIEW_OFF    0x1d6624u   /* int16: the view's x offset */
+#define SCREEN_MODE 0x1de5f6u
+#define BLIT_FLAGS  0x1becbcu   /* word: mirror/ghost/scale variants of the blitter */
+#define FRAMES      0x1d3b80u   /* composite sprites: 8-byte frames, word 0 = first element */
+#define ELEMENTS    0x1d3b7cu   /* 10-byte elements {sprite offset, dx, dy, flags, next} */
+#define SPRITES     0x1d3bb8u   /* MSPR: 6-byte sprite entries (as the block table) */
+#define DECO_TABLE  0x1d3b38u   /* word tables: frames for decorations (+0x252 by bit, +0x4ae by kind) */
+#define FRAME_MODE  0x1d667cu   /* word: special frame drawing modes (0 = plain) */
+
+static const uint8_t *M;
+static uint32_t r32(uint32_t a) { uint32_t v; memcpy(&v, M + a, 4); return v; }
+static int16_t r16(uint32_t a) { int16_t v; memcpy(&v, M + a, 2); return v; }
+
+typedef struct { uint8_t *buf; int pitch, w, h; int lowres; } Target;
+
+static int unsupported;                             /* blitter variants met that are not native yet */
+
+/* One sprite (a table entry) at (x, y) in the game's coordinates, with the
+ * blitter's flags: bit 0 mirrors (rows written leftwards from x + width), bit 1
+ * flips (rows upwards from y + height), as 0x15ed21 does, one past the edge. */
+static void blit(const Target *t, uint32_t entry, int x, int y, int flags) {
+    uint32_t data = r32(entry); int w = M[entry + 4], h = M[entry + 5];
+    if (!h) return;
+    if (flags & ~3) unsupported++;
+    if (t->lowres) { w >>= 1; h >>= 1; x >>= 1; y >>= 1; }
+    int dx = flags & 1 ? -1 : 1, x0 = flags & 1 ? x + w : x;
+    int dy = flags & 2 ? -1 : 1, y0 = flags & 2 ? y + h : y;
+    const uint8_t *s = M + data;
+    for (int row = 0; row < h; row++) {
+        int px = x0, py = y0 + dy * row;
+        for (;;) {
+            int8_t n = (int8_t)*s++;
+            if (n == 0) break;
+            if (n < 0) { px -= n * dx; continue; }
+            if (py >= 0 && py < t->h)
+                for (int k = 0; k < n; k++) { int xx = px + dx * k; if (xx >= 0 && xx < t->w) t->buf[py * t->pitch + xx] = s[k]; }
+            s += n; px += n * dx;
+        }
+    }
+}
+
+/* A composite sprite (0x1209b5 in its plain mode): the frame's elements, each a
+ * sprite at an offset with its own blitter flags. */
+static void frame(const Target *t, int f, int x, int y) {
+    if ((uint16_t)r16(FRAME_MODE)) { unsupported++; return; }
+    uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
+    uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10;
+    for (int guard = 0; e > elems && guard < 256; guard++) {
+        uint32_t spr = sprites + (uint16_t)r16(e);
+        if (spr > sprites) blit(t, spr, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), (uint16_t)r16(e + 6));
+        e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10;
+    }
+}
+
+/* What render_park draws into the landscape cache for camera (cx0, cy0), into buf.
+ * Returns the number of cells whose decorations were left out (byte 3 bits). */
+int tp_native_landscape(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t *buf, int pitch, int w, int h) {
+    M = mem;
+    Target t = {buf, pitch, w, h, r16(SCREEN_MODE) & 1};
+    int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
+    uint32_t map = r32(MAP_PTR), table = r32(BLOCK_TABLE);
+    if (!tw || !th) return -1;
+    uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
+    int skipped = 0; unsupported = 0;
+    for (int r = 0, y = cy0; r < rows; r++, y++, base += 0x100) {
+        int left = off + (tw / 3) * r - (r / 3 + 1) * tw;
+        int x = (tw / 3) * r + 0x280 - (r / 3 + 1) * tw;
+        int cx = (cx0 - (r / 3 + 1)) + (0x280 - off) / tw;
+        uint32_t p = base - (uint32_t)((r / 3) * 4 + 4) + (uint32_t)(((0x280 - off) / tw) * 4);
+        for (; (int16_t)x >= (int16_t)left; x -= tw, p -= 4, cx--) {
+            if (x < off - tw) continue;
+            if ((int16_t)cx >= 0 && (int16_t)cx < 0x40 && (int16_t)y >= 0 && (int16_t)y < 0x40) {
+                uint32_t e = table + (uint32_t)(M[p + 2] + 1) * 6;
+                int ys = (int16_t)(r * th + th) - M[e + 5];
+                blit(&t, e, (int16_t)x, (int16_t)ys, 0);
+                /* decorations (0x11bb21..0x11bc9e): bits 0-2 at a pseudo-random place in the tile,
+                 * bit 5 a kind (top two bits) half a tile across and 16 down from the block's top */
+                int cell = (int)((p - map) >> 2), bits = M[p + 3] & 0x3f;
+                for (int i = 0; bits; i++, bits >>= 1) {
+                    if (!(bits & 1)) continue;
+                    if (i <= 2) {
+                        int fx = (int16_t)(x + (cell + M[p + 2] + i * 16) % tw);
+                        int fy = (int16_t)(r * th + (cell + i * 16) % th);
+                        frame(&t, (uint16_t)r16(r32(DECO_TABLE) + 0x252 + i * 2), fx, fy);
+                    } else if (i == 5) {
+                        int hires = r16(SCREEN_MODE) == 8;
+                        int fy = (int16_t)(ys + (hires ? 8 : 0x10));
+                        int fx = (int16_t)(x + ((tw << 7) >> 8) + (hires ? 4 : 8));
+                        frame(&t, (uint16_t)r16(r32(DECO_TABLE) + 0x4ae + (M[p + 3] >> 6) * 2), fx, fy);
+                    }
+                }
+            } else {
+                uint32_t e = table + 6;                      /* block 0 off the map */
+                int ys = (int16_t)(r * th + th) - M[table + 0xb];
+                blit(&t, e, (int16_t)x, (int16_t)ys, 0);
+            }
+        }
+    }
+    return skipped + unsupported;
+}
+
+int tp_native_blit_flags(const uint8_t *mem) { M = mem; return (uint16_t)r16(BLIT_FLAGS); }
