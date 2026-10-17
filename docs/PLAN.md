@@ -322,6 +322,29 @@ Neighbouring passes now differ by under 200 px (walkers) in their trusted
 parts; pass cost ~6 ms a frame at 1x, ~9 ms zoomed out. Checked in the real app
 window: slow pointer circles at 1x and 0.5x, 1,000 visitors, forced storm.
 
+## Pointer, full screen and the top of the view (2026-10-17, later)
+
+The player reported pop-in near the top, a broken menu bar at the top and a
+jumpy pointer. In full screen (real pointer moved with CGEvents, screen captured):
+- the app hid the Mac pointer over the whole view, so with the menu bar revealed
+  there was no arrow, only the game's cursor drawn under the title bar; and edge
+  scrolling at the top moved the park while the pointer went for the menu bar;
+- the game's cursor was found by diffing the screen against the back buffer
+  around a stale mouse position: moving, it often missed (no cursor that frame)
+  or caught park pixels (drawn at the pointer, unzoomed);
+- in the date and advisor rectangles, whatever the game's frame had that the
+  passes' park did not was shown as interface, including that frame's missing
+  rides (it does not draw those anchored above its top): pop-in at the top.
+Now the cursor is read from the game (0x17d2dd: [0x1becb4] shown, image
+[0x1de590] 16 x 15 rows [0x1de594] apart, 0xfe transparent, corner at the mouse)
+and shown as a Mac cursor at the view's scale (capped at 64 points, the largest
+macOS shows), moving at the display's rate; over the menu bar macOS shows its
+arrow. The panel is published without the game's cursor. No edge scrolling at
+the top. The date rectangle uses the passes comparison only when the date was
+drawn with the park (otherwise lost). Screen captures: popping blocks while
+circling near the top 409 → 74 in 40 frames (the rest is the pointer itself);
+TP_VIEW_VERIFY 0 bad frames.
+
 ## Done so far
 
 - 2026-10-17 (Claude Code, headed playtest; the user saw "visual instability,
