@@ -300,6 +300,28 @@ old, 273 of 1,200 frames had a piece off by more than 3,000 pixels and 4,600
 to 7,400 stale pixels a frame; new, none after the first frame. Window
 captures (screencapture of the game's window) confirm.
 
+## Zoomed/widescreen view: no popping (2026-10-17, later)
+
+The player saw rides clip in and out while circling the pointer. Measured with
+TP_VIEW_TRUST (native passes one camera step apart, same state, compared):
+the renderer draws an object from the cell at its back, so a ride whose cell is
+above a view's top row is not drawn at all though it hangs ~64 rows down into
+the view; things of rows below the drawn rows are cut at the bottom; and
+objects of cells beside the view are cut up to ~60 px in. The old trusted part
+of a pass (16 px in, rows 0..112) and the game's own frame (copied over the
+park, its edges moving with the camera, which follows the pointer) were inside
+those zones. Now native passes are drawn taller (192 more rows into a taller
+buffer), only rows 80..PH-112 and 64 px in from the sides are used, and the park
+picture is native passes only (they draw everything the game's frame did,
+thought bubbles included); the game's frame is still used for interface, tool
+previews and weather. Also: weather pixels are no longer taken for interface
+(rain streaks and lightning were, with park pixels between them, drawn unzoomed),
+the cursor capture accepts only pointer-sized changes (bigger ones dragged park
+patches to the pointer), and never-drawn visible passes are drawn at once.
+Neighbouring passes now differ by under 200 px (walkers) in their trusted
+parts; pass cost ~6 ms a frame at 1x, ~9 ms zoomed out. Checked in the real app
+window: slow pointer circles at 1x and 0.5x, 1,000 visitors, forced storm.
+
 ## Done so far
 
 - 2026-10-17 (Claude Code, headed playtest; the user saw "visual instability,
