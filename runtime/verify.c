@@ -117,11 +117,20 @@ uint32_t tp_break_list[32]; int tp_break_count[32], tp_break_n;
 uint32_t *tp_trace_buf; uint32_t tp_trace_cap, tp_trace_n;
 uint32_t tp_watch_pc = 0xffffffffu;
 volatile int tp_watch_hit;
+/* The host's hooks: tp_run returns -3 on arriving at one of tp_hook_pcs (once
+ * per arrival, tp_hook_which says which; resuming runs the block), e.g. the
+ * native park view (view.c) around the game's per-frame render. */
+uint32_t tp_hook_pcs[4] = {0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
+int tp_hook_which;
+int tp_hook_armed = 1;   /* the host clears it after handling a hook (its own guest calls re-arm it) */
 int tp_run(uint32_t budget) {
     interrupt_number = 0;
     blocks_run = 0;
     if (setjmp(trap)) return -1;
     while (budget--) {
+        if (state.tc == tp_hook_pcs[0] || state.tc == tp_hook_pcs[1] || state.tc == tp_hook_pcs[2] || state.tc == tp_hook_pcs[3]) {
+            if (tp_hook_armed) { tp_hook_armed = 0; for (int h = 0; h < 4; h++) if (state.tc == tp_hook_pcs[h]) tp_hook_which = h; return -3; }
+        } else tp_hook_armed = 1;
         if (state.tc == tp_watch_pc) tp_watch_hit = 1;
         if (tp_break_n) for (int b = 0; b < tp_break_n; b++) if (state.tc == tp_break_list[b] && tp_break_count[b]++ < 3)
             fprintf(stderr, "hit %08x\n", state.tc);

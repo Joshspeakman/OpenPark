@@ -100,9 +100,21 @@ int main(int argc, char **argv) {
             if (r || el >= seconds) break;
             while (*k && strtod(k, NULL) <= el) {
                 char *e; strtod(k, &e); e++;
-                if (*e == 'm') {
+                if (*e == 'm' || *e == 'v') {           /* m: the game's mouse; v: through the zoomed view (view.c) */
+                    int via = *e == 'v';
                     double x = strtod(e + 2, &e); double y = strtod(e + 1, &e); unsigned b = (unsigned)strtoul(e + 1, &e, 10);
-                    tp_host_mouse(x / 640, y / 400, b);
+                    if (via) tp_view_mouse(x / 640, y / 400, b); else tp_host_mouse(x / 640, y / 400, b);
+                } else if (*e == 'z') {                  /* z:zoom:cx:cy (canvas; cx < 0: the game's view centre) */
+                    double z = strtod(e + 2, &e), cx = strtod(e + 1, &e), cy = strtod(e + 1, &e);
+                    if (cx < 0) tp_view_camera_center(&cx, &cy);
+                    tp_view_enable(1); tp_view_set(z != 1, cx, cy, z);
+                } else if (*e == 's') {                  /* s:name: the composited zoomed picture, 1280x800 */
+                    char name[256]; int n = 0; e += 2; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
+                    static uint32_t frame[64000]; tp_host_frame_rgba(frame);
+                    uint32_t *big = malloc(4 * 1280 * 800); tp_view_compose(big, 1280, 800, frame, 0);
+                    char p[1024]; snprintf(p, sizeof p, "%s/%s.png", out, name);
+                    int tp_host_png_rgba(const char *, const uint32_t *, int, int); tp_host_png_rgba(p, big, 1280, 800); free(big);
+                    fprintf(stderr, "view shot %s live=%d\n", p, tp_view_live());
                 } else { uint32_t key = (uint32_t)strtoul(e, &e, 16); tp_host_key(key); tp_host_key_raw(key >> 8, 1); tp_host_key_raw(key >> 8, 0); }
                 k = *e ? e + 1 : e;
             }
@@ -113,6 +125,21 @@ int main(int argc, char **argv) {
                 else { hx = rand() / (double)RAND_MAX * 0.999; hy = rand() / (double)RAND_MAX * 0.999;
                        tp_host_mouse(hx, hy, 0); tp_host_mouse(hx, hy, rand() % 5 ? 1 : 2); held = 1; }
                 next_fz = el + 0.15;
+            }
+            {   /* survey: TP_VIEW_TEST=<second> runs the native view's pass test at the next park frame (view.c) */
+                static int vt; const char *ve = getenv("TP_VIEW_TEST");
+                if (ve && !vt && el >= atof(ve)) { void tp_view_test(const char *); tp_view_test(out); vt = 1; }
+                if (vt == 1) { int tp_view_test_step(void); if (tp_view_test_step()) vt = 2; }
+            }
+            {   /* survey: TP_PROFILE=<second> records the next 20 million dispatched blocks, then writes counts per block */
+                extern uint32_t *tp_trace_buf; extern uint32_t tp_trace_cap, tp_trace_n;
+                static int prof; const char *pe = getenv("TP_PROFILE");
+                if (pe && !prof && el >= atof(pe)) { tp_trace_cap = 20000000; tp_trace_buf = malloc(4ul * tp_trace_cap); tp_trace_n = 0; prof = 1; }
+                if (prof == 1 && tp_trace_n >= tp_trace_cap) {
+                    char p[1024]; snprintf(p, sizeof p, "%s/profile.bin", out);
+                    FILE *f = fopen(p, "wb"); fwrite(tp_trace_buf, 4, tp_trace_n, f); fclose(f);
+                    tp_trace_buf = NULL; prof = 2; fprintf(stderr, "profile %s\n", p);
+                }
             }
             if (shots && el >= next_shot) {
                 char p[1024], h[65]; snprintf(p, sizeof p, "%s/rt-%03d.png", out, shot_n++);

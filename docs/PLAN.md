@@ -140,28 +140,46 @@ Evidence (local/ignored): `work/main-survey.json`, `work/intro-survey.json`,
 `work/config-survey.json`, `work/native-proof/result.json`,
 `work/native-proof/proof.dylib`, `work/check.log`.
 
-## Engine rebuild (CorsixTH-style) — plan, 2026-10-17
+## Engine rebuild (CorsixTH-style) — plan and state, 2026-10-17
 
 The user wants the engine rebuilt the way CorsixTH rebuilt Theme Hospital, starting
 with real-time zoom. Approach: keep the verified recompiled game as the reference
-and replace subsystems natively one at a time, each checked against the original
-(differential, as everywhere else in this port), until the original code is no
-longer needed for that part.
+and replace subsystems natively one at a time, each checked against the original,
+until the original code is no longer needed for that part.
 
-1. Survey (started). Sprite banks are Bullfrog TAB/DAT, decoded by
-   `tools/sprites.py` (MBLK = 244 isometric ground blocks, MSPR = 3,301 sprites,
-   HPANEL = panel). In memory the game loads each .DAT raw and turns its .TAB into
-   6-byte {pointer, width, height} entries (MBLK at 0x400678 in the scripted park),
-   reached through a descriptor at 0x1d3b90 used by about 46 blocks: the way into
-   the world renderer. Still to find: the map cell layout (not a plain byte grid),
-   the camera, draw order, and the people/ride animation tables (MSPR + .ANI/.INF).
-2. Native world renderer: draw the park from the game's live memory with the
-   original sprites. Acceptance: at 1x it matches the game's own 320x200 world view
-   pixel for pixel on many checkpoints (the panel stays the game's).
-3. Real-time zoom: the native renderer draws any scale or area (pinch / scroll
-   wheel / keys), the game's panel composited at 1x; clicks in the world are mapped
-   back to the game's coordinates. First user-visible feature.
-4. Then, as CorsixTH did: hi-res UI, widescreen, the simulation pieces one by one.
+Stage 1 (done, runtime/view.c): the host owns camera and zoom. The park is drawn by
+the game's own renderer called as a service: `render_park(cam_x, cam_y, rows)` at
+0x11b837 is run by the host (`tp_host_guest_call`) once per area ("pass"), and the
+passes are assembled into one 1984x1058 picture of the whole park (320x200 scale).
+At 1x nothing changes (no hooks are set). Facts it rests on, all measured:
+- Hooks (verify.c `tp_hook_pcs`): 0x113b9a (the game's per-frame render call),
+  0x113beb (its return), 0x180210 (back buffer to screen, before the cursor).
+- Camera: x [0x1d667a], y [0x1d6666] (game keeps x 4..51, y 0..51); landscape
+  cache dirty flag [0x1d666e]. A camera step moves the picture by (24, 0) in x and
+  (8, 16) in y (registration of passes, exact match). Park rows 0..177; panel below.
+- Side effects: drawing advances things' animation frames (offset 10 of the
+  200-byte records at [0x1d3b10], every 16th tick). The game's globals and data
+  blocks (pointer table 0x1d3b00..0x1d3bbf) are saved before the passes and put
+  back after; a full 64 MiB memory diff over busy demo frames then shows no change.
+- A pass costs about 0.56 ms; the whole park is 63 passes. Visible passes run
+  within 12 ms per frame (round robin beyond that) and do not count as game time.
+- Interface over the park (windows, date, messages) = back buffer at 0x180210
+  minus the park as rendered; shown at 1x over the zoomed picture.
+- Input: a click in the zoomed park moves the game's camera so the point is in its
+  real view, then goes to the game there (checked: path tool selected through the
+  panel, path laid at a point outside the game's own view).
+How the addresses were found: block profile of a running park (TP_PROFILE ->
+tools/survey_callgraph.py), function disassembly from a checkpoint
+(TP_SHOT_CKPT -> tools/survey_disasm.py), sprite banks located by content
+(tools/sprites.py decodes them), the renderer reached through the MBLK descriptor.
+
+Next stages:
+2. 640x480: the game has an SVGA mode ([0x1de5f6] = 8). Host VESA banking and a
+   640x480 frame, then passes at that scale give twice the detail when zoomed in.
+3. The game's cursor drawn into the zoomed picture (tool feedback).
+4. Native renderer behind the same interface: ground blocks from the 64x64 map
+   (4-byte cells at [0x1d3b08], byte 2 = block), then things, verified pixel for
+   pixel against passes; then widescreen, hi-res UI, the simulation piece by piece.
 
 ## Next concrete step
 
@@ -170,6 +188,12 @@ longer needed for that part.
 3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
 
 ## Done so far
+
+- 2026-10-17 (Claude Code): real-time zoom, engine rebuild stage 1 (runtime/view.c,
+  section above). Pinch / ⌘-scroll / ⌘= ⌘- ⌘0 zoom, scroll or arrows pan, edge pan;
+  1x is the game's own view. Checked headless and with the installed app's
+  background self-test (zoom out, tool through the panel, click in the zoomed park,
+  back to 1x); `--park` check green. Not yet played by hand.
 
 - 2026-10-17 (Claude Code): the user found "slow" about 20% too fast. Cause: the
   governor counted a REP string instruction once, where GOG's DOSBox (normal core,

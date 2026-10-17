@@ -44,6 +44,18 @@ void tp_host_set_cycles(double per_ms);
 
 int  tp_host_checkpoint(const char *path);   /* state snapshot for tools/spotcheck.py */
 
+/* Native park view (view.c): the whole park drawn by passes of the game's own
+ * renderer, shown at any zoom. Canvas coordinates are 320x200-scale pixels of
+ * the park picture. */
+void tp_view_enable(int main_game);           /* only for MAIN.EXE's code (not the intro) */
+int  tp_view_set(int on, double cx, double cy, double zoom);   /* (cx, cy): canvas point at the park area's centre; 0: not now */
+void tp_view_camera_center(double *cx, double *cy);          /* where the game's own view is */
+void tp_view_canvas_size(double *w, double *h);
+int  tp_view_live(void);                      /* the zoomed picture is current (the park is on screen) */
+void tp_view_mouse(double fx, double fy, uint32_t buttons);  /* as tp_host_mouse; mapped when zoomed */
+void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int smooth);   /* ow x oh: 320x200 layout */
+#define TP_VIEW_WORLD_ROWS 178                /* park rows of the 320x200 screen; the panel is below */
+
 /* Saved files below the overlay (sha256), for tests. */
 void tp_host_list_saved(void (*fn)(const char *rel, const char *sha256_hex, void *), void *ctx);
 #endif
