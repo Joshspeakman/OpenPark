@@ -310,6 +310,93 @@ static void text_solid(int x, int y, const uint8_t *str, int colour) {
     }
 }
 static int cell_things(int idx, int x, int y);
+static uint32_t rng;                                    /* a copy of the game's generator (0x118b92, seed 0x1d3af4) */
+static int rand15(void) { rng *= 0xbb40e62du; return (int)((rng >> 8) & 0x7fff); }
+static int idiv_trunc(int a, int b) { return a / b; }   /* (C division truncates, as idiv) */
+/* Class 0x0e, ride cars (0x11dd27). Sub-kinds 8, 0x0a, 0x22: the car frame placed by the ride
+ * (class 0x12 in its cell) with each rider element swapped for the rider's sprite (table
+ * 0x1b9a78, 47 sprites per kind of visitor); 0x14..0x18: a train of frames; 0x20: one frame
+ * without riders. Sounds and click tests along the way are not drawing. */
+static int classE(uint32_t t, int x, int y) {
+    int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
+    uint32_t deco = r32(DECO_TABLE), frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
+    uint32_t map = r32(MAP_PTR), things = r32(THINGS);
+    int place_x = (tw * M[t + 6] >> 8) + (M[t + 8] >> (hires ? 5 : 4));
+    int place_y = hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3;
+    if (sub == 8 || sub == 0xa || sub == 0x22) {
+        int16_t off = 0;
+        if (sub != 8) {
+            uint32_t parent = things + (uint32_t)(uint16_t)r16(t + 0x16) * 0xc8;
+            if ((uint16_t)r16(parent + 0x2e) > M[0x1ccf78 + (uint16_t)r16(parent + 0x16)]) off = (int16_t)(off - (rand15() & 3));
+        }
+        uint32_t ride = find_in_cell(map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4), 0x12);
+        if (!ride) ride = find_in_cell(map + (uint32_t)((int16_t)r16(t + 0x10) * 4), 0x12);
+        uint32_t rider = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
+        if (!ride) {                                             /* no ride: the rider alone */
+            if (rider <= things) return 0;
+            int a = M[rider + 6] - M[rider + 8], b = M[rider + 6] + M[rider + 8];
+            int px = (int16_t)(x + 2 * idiv_trunc(a, 16) + 0x20), py = (int16_t)(y + 2 * idiv_trunc(b, 32));
+            frame_logged((uint16_t)r16(deco + (uint32_t)((uint16_t)r16(rider + 0xa) + M[t + 0x12]) * 2), px, py);
+            return 0;
+        }
+        uint32_t rec = r32(0x1b4399 + (uint32_t)(uint16_t)r16(ride + 0x16) * 10) + (uint32_t)M[ride + 0x44] * 0x19;
+        int f = (uint16_t)r16(deco + (uint32_t)(uint16_t)r16(rec + (uint32_t)M[t + 0x12] * 2 + 5) * 2);
+        x = (int16_t)(x + place_x); y = (int16_t)(y + place_y);
+        off = (int16_t)(off - idiv_trunc((int8_t)M[rec + 0x12] * M[t + 6], 256));
+        off = (int16_t)(off - idiv_trunc((int8_t)M[rec + 0x13] * M[t + 8], 256));
+        off = (int16_t)(off + (int8_t)M[rec + 0x14]);
+        off = (int16_t)(off - (r16(ride + 0x16) == 3 ? 0x18 : M[ride + 0x79] * 0x18));
+        off = (int16_t)idiv_trunc(off, (M[FRAME_MODE] & 8) ? (uint16_t)r16(0x1d6642) : 1);
+        if (hires) off = (int16_t)(off / 2);
+        y = (int16_t)(y + off);
+        for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10, guard = 0; e > elems && guard < 256;
+             e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, guard++) {
+            int fl = (uint16_t)r16(e + 6);
+            if (fl & 0x80) {                                     /* a seat: the next rider's sprite */
+                if (rider <= things) continue;
+                if (r16(ride + 0x16) == 3 && sub != 0x22) { rider = things + (uint32_t)(uint16_t)r16(rider + 0x47) * 0xc8; continue; }
+                for (int i = 0; i < 0x2f; i++) if (r16(0x1b9a78 + (uint32_t)i * 2) == r16(e)) {
+                    if (r16(FRAME_MODE) != 8) {
+                        uint32_t ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[rider + 0x59] * 0x5e + (uint32_t)i * 2);
+                        uint32_t os = sprites + (uint16_t)r16(e);
+                        int bx = (M[os + 4] >> 1) + ((int16_t)x - (M[ns + 4] >> 1)), by = y - M[ns + 5] + M[os + 5];
+                        log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+                    }
+                    break;
+                }
+                rider = things + (uint32_t)(uint16_t)r16(rider + 0x47) * 0xc8;
+            } else {
+                if ((uint16_t)r16(e) == 0xba) continue;
+                if (r16(FRAME_MODE) == 8) { missing = 0x30e; continue; }   /* scaled (0x166dfa): not native */
+                log_blit(sprites + (uint16_t)r16(e), (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl);
+            }
+        }
+        return missing;
+    }
+    if (sub == 0x14 || sub == 0x16 || sub == 0x18) {
+        x = (int16_t)(x + place_x); y = (int16_t)(y + place_y);
+        uint32_t tab = 0x1b7870 + (uint32_t)(uint16_t)r16(t + 0xa) * 6;
+        int f0 = (uint16_t)r16(deco + (uint32_t)(uint16_t)r16(tab) * 2), f1 = (uint16_t)r16(deco + (uint32_t)(uint16_t)r16(tab + 2) * 2);
+        int f2 = (uint16_t)r16(deco + (uint32_t)(uint16_t)r16(tab + 4) * 2), xx = (int16_t)x;
+        frame_logged(f0, xx, y);
+        for (int i = 0; i < (uint16_t)r16(t + 0x26); i++) {
+            frame_logged(f1, xx, y);
+            int w = M[frames + (uint32_t)f1 * 8 + 2];
+            xx = (int16_t)(xx + ((M[FRAME_MODE] & 8) ? w / (uint16_t)r16(0x1d6640) : w));
+        }
+        frame_logged(f2, xx, y);
+        return 0;
+    }
+    if (sub == 0x20) {
+        x = (int16_t)(x + place_x); y = (int16_t)(y + place_y - r16(t + 0x98));
+        uint32_t parent = things + (uint32_t)(uint16_t)r16(t + 0x16) * 0xc8;
+        int f = (uint16_t)r16(deco + (r16(0x1cced0 + (uint32_t)(uint16_t)r16(parent + 0x16) + 0x22) == 0xdb ? 0x3c2 : 0x146));
+        for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10, guard = 0; e > elems && guard < 256;
+             e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, guard++)
+            if (!(r16(e + 6) & 0x80)) log_blit(sprites + (uint16_t)r16(e), (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), (uint16_t)r16(e + 6));
+    }
+    return 0;
+}
 /* Class 0x14, the entrance (0x11f8f8): sub-kind 2 walks like people; 6 is the gate with the
  * park's name scrolling over it (and the cells four to either side drawn again over it);
  * 8 a frame with up to three parts; the rest one frame from the deco table. */
@@ -374,6 +461,9 @@ static int cell_things(int idx, int x, int y) {
             int f = (uint16_t)r16(t + 0xa); if (tick_is(0xf)) f = next_frame(f);   /* advanced, then drawn */
             frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)),
                          (int16_t)((uint16_t)y + (hires ? 0xf : 0x1f)));
+        } else if (cls == 0xe) {
+            int m = classE(t, x, y);
+            if (m && !missing) missing = m;
         } else if (cls == 0x14) {
             int m = class14(t, x, y);
             if (m && !missing) missing = m;
@@ -393,7 +483,7 @@ static int cell_things(int idx, int x, int y) {
 }
 /* The things loop for camera (cx0, cy0): cell markers and draw calls to the log. */
 void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg, void *ctx) {
-    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4);
+    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); rng = r32(0x1d3af4);
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR);
     uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
