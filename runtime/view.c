@@ -312,7 +312,9 @@ void tp_view_hook(void) {
             }
         }
         if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); }
-        else if (!w && active) { active = 0; hooks(0); }
+        else if (!w) {                                    /* zoom is off: no hooks at all until tp_view_set turns it on */
+            active = 0; hooks(0); tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed();
+        }
         else if (active) render_visible(vx, vy, vw, vh, 0);
         in_frame = active;
         break;
