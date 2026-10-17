@@ -98,7 +98,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[6], _sound[4];
+    Setting _display[7], _sound[4];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -139,6 +139,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"The game's usual screen; R in the park switches", @"The game's SVGA mode: more of the park at once"]);
         _display[4] = setting(@"Wide Windows", @"Widescreen", @[@YES, @NO], @[@"More Park", @"Black Bars"],
                               @[@"The park fills the window; the panel stays centred", @"The game's 4:3 picture, as on a CRT"]);
+        _display[6] = setting(@"Zoomed Drawing", @"NativePasses", @[@YES, @NO], @[@"Native", @"The Game's"],
+                              @[@"Zoomed-out views drawn by the new engine: faster", @"Zoomed-out views drawn by the game's own code"]);
         _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
                             @[@"The Mac's pointer hides over the game", @"The Mac's pointer stays visible too"]);
         self.open = -1; self.hover = HIT_NONE; self.focus = -1;
@@ -157,7 +159,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 6 : self.open == 1 ? 4 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -208,7 +210,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (NSRect)panel { return NSMakeRect(42, 132, WIN_W - 84, 512); }
 - (NSRect)rowRect:(NSInteger)k {
     if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 7 + 63 * k, f.size.width - 20, 63); }
-    NSRect p = self.panel; CGFloat pitch = self.rowCount > 5 ? 69 : 74;
+    NSRect p = self.panel; CGFloat pitch = self.rowCount > 6 ? 60 : self.rowCount > 5 ? 69 : 74;
     return NSMakeRect(p.origin.x + 26, p.origin.y + 80 + pitch * k, p.size.width - 52, 70);
 }
 - (NSRect)arrow:(NSInteger)k right:(BOOL)right {
