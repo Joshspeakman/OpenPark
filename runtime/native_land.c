@@ -126,3 +126,73 @@ int tp_native_landscape(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t 
 }
 
 int tp_native_blit_flags(const uint8_t *mem) { M = mem; return (uint16_t)r16(BLIT_FLAGS); }
+
+/* ---- things (stage 3b, in progress) ----
+ * The second loop of render_park (0x11be5a..0x11c015) walks the cells as the
+ * landscape loop does and calls 0x11c22a(first thing, x, row * height) for each
+ * cell with things. 0x11c22a follows the cell's list (word 2 = next) and draws
+ * each thing by its class (byte 4 of the 200-byte records at [0x1d3b10]).
+ * Native so far: static scenery (negative index: one frame from word table
+ * 0x1b44c1) and class 24 (an animated frame, word 10). Draw calls go to a log
+ * (development) so they can be compared with the game's (view.c). */
+#define THINGS      0x1d3b10u
+#define STATIC_TAB  0x1b44c1u
+typedef void (*DrawLog)(int kind, int a, int b, int c, uint32_t d, int e, void *ctx);
+static DrawLog dlog; static void *dctx;
+static void log_blit(uint32_t entry, int x, int y, int flags) {
+    if (dlog) dlog(2, x, y, M[entry + 4] | M[entry + 5] << 8, r32(entry), flags, dctx);
+}
+static void frame_logged(int f, int x, int y) {
+    uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
+    uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10;
+    for (int guard = 0; e > elems && guard < 256; guard++) {
+        uint32_t spr = sprites + (uint16_t)r16(e);
+        if (spr > sprites) log_blit(spr, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), (uint16_t)r16(e + 6));
+        e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10;
+    }
+}
+/* One cell's things (0x11c22a). Returns 0 if every thing in it is native, else the first class that is not. */
+static int cell_things(int idx, int x, int y) {
+    int tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
+    while (idx) {
+        if (idx < 0) {                                           /* static scenery: one frame, then the list ends */
+            int f = (uint16_t)r16(r32(DECO_TABLE) + (uint16_t)r16(STATIC_TAB + (uint32_t)(-idx) * 2) * 2);
+            frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 4 : 8)), (int16_t)((uint16_t)y + (hires ? 8 : 0x10)));
+            return missing;
+        }
+        uint32_t t = r32(THINGS) + (uint32_t)idx * 0xc8;
+        int cls = M[t + 4];
+        if (cls == 0x18) {
+            if (r16(0x1de5ac) && M[t + 0xc] == 2) { if (!missing) missing = 0x118; }   /* + 0x120ff5 first: not native yet */
+            /* (its animation step happens in the game's own pass; the frame is read as it left it) */
+            frame_logged((uint16_t)r16(t + 0xa), (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)),
+                         (int16_t)((uint16_t)y + (hires ? 0xf : 0x1f)));
+        } else if (!missing) missing = cls ? cls : 0x100;
+        idx = r16(t + 2);
+    }
+    return missing;
+}
+/* The things loop for camera (cx0, cy0): cell markers and draw calls to the log. */
+void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg, void *ctx) {
+    M = mem; dlog = lg; dctx = ctx;
+    int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
+    uint32_t map = r32(MAP_PTR);
+    uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
+    for (int r = 0, y = cy0; r < rows; r++, y++, base += 0x100) {
+        int left = off + (tw / 3) * r - (r / 3 + 1) * tw;
+        int x = (tw / 3) * r + 0x280 - (r / 3 + 1) * tw;
+        int cx = (cx0 - (r / 3 + 1)) + (0x280 - off) / tw;
+        uint32_t p = base - (uint32_t)((r / 3) * 4 + 4) + (uint32_t)(((0x280 - off) / tw) * 4);
+        for (; (int16_t)x >= (int16_t)left; x -= tw, p -= 4, cx--) {
+            if (x < off - tw) continue;
+            if ((int16_t)cx < 0 || (int16_t)cx >= 0x40 || (int16_t)y < 0 || (int16_t)y >= 0x40) continue;
+            int16_t first = r16(p);
+            if (!first) continue;
+            int cy = (uint16_t)(r * th);
+            lg(1, first, (uint16_t)x, cy, 0, 0, ctx);
+            int miss = cell_things(first, (uint16_t)x, cy);
+            lg(3, miss, 0, 0, 0, 0, ctx);
+        }
+    }
+    dlog = NULL;
+}
