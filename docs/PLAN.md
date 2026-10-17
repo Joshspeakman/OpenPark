@@ -246,7 +246,8 @@ Later: the native renderer replaces passes; widescreen, hi-res UI, simulation.
   passes throttled; measured equal game-day rate); native landscape layer
   (stage 3 start), pixel-exact against the game. Stage 3b things (section
   above): all classes native, checked by draw calls and pixels; the zoomed
-  view now draws natively (native passes); passes no longer pick under the
+  view now draws natively (native passes; launcher Display → Zoomed Drawing
+  switches back to the game's passes); passes no longer pick under the
   mouse or take clicks. Two 300 s fuzz soaks (seeds 3, 7) with the
   wide view at 0.6: no stops, state unchanged by passes at all 40 checks each.
 
