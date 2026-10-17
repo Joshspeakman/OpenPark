@@ -345,6 +345,22 @@ drawn with the park (otherwise lost). Screen captures: popping blocks while
 circling near the top 409 → 74 in 40 frames (the rest is the pointer itself);
 TP_VIEW_VERIFY 0 bad frames.
 
+## Reused from decomp.wtf (2026-10-17)
+
+The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what
+helps here. It is a matching-decompilation orchestrator for console games (C
+that the original compiler turns into identical bytes; N64, PS1/2, GameCube,
+Wii, GBA, DS; Linux/Windows only): its period-compiler toolchains, byte scorer,
+permuter and hand-written-assembly signs (PowerPC/MIPS register rules) do not
+apply to a Watcom-built DOS game recompiled statically. One idea does: ranking
+look-alike functions by instruction sequence (its similarity.py, after coddog).
+Adapted as tools/survey_similar.py over survey_disasm's listing: `--at ADDR`
+ranks a function's look-alikes, `--groups` lists families of near-identical
+functions (MAIN.EXE: 45 families, 109 of 1,812 functions at 0.92, 30+
+instructions). Checked against known pairs: the small font 0x180e88 / 0x180f34
+(320x200 / 640x480) 0.94; the blit wrappers 0x15ec9c / 0x15ecd4 identical. Use
+it before porting a game routine natively, to port its variants with it.
+
 ## Done so far
 
 - 2026-10-17 (Claude Code, headed playtest; the user saw "visual instability,
