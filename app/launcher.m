@@ -98,7 +98,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[6], _sound[3];
+    Setting _display[6], _sound[4];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -131,6 +131,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"The shape a 1994 monitor gave it", @"Stretched to the window's shape"]);
         _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"],
                             @[@"Sound Blaster effects and General MIDI music", @"The park is silent"]);
+        _sound[3] = setting(@"Music Instruments", @"SoundBank", @[@""], @[@"Built-in"],
+                            @[@"The Mac's synthesizer; → picks a SoundFont"]);
         _sound[1] = setting(@"Effects Volume", @"SoundVolume", vol, volL, volN);
         _sound[2] = setting(@"Music Volume", @"MusicVolume", vol, volL, volN);
         _display[5] = setting(@"Start In", @"StartHiRes", @[@NO, @YES], @[@"320 × 200", @"640 × 480"],
@@ -155,7 +157,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 6 : self.open == 1 ? 3 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 6 : self.open == 1 ? 4 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -169,9 +171,33 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
             if (fabs([s->values[k] doubleValue] - [v doubleValue]) < 0.05) i = k;
     return i == NSNotFound ? 0 : (NSInteger)i;
 }
-- (NSString *)valueOf:(Setting *)s { return s->labels[[self valueIndex:s]]; }
+- (NSString *)valueOf:(Setting *)s {
+    if ([s->key isEqual:@"SoundBank"]) {                 /* a file the player chose, or the built-in synth */
+        NSString *b = [NSUserDefaults.standardUserDefaults stringForKey:@"SoundBank"];
+        return b.length ? b.lastPathComponent.stringByDeletingPathExtension : @"Built-in";
+    }
+    return s->labels[[self valueIndex:s]];
+}
+- (NSString *)noteOf:(Setting *)s {
+    if ([s->key isEqual:@"SoundBank"]) {
+        NSString *b = [NSUserDefaults.standardUserDefaults stringForKey:@"SoundBank"];
+        return b.length ? @"Your SoundFont for the music; ← goes back to built-in" : s->notes[0];
+    }
+    return s->notes[[self valueIndex:s]];
+}
 - (void)step:(NSInteger)k by:(NSInteger)d {
     Setting *s = [self rowSetting:k];
+    if ([s->key isEqual:@"SoundBank"]) {                 /* → opens a file, ← clears it */
+        if (d < 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SoundBank"];
+        else {
+            NSOpenPanel *op = [NSOpenPanel openPanel];
+            op.message = @"Choose a SoundFont (.sf2) or DLS file for the music";
+            op.allowedFileTypes = @[@"sf2", @"dls", @"SF2", @"DLS"];
+            if ([op runModal] == NSModalResponseOK) [NSUserDefaults.standardUserDefaults setObject:op.URL.path forKey:@"SoundBank"];
+        }
+        self.needsDisplay = YES;
+        return;
+    }
     NSInteger n = (NSInteger)s->values.count;
     [NSUserDefaults.standardUserDefaults setObject:s->values[([self valueIndex:s] + d + n) % n] forKey:s->key];
     self.needsDisplay = YES;
@@ -306,7 +332,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSRect la = [self arrow:k right:NO], ra = [self arrow:k right:YES];
     NSRect va = NSMakeRect(NSMaxX(la) + 4, r.origin.y + 10, ra.origin.x - NSMaxX(la) - 8, 30);
     label([self valueOf:s], heavy(20), cream(), va, NSTextAlignmentCenter, 1.2, YES);
-    NSString *note = s->notes[[self valueIndex:s]];
+    NSString *note = [self noteOf:s];
     if (note.length) label(note, plain(14), note_c(), NSMakeRect(va.origin.x - 60, r.origin.y + 42, va.size.width + 120, 20), NSTextAlignmentCenter, 0.6, YES);
     for (int side = 0; side < 2; side++) {   /* gold pennant arrows */
         NSRect a = side ? ra : la; BOOL lit = self.hover == (side ? 200 : 100) + k;
