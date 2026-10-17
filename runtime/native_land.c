@@ -386,6 +386,11 @@ static void text_solid(int x, int y, const uint8_t *str, int colour) {
 }
 static int cell_things(int idx, int x, int y);
 static uint32_t rng;                                    /* a copy of the game's generator (0x118b92, seed 0x1d3af4) */
+/* For display (not the checks): a thing's random choices the same in every pass of a frame. The game's
+ * generator runs on through a pass, so a thing drawn by two passes (a ride car across their seam) could
+ * jitter differently in each: the halves tore apart, a different way each frame. */
+int tp_native_stable_rng;
+static void rng_for(uint32_t t) { if (tp_native_stable_rng) rng = r32(0x1d3af4) ^ (t * 2654435761u); }
 static int rand15(void) { rng *= 0xbb40e62du; return (int)((rng >> 8) & 0x7fff); }
 static int idiv_trunc(int a, int b) { return a / b; }   /* (C division truncates, as idiv) */
 /* Class 0x0e, ride cars (0x11dd27). Sub-kinds 8, 0x0a, 0x22: the car frame placed by the ride
@@ -393,6 +398,7 @@ static int idiv_trunc(int a, int b) { return a / b; }   /* (C division truncates
  * 0x1b9a78, 47 sprites per kind of visitor); 0x14..0x18: a train of frames; 0x20: one frame
  * without riders. Sounds and click tests along the way are not drawing. */
 static int classE(uint32_t t, int x, int y) {
+    rng_for(t);
     int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
     uint32_t deco = r32(DECO_TABLE), frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
     uint32_t map = r32(MAP_PTR), things = r32(THINGS);
@@ -569,6 +575,7 @@ static int rem_7be8;                                    /* 0x1d7be8: the last by
  * with an offset, from table 0x1b4e5a) picked at random, which the game remembers in word 0x4d;
  * other kinds draw the frame without seats. Scaled mode (0x167182) is not native. */
 static int ride_draw(uint32_t t, int x, int y) {
+    rng_for(t);
     uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES), things = r32(THINGS), deco = r32(DECO_TABLE);
     uint32_t fr = frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
     if (r16(FRAME_MODE)) return (M[FRAME_MODE] & 8) ? 0x304 : 0;
