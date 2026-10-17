@@ -601,7 +601,7 @@ static void *game_thread(void *arg) {
 /* Development: live control for playtests (TP_CONTROL=<file>). Lines appended to the file run in
  * order, one batch per tick: key HEX | type TEXT | mouse X Y B | click X Y [B] | vmouse X Y B |
  * vclick X Y [B] | raw SCAN 1|0 | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
- * sleep S | ack TAG | quit. mouse/click are in the game frame's pixels (320x200 or 640x480);
+ * sleep S | ack TAG | show (the window, which control runs keep hidden) | quit. mouse/click are in the game frame's pixels (320x200 or 640x480);
  * vmouse/vclick in a vshot's pixels (what the window shows, 960 rows high). ack appends TAG to
  * <file>.ack once everything before it has run. */
 static int vshot_size(int *ow, int *oh, NSView *v) {
@@ -682,6 +682,7 @@ static uint32_t key_of_char(unichar c) {
             FILE *f = fopen([path stringByAppendingString:@".ack"].fileSystemRepresentation, "a");
             if (f) { fprintf(f, "%s\n", p.count > 1 ? [p[1] UTF8String] : ""); fclose(f); }
         }
+        else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
         else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
     }
@@ -710,6 +711,11 @@ static uint32_t key_of_char(unichar c) {
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     if (hold) tp_audio_set_volumes(0, 0);
     else tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
+}
+/* The Dock icon brings the window back (a test run's hidden window too). */
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)a hasVisibleWindows:(BOOL)visible {
+    if (_window && !_window.isVisible) [_window makeKeyAndOrderFront:nil];
+    return YES;
 }
 - (void)applicationDidHide:(NSNotification *)n { [self holdGame:YES]; }
 - (void)applicationDidUnhide:(NSNotification *)n { [self holdGame:NO]; }
