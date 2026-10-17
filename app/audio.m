@@ -2,6 +2,7 @@
  * AVAudioSourceNode, and MPU-401 MIDI bytes through Apple's General MIDI
  * synthesizer (DLSSynth). Volumes come from the launcher settings. */
 #import <AVFoundation/AVFoundation.h>
+#import <AudioToolbox/AudioToolbox.h>
 #include "host.h"
 
 static AVAudioEngine *engine;
@@ -69,6 +70,13 @@ int tp_audio_start(void) {
     synth = [[AVAudioUnitMIDIInstrument alloc] initWithAudioComponentDescription:d];
     [engine attachNode:synth];
     [engine connect:synth to:engine.mainMixerNode format:nil];
+    /* The player's own instruments for the General MIDI music (a SoundFont .sf2 or DLS file, launcher > Sound). */
+    NSString *bank = NSProcessInfo.processInfo.environment[@"TP_SOUNDBANK"] ?: [NSUserDefaults.standardUserDefaults stringForKey:@"SoundBank"];
+    if (bank.length && [NSFileManager.defaultManager fileExistsAtPath:bank]) {
+        CFURLRef url = (__bridge CFURLRef)[NSURL fileURLWithPath:bank];
+        OSStatus st = AudioUnitSetProperty(synth.audioUnit, kMusicDeviceProperty_SoundBankURL, kAudioUnitScope_Global, 0, &url, sizeof url);
+        fprintf(stderr, "audio: instruments %s: %s\n", bank.lastPathComponent.UTF8String, st ? "could not be loaded, built-in used" : "loaded");
+    }
     /* Automated tests run the whole path at zero output volume. */
     if (getenv("W32_AUDIO_MUTE") || getenv("TP_MUTE")) engine.mainMixerNode.outputVolume = 0;
     NSError *err = nil;
