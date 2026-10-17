@@ -93,6 +93,7 @@ int main(int argc, char **argv) {
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));
     if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
+    if (getenv("TP_START_HIRES")) tp_view_request_hires(1);          /* as the app's Start In 640x480 */
     int r;
     if (realtime) {
         double next_shot = shots; int shot_n = 0; const char *k = rt_keys;
