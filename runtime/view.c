@@ -191,9 +191,16 @@ static uint8_t snap0[MAX_SCREEN + 65536], snap1[MAX_SCREEN + 65536]; static size
 typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
 void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
 static NDTarget snap_t;
+static struct { int ok, mode; long base, pitch; int clip_w, clip_h, clip_r; } clipinfo;   /* the things' clip window */
+static int capture_clip;
 void tp_view_nested_hook(void) {
-    if (!logging) return;
     extern uint32_t tp_get(unsigned); uint32_t pc = tp_get(9), sp = tp_get(4);
+    if (pc == 0x11be5au && capture_clip) {                /* as the things loop starts: 0x14de1a(1) has set it */
+        clipinfo.base = (long)r32(0x1de5e0) * (long)r32(DISP_PITCH) + (long)r32(0x1de5d0); clipinfo.pitch = (long)r32(DISP_PITCH);
+        clipinfo.clip_w = (int)r32(0x1de5c8); clipinfo.clip_h = (int)r32(0x1de5f0); clipinfo.clip_r = (int)r32(0x1de5ec);
+        clipinfo.mode = G.s; clipinfo.ok = 1; capture_clip = 0;
+    }
+    if (!logging) return;
     if (pc == 0x11be5au || pc == 0x11c01au) {
         size_t n = (size_t)r32(DISP_PITCH) * (size_t)SH; if (n > sizeof snap0) n = sizeof snap0;
         memcpy(pc == 0x11be5au ? snap0 : snap1, M + r32(DISP_BUF), n); snap_n = n;
@@ -288,10 +295,49 @@ static void things_check(int cx, int cy, int rows) {
         fprintf(stderr, "\n");
     }
 }
+/* Native passes (stage 3b): the landscape (native_land.c), copied to the screen, the things
+ * drawn over it (native_land.c's call list through native_draw.c), in the clip window the
+ * game's pass would use. Anything not native yet makes the pass the game's again. */
+typedef struct { NDTarget t; int colour, fail; } NPState;
+static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
+    NPState *st = ctx;
+    if (kind == 5) { st->colour = c; return; }
+    if (kind == 2) { tp_native_draw_sprite(&st->t, M + d, c & 0xff, c >> 8, a, b, e, st->colour); st->colour = 0; return; }
+    if ((kind == 3 && a) || kind == 4) st->fail = 1;
+}
+static uint8_t np_cache[MAX_SCREEN + 65536], np_out[MAX_SCREEN + 65536];
+static int native_pass(int cx, int cy, int rows) {
+    if (!clipinfo.ok || clipinfo.mode != G.s || r16(0x1d667c)) return -1;             /* (FRAME_MODE: scaled drawing) */
+    uint16_t sel = (uint16_t)r16(0x1d6678);
+    if (sel) { int k = M[r32(0x1d3b10) + (uint32_t)sel * 0xc8 + 0xc]; if (k == 0x2c || k == 0x2e) return -1; }   /* (0x164940) */
+    size_t n = (size_t)clipinfo.pitch * (size_t)SH; if (n > sizeof np_cache) return -1;
+    memcpy(np_cache, M + r32(LAND_CACHE), n);             /* (the landscape leaves a few pixels at the map's edge as they were) */
+    if (tp_native_landscape(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, WORLD_H) != 0) return -1;
+    memcpy(np_out, np_cache, n);
+    NPState st = {{np_out, n, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, clipinfo.clip_h, clipinfo.clip_r,
+                   M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0}, 0, 0};
+    tp_native_things(M, cx, cy, rows, np_draw, &st);
+    return st.fail || st.t.unsupported ? -1 : 0;
+}
+static const uint8_t *pass_src;
+static int lazy_save, state_saved;                        /* render_visible: save the game's state on demand */
+static void find_regions(void); static void state_save(void);                           /* where the last pass's picture is (the screen or np_out) */
 #define HOVER 0x1de5acu
 #define CLICKED 0x1de5a0u
 static int pass(int cx, int cy) {
+    static int native_mode = -1; if (native_mode < 0) native_mode = getenv("TP_NATIVE_PASS") ? atoi(getenv("TP_NATIVE_PASS")) : 1;
+    int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32;
+    int rows0 = ((G.s == 1 ? 400 : 480) + th0 - 1) / th0;
+    int native_ok = native_mode >= 1 && native_pass(cx, cy, rows0) == 0;
+    static long np_count, gp_count; if (native_ok) np_count++; else gp_count++;
+    if (getenv("TP_VIEW_DEBUG") && (np_count + gp_count) % 500 == 0) fprintf(stderr, "view: %ld native passes, %ld game passes\n", np_count, gp_count);
+    if (native_ok && native_mode == 1) { pass_src = np_out; return 0; }
+    pass_src = M + r32(DISP_BUF);
+    if (lazy_save && !state_saved) { find_regions(); state_save(); state_saved = 1; }
     int16_t ox = r16(CAM_X), oy = r16(CAM_Y);
+    if (!clipinfo.ok || clipinfo.mode != G.s) {           /* learn the clip window from this game pass */
+        capture_clip = 1; if (tp_hook_pcs[7] == 0xffffffffu) { tp_hook_pcs[7] = 0x11be5au; tp_hooks_changed(); }
+    }
     static int thing_check = -1; if (thing_check < 0) thing_check = getenv("TP_NATIVE_THINGS") != NULL;
     uint32_t keep_hooks[8]; int logged = 0;
     if (thing_check) {                                    /* log the game's calls during this pass */
@@ -319,10 +365,22 @@ static int pass(int cx, int cy) {
         if (r >= 0) things_check(cx, cy, (int)args[2]);
     }
     w16(CAM_X, ox); w16(CAM_Y, oy); w16(LAND_DIRTY, 1); w16(HOVER, hover); w16(CLICKED, clicked);
+    if (tp_hook_pcs[7] == 0x11be5au && !capture_clip) { tp_hook_pcs[7] = 0xffffffffu; tp_hooks_changed(); }
+    if (native_ok && native_mode == 2 && r >= 0) {        /* check: the native picture against the game's */
+        static long cp, cbad, cpx; long diff = 0; int fx = -1, fy = -1; const uint8_t *g = M + r32(DISP_BUF);
+        for (int y = 0; y < WORLD_H; y++) for (int x = TX0; x < TX1; x++) {
+            if (x < 0 || x >= SW) continue;
+            if (np_out[y * SW + x] != g[y * SW + x]) { if (!diff) { fx = x; fy = y; } diff++; }
+        }
+        cp++; if (diff) { cbad++; cpx += diff; if (cbad < 6) fprintf(stderr, "native pass: camera %d,%d differs in %ld pixels (first %d,%d)\n", cx, cy, diff, fx, fy);
+            if (cbad < 3) for (int y = 0; y < WORLD_H; y++) for (int x = TX0; x < TX1; x++) if (x >= 0 && x < SW && np_out[y * SW + x] != g[y * SW + x])
+                fprintf(stderr, "   %d,%d native %d (landscape %d) game %d, game cache %d\n", x, y, np_out[y * SW + x], np_cache[y * SW + x], g[y * SW + x], M[r32(LAND_CACHE) + y * SW + x]); }
+        if (cp % 200 == 0 || cp == 10) fprintf(stderr, "native pass: %ld checked, %ld differ (%ld pixels); %ld native, %ld game passes\n", cp, cbad, cpx, np_count, gp_count);
+    }
     return r < 0 ? -1 : 0;
 }
 static void blit_to_canvas(int cx, int cy, int x0, int x1, int y0, int y1) {
-    const uint8_t *src = M + r32(DISP_BUF);
+    const uint8_t *src = pass_src ? pass_src : M + r32(DISP_BUF);
     int bx = cam_ox(cx, cy), by = cam_oy(cy);
     for (int y = y0; y < y1; y++) {
         int cy2 = by + y; if (cy2 < 0 || cy2 >= CH) continue;
@@ -407,7 +465,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
      * its dirty flag, so the game's frame does not redraw its landscape (that costs game time). */
     static uint8_t cache_keep[MAX_SCREEN]; uint32_t cache = r32(LAND_CACHE); size_t cache_n = (size_t)SW * SH;
     memcpy(cache_keep, M + cache, cache_n);
-    if (!nosave) { find_regions(); state_save(); }
+    lazy_save = !nosave; state_saved = 0;                    /* saved before the first game pass (native passes change nothing) */
     double t0 = now(), budget = all ? 1.0 : 0.012;
     int16_t rcx = r16(CAM_X), rcy = r16(CAM_Y);                 /* the real view's rectangle in the canvas */
     int rx0 = cam_ox(rcx, rcy), ry0 = cam_oy(rcy), rx1 = rx0 + SW, ry1 = ry0 + WORLD_H;
@@ -417,11 +475,13 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
         if (!all && p->x0 >= rx0 && p->x1 <= rx1 && p->y0 >= ry0 && p->y1 <= ry1) continue;   /* the real frame has it */
         if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, 0, p->y1 - p->y0);
+        pass_src = NULL;                                  /* (other copies are of the real frame) */
         rr = (start + k + 1) % ngrid;
         if (now() - t0 > budget) break;
     }
     tp_insns = insns; tp_rep = reps;
-    if (!nosave) state_restore();                             /* (the dirty flag is among the globals) */
+    if (state_saved) state_restore();                         /* (the dirty flag is among the globals) */
+    lazy_save = 0;
     memcpy(M + cache, cache_keep, cache_n);
     /* (the governor lets the game catch up the time the passes took: it runs while behind) */
     if (getenv("TP_VIEW_DEBUG")) {
