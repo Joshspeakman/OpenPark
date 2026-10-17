@@ -247,6 +247,7 @@ static void things_check(int cx, int cy, int rows) {
     }
 }
 #define HOVER 0x1de5acu
+#define CLICKED 0x1de5a0u
 static int pass(int cx, int cy) {
     int16_t ox = r16(CAM_X), oy = r16(CAM_Y);
     static int thing_check = -1; if (thing_check < 0) thing_check = getenv("TP_NATIVE_THINGS") != NULL;
@@ -264,7 +265,7 @@ static int pass(int cx, int cy) {
     /* The renderer also picks the thing under the mouse (0x120ff5, when [0x1de5ac] is set):
      * it records the hit (0x1d6678...) and on a click can open its window (0x135f21). In a
      * pass the camera is not the one the mouse is over, so a pass must not pick: off here. */
-    int16_t hover = r16(HOVER); w16(HOVER, 0);
+    int16_t hover = r16(HOVER), clicked = r16(CLICKED); w16(HOVER, 0); w16(CLICKED, 0);   /* (and its click tests, 0x1de5a0) */
     int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32;
     uint32_t args[3] = {(uint32_t)cx, (uint32_t)cy, (uint32_t)(((G.s == 1 ? 400 : 480) + th - 1) / th)};   /* rows, as 0x113b9a */
     if (logged) { nlog_n = 0; tp_native_things(M, cx, cy, (int)args[2], native_logger, NULL); }   /* on the state the game draws from */
@@ -274,7 +275,7 @@ static int pass(int cx, int cy) {
         logging = 0; memcpy(tp_hook_pcs, keep_hooks, sizeof keep_hooks); tp_hooks_changed();
         if (r >= 0) things_check(cx, cy, (int)args[2]);
     }
-    w16(CAM_X, ox); w16(CAM_Y, oy); w16(LAND_DIRTY, 1); w16(HOVER, hover);
+    w16(CAM_X, ox); w16(CAM_Y, oy); w16(LAND_DIRTY, 1); w16(HOVER, hover); w16(CLICKED, clicked);
     return r < 0 ? -1 : 0;
 }
 static void blit_to_canvas(int cx, int cy, int x0, int x1, int y0, int y1) {
