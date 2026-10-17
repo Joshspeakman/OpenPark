@@ -44,25 +44,29 @@ clang -arch arm64 -O2 -fobjc-arc -Wall -Wno-unused-function -I "$INC" -I runtime
   -o "$APP.new/Contents/MacOS/ThemePark"
 "$PYTHON" tools/export_image.py "$EXE" "$APP.new/Contents/Resources/MAIN.TPIMG" >/dev/null
 "$PYTHON" tools/export_image.py "$INTRO" "$APP.new/Contents/Resources/INTRO.TPIMG" >/dev/null
-# Launcher art from the player's own copy: the title screen and a park from the
-# attract demo, rendered by running the compiled game headless (muted, scratch).
+# Launcher art from the player's own copy: the title screen (its "theme PARK" box heads the
+# launch window), rendered by running the compiled game headless (muted, scratch).
 clang -arch arm64 -O2 -w -I "$INC" -I runtime runtime/host.c runtime/sb16.c runtime/headless.c runtime/verify.c \
   work/app-release/game.a -lz -o "$OUT/tp-headless"
 ART=$(mktemp -d "$OUT/art-XXXXXXXX")
 DS_TEST=1 W32_AUDIO_MUTE=1 "$OUT/tp-headless" --game "$GAMEDIR/GAME" --overlay "$PWD/$ART/o1" \
   --image "$APP.new/Contents/Resources/MAIN.TPIMG" --out "$ART/title" --quantum 1000 --blocks 6000000 >/dev/null
-DS_TEST=1 W32_AUDIO_MUTE=1 TP_CYCLES=40000 "$OUT/tp-headless" --game "$GAMEDIR/GAME" --overlay "$PWD/$ART/o2" \
-  --image "$APP.new/Contents/Resources/MAIN.TPIMG" --out "$ART/demo" --realtime 16 --rt-keys 2:1c0d >/dev/null
 [[ -f $ART/title/frame.png ]] && cp "$ART/title/frame.png" "$APP.new/Contents/Resources/banner.png"
-[[ -f $ART/demo/frame.png ]] && cp "$ART/demo/frame.png" "$APP.new/Contents/Resources/backdrop.png"
 mv "$ART" "$HOME/.Trash/theme-park-art-$(date +%s)"
+# The icon: the park planet from GOG's icon on a Nightly tile like the other ports' (tools/tp_icon.m);
+# GOG's own icon if that cannot be made.
 ICO=$GAMEDIR/goggame-1207660423.ico
 ICONSET=$OUT/AppIcon.iconset
 mkdir -p "$ICONSET"
 sips -s format png "$ICO" --out "$OUT/icon-256.png" >/dev/null
+if clang -fobjc-arc -framework AppKit tools/tp_icon.m -o "$OUT/tp_icon" && "$OUT/tp_icon" "$OUT/icon-256.png" "$OUT/icon-1024.png" --nightly; then
+  SRC=$OUT/icon-1024.png
+else
+  SRC=$OUT/icon-256.png
+fi
 for s in 16 32 128 256 512; do
-  sips -z $s $s "$OUT/icon-256.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  d=$((s*2)); sips -z $d $d "$OUT/icon-256.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  d=$((s*2)); sips -z $d $d "$SRC" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP.new/Contents/Resources/AppIcon.icns"
 COMMIT=$(git rev-parse --short HEAD)
