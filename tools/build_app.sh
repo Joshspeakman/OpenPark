@@ -53,16 +53,40 @@ DS_TEST=1 W32_AUDIO_MUTE=1 "$OUT/tp-headless" --game "$GAMEDIR/GAME" --overlay "
   --image "$APP.new/Contents/Resources/MAIN.TPIMG" --out "$ART/title" --quantum 1000 --blocks 6000000 >/dev/null
 [[ -f $ART/title/frame.png ]] && cp "$ART/title/frame.png" "$APP.new/Contents/Resources/banner.png"
 mv "$ART" "$HOME/.Trash/theme-park-art-$(date +%s)"
-# The icon: the park planet from GOG's icon on a Nightly tile like the other ports' (tools/tp_icon.m);
-# GOG's own icon if that cannot be made.
+# Theme Park's store art (key art, logo, box art) from GOG's public store API, for the launch window
+# and icon on this Mac only: kept in $DATA/art, never in this project. TP_NO_DOWNLOADS=1 skips it;
+# without it the window uses the title screen's logo and the icon GOG's icon from the package.
+fetch_art() {
+  [[ -z ${TP_NO_DOWNLOADS:-} ]] || return 0
+  mkdir -p "$DATA/art"
+  local links
+  links=$(curl -fsSL -m 30 "https://api.gog.com/v2/games/1207660423?locale=en-US" | python3 -c '
+import json, sys
+l = json.load(sys.stdin)["_links"]
+for name, key in (("keyart.jpg", "galaxyBackgroundImage"), ("logo.png", "logo"), ("box.jpg", "boxArtImage")):
+    if key in l: print(name, l[key]["href"])') || { echo "   (GOG's store art could not be listed)"; return 0; }
+  while read -r name url; do
+    [[ -s $DATA/art/$name ]] && continue
+    if curl -fsSL -m 60 -o "$DATA/art/$name.part" "$url" && [[ $(wc -c < "$DATA/art/$name.part") -gt 20000 ]] \
+       && sips -g pixelWidth "$DATA/art/$name.part" >/dev/null 2>&1; then
+      mv "$DATA/art/$name.part" "$DATA/art/$name"
+    else
+      rm -f "$DATA/art/$name.part"; echo "   ($name could not be downloaded from GOG)"
+    fi
+  done <<< "$links"
+}
+fetch_art
+for f in keyart.jpg logo.png; do [[ -s $DATA/art/$f ]] && cp "$DATA/art/$f" "$APP.new/Contents/Resources/$f"; done
+# The icon: the park planet (GOG's box art, else GOG's icon from the package) on a Nightly tile like
+# the other ports' (tools/tp_icon.m); GOG's own icon if that cannot be made.
 ICO=$GAMEDIR/goggame-1207660423.ico
 ICONSET=$OUT/AppIcon.iconset
 mkdir -p "$ICONSET"
 sips -s format png "$ICO" --out "$OUT/icon-256.png" >/dev/null
-if clang -fobjc-arc -framework AppKit tools/tp_icon.m -o "$OUT/tp_icon" && "$OUT/tp_icon" "$OUT/icon-256.png" "$OUT/icon-1024.png" --nightly; then
-  SRC=$OUT/icon-1024.png
-else
-  SRC=$OUT/icon-256.png
+SRC=$OUT/icon-256.png
+if clang -fobjc-arc -framework AppKit tools/tp_icon.m -o "$OUT/tp_icon"; then
+  if [[ -s $DATA/art/box.jpg ]] && "$OUT/tp_icon" "$DATA/art/box.jpg" "$OUT/icon-1024.png" --nightly --box; then SRC=$OUT/icon-1024.png
+  elif "$OUT/tp_icon" "$OUT/icon-256.png" "$OUT/icon-1024.png" --nightly; then SRC=$OUT/icon-1024.png; fi
 fi
 for s in 16 32 128 256 512; do
   sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null

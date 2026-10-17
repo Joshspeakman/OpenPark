@@ -1,41 +1,38 @@
-/* Theme Park's launch window, in the layout the other ports share (Freedom Force, Brutal Half-Life): a banner with the
- * title and a faint motif, gold labels beside menu fields, outlined group buttons, Quit/Play and the build line.
- * The title is the "theme PARK" box from the player's own title screen, rendered at install time by
- * tools/build_app.sh (Resources/banner.png) and scaled in whole steps so its pixels stay square; without it the
- * window sets the title in type. Settings live in the app's user defaults and are read by main.m.
+/* Theme Park's launch window, laid out like Dungeon Siege's (the other ports' launch window): the game's key art
+ * across the top with its logo, a framed box of the main choices (each with a line saying what it does), big
+ * buttons for the groups with a summary under each, and Quit/Play; a group opens as a panel over the window.
+ * Dungeon Siege dresses it in its own stone and wood; here it is the park's grass and fairground lights.
+ *
+ * Art (Resources, put there by tools/build_app.sh, never in this project): keyart.jpg and logo.png are GOG's store
+ * art for Theme Park, downloaded at install time for this Mac only; banner.png is the player's own title screen,
+ * rendered by the compiled game, which gives the grass and, if the download failed, the logo. Without any of it the
+ * window falls back to plain colours and type. Settings live in the app's user defaults and are read by main.m.
  * TP_LAUNCHER_SHOT=<png> renders the window to an image and exits (TP_LAUNCHER_OPEN=<group> with a group open,
- * TP_LAUNCHER_FOCUS=<n> with a row focused). */
+ * TP_LAUNCHER_FOCUS=<n> with a row focused, TP_LAUNCHER_HOVER=<hit> with something under the pointer). */
 #import <Cocoa/Cocoa.h>
 
 static NSColor *rgb(int r, int g, int b) { return [NSColor colorWithSRGBRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:1]; }
-static NSColor *ground(void) { return rgb(11, 22, 15); }
-static NSColor *ray(void) { return rgb(20, 42, 27); }
-static NSColor *gold(void) { return rgb(245, 197, 66); }
-static NSColor *cream(void) { return rgb(248, 241, 220); }
-static NSColor *muted(void) { return rgb(132, 152, 136); }
-static NSColor *panel(void) { return rgb(19, 38, 26); }
-static NSColor *panel_lit(void) { return rgb(30, 58, 39); }
-static NSColor *ride_red(void) { return rgb(196, 52, 40); }
-static NSFont *heavy(CGFloat n) { return [NSFont fontWithName:@"AvenirNextCondensed-HeavyItalic" size:n] ?: [NSFont boldSystemFontOfSize:n]; }
-static NSFont *demi(CGFloat n) { return [NSFont fontWithName:@"AvenirNextCondensed-DemiBold" size:n] ?: [NSFont systemFontOfSize:n weight:NSFontWeightSemibold]; }
-static NSFont *medium(CGFloat n) { return [NSFont fontWithName:@"AvenirNextCondensed-Medium" size:n] ?: [NSFont systemFontOfSize:n]; }
-static NSFont *mono(CGFloat n, BOOL bold) { return [NSFont monospacedSystemFontOfSize:n weight:bold ? NSFontWeightBold : NSFontWeightRegular]; }
+static NSColor *gold(void) { return rgb(247, 201, 72); }
+static NSColor *cream(void) { return rgb(250, 244, 226); }
+static NSColor *note_c(void) { return rgb(196, 204, 176); }
+static NSColor *bulb(void) { return rgb(255, 236, 150); }
+static NSFont *display(CGFloat n) { return [NSFont fontWithName:@"Optima-ExtraBlack" size:n] ?: [NSFont boldSystemFontOfSize:n]; }
+static NSFont *heavy(CGFloat n) { return [NSFont fontWithName:@"Optima-Bold" size:n] ?: [NSFont systemFontOfSize:n weight:NSFontWeightSemibold]; }
+static NSFont *plain(CGFloat n) { return [NSFont fontWithName:@"Optima-Regular" size:n] ?: [NSFont systemFontOfSize:n]; }
 
-static void text(NSString *s, NSFont *f, NSColor *c, NSRect r, NSTextAlignment al, CGFloat kern) {
-    NSMutableParagraphStyle *p = [NSMutableParagraphStyle new]; p.alignment = al; p.lineBreakMode = NSLineBreakByWordWrapping;
-    [s drawInRect:r withAttributes:@{NSFontAttributeName: f, NSForegroundColorAttributeName: c, NSParagraphStyleAttributeName: p, NSKernAttributeName: @(kern)}];
-}
-/* one line, vertically centred in r */
-static void label(NSString *s, NSFont *f, NSColor *c, NSRect r, NSTextAlignment al, CGFloat kern) {
+static void label(NSString *s, NSFont *f, NSColor *c, NSRect r, NSTextAlignment al, CGFloat kern, BOOL shadow) {
+    NSMutableParagraphStyle *p = [NSMutableParagraphStyle new]; p.alignment = al; p.lineBreakMode = NSLineBreakByTruncatingTail;
+    NSMutableDictionary *a = [@{NSFontAttributeName: f, NSForegroundColorAttributeName: c, NSParagraphStyleAttributeName: p, NSKernAttributeName: @(kern)} mutableCopy];
+    if (shadow) { NSShadow *sh = [NSShadow new]; sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.85]; sh.shadowOffset = NSMakeSize(0, -1.5); sh.shadowBlurRadius = 3; a[NSShadowAttributeName] = sh; }
     CGFloat h = f.ascender - f.descender;
-    text(s, f, c, NSMakeRect(r.origin.x, NSMidY(r) - h / 2, r.size.width, h + 2), al, kern);
+    [s drawInRect:NSMakeRect(r.origin.x, NSMidY(r) - h / 2, r.size.width, h + 2) withAttributes:a];
 }
 static void rounded(NSRect r, CGFloat rad, NSColor *fill, NSColor *line, CGFloat w) {
     NSBezierPath *b = [NSBezierPath bezierPathWithRoundedRect:r xRadius:rad yRadius:rad];
     if (fill) { [fill setFill]; [b fill]; }
     if (line) { [line setStroke]; b.lineWidth = w; [b stroke]; }
 }
-/* `r` (top-down pixels) of an image, enlarged k times with hard pixel edges, to be drawn smoothly at any size */
+/* `r` (top-down pixels) of an image enlarged k times with hard pixel edges */
 static NSImage *pixel_crop(NSImage *img, CGRect r, int k) {
     CGImageRef c = [img CGImageForProposedRect:NULL context:nil hints:nil]; if (!c) return nil;
     CGImageRef part = CGImageCreateWithImageInRect(c, r); if (!part) return nil;
@@ -49,10 +46,43 @@ static NSImage *pixel_crop(NSImage *img, CGRect r, int k) {
     CGImageRelease(big); CGContextRelease(g); CGColorSpaceRelease(cs); CGImageRelease(part);
     return out;
 }
+/* the part of an image with any opacity (GOG's logo comes with wide margins) */
+static NSImage *trimmed(NSImage *img) {
+    CGImageRef c = [img CGImageForProposedRect:NULL context:nil hints:nil]; if (!c) return img;
+    size_t w = CGImageGetWidth(c), h = CGImageGetHeight(c); uint8_t *px = calloc(w * h, 4);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB(); CGContextRef g = CGBitmapContextCreate(px, w, h, 8, w * 4, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+    CGContextDrawImage(g, CGRectMake(0, 0, w, h), c);
+    size_t x0 = w, y0 = h, x1 = 0, y1 = 0;
+    for (size_t y = 0; y < h; y++) for (size_t x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    CGContextRelease(g); CGColorSpaceRelease(cs); free(px);
+    if (x1 <= x0 || y1 <= y0) return img;
+    CGImageRef t = CGImageCreateWithImageInRect(c, CGRectMake(x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+    NSImage *r = [[NSImage alloc] initWithCGImage:t size:NSMakeSize(x1 - x0 + 1, y1 - y0 + 1)]; CGImageRelease(t); return r;
+}
+/* fairground bulbs along a rectangle's edges, every `step` points */
+static void bulbs(NSRect r, CGFloat step, BOOL sides) {
+    NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+    NSInteger nx = MAX(1, (NSInteger)lround(r.size.width / step)), ny = MAX(1, (NSInteger)lround(r.size.height / step));
+    for (NSInteger i = 0; i <= nx; i++) {
+        CGFloat x = r.origin.x + r.size.width * i / nx;
+        [pts addObject:[NSValue valueWithPoint:NSMakePoint(x, r.origin.y)]]; [pts addObject:[NSValue valueWithPoint:NSMakePoint(x, NSMaxY(r))]];
+    }
+    if (sides) for (NSInteger i = 1; i < ny; i++) {
+        CGFloat y = r.origin.y + r.size.height * i / ny;
+        [pts addObject:[NSValue valueWithPoint:NSMakePoint(r.origin.x, y)]]; [pts addObject:[NSValue valueWithPoint:NSMakePoint(NSMaxX(r), y)]];
+    }
+    for (NSValue *v in pts) {
+        NSPoint p = v.pointValue;
+        NSGradient *glow = [[NSGradient alloc] initWithStartingColor:[bulb() colorWithAlphaComponent:0.55] endingColor:[bulb() colorWithAlphaComponent:0]];
+        [glow drawFromCenter:p radius:0 toCenter:p radius:8 options:0];
+        [rgb(120, 70, 20) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(p.x - 3.6, p.y - 3.6, 7.2, 7.2)] fill];
+        [rgb(255, 250, 215) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(p.x - 2.6, p.y - 2.6, 5.2, 5.2)] fill];
+    }
+}
 
 /* ---- settings ---- */
-typedef struct { NSString *title, *key; NSArray *values; NSArray<NSString *> *labels; } Setting;
-static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l) { Setting s = {t, k, v, l}; return s; }
+typedef struct { NSString *title, *key; NSArray *values; NSArray<NSString *> *labels, *notes; } Setting;
+static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray *n) { Setting s = {t, k, v, l, n}; return s; }
 
 @interface TPLaunchView : NSView
 @property NSInteger focus, hover, open;   /* open: -1 or group index */
@@ -60,41 +90,55 @@ static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l) { Setti
 @end
 
 enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
-#define WIN_W 760
-#define WIN_H 790
-#define BANNER_H 232
+#define WIN_W 780
+#define WIN_H 760
+#define BANNER_H 250
 
 @implementation TPLaunchView {
-    NSImage *_logo;
-    Setting _top[4];
+    NSImage *_keyart, *_logo, *_grass;
+    Setting _top[2];
     NSArray<NSString *> *_groups;
-    Setting _display[3], _sound[3];
+    Setting _display[4], _sound[3];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
-        NSString *p = [NSBundle.mainBundle pathForResource:@"banner" ofType:@"png"];
-        NSImage *title = p ? [[NSImage alloc] initWithContentsOfFile:p] : nil;
-        if (title) _logo = pixel_crop(title, CGRectMake(58, 17, 206, 36), 8);   /* the title screen's logo box */
+        NSBundle *b = NSBundle.mainBundle; NSString *p;
+        if ((p = [b pathForResource:@"keyart" ofType:@"jpg"])) _keyart = [[NSImage alloc] initWithContentsOfFile:p];
+        if ((p = [b pathForResource:@"logo" ofType:@"png"])) _logo = trimmed([[NSImage alloc] initWithContentsOfFile:p]);
+        NSImage *title = (p = [b pathForResource:@"banner" ofType:@"png"]) ? [[NSImage alloc] initWithContentsOfFile:p] : nil;
+        if (title) {
+            _grass = pixel_crop(title, CGRectMake(272, 64, 40, 40), 2);           /* the title screen's lawn */
+            if (!_logo) _logo = pixel_crop(title, CGRectMake(58, 17, 206, 36), 8); /* its logo box, if GOG's art is missing */
+        }
+        if (_keyart.size.width < 400) _keyart = nil;
         NSArray *vol = @[@0.0, @0.1, @0.2, @0.3, @0.4, @0.5, @0.6, @0.7, @0.8, @0.9, @1.0];
         NSArray *volL = @[@"Off", @"10%", @"20%", @"30%", @"40%", @"50%", @"60%", @"70%", @"80%", @"90%", @"100%"];
-        _top[0] = setting(@"Screen", @"StartFullScreen", @[@NO, @YES], @[@"Window", @"Full screen"]);
-        _top[1] = setting(@"Game speed", @"Cycles", @[@10000, @20000, @40000], @[@"Original", @"Fast (2×)", @"Fastest (4×)"]);
-        _top[2] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"]);
-        _top[3] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"]);
+        NSArray *volN = @[@"", @"", @"", @"", @"", @"", @"", @"", @"", @"", @""];
+        _top[0] = setting(@"Game Speed", @"Cycles", @[@10000, @20000, @40000], @[@"Original", @"Fast", @"Fastest"],
+                          @[@"As GOG's DOSBox runs it", @"Twice the original pace", @"Four times: the seasons fly by"]);
+        _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
+                          @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
         _groups = @[@"Display", @"Sound", @"Controls", @"Files"];
-        _display[0] = setting(@"Pixels", @"SmoothPixels", @[@NO, @YES], @[@"Sharp", @"Smooth"]);
-        _display[1] = setting(@"Aspect", @"Stretch", @[@NO, @YES], @[@"4:3, as on a CRT", @"Fill the window"]);
-        _display[2] = setting(@"Mouse pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The game's own", @"The game's and the Mac's"]);
-        _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"]);
-        _sound[1] = setting(@"Effects volume", @"SoundVolume", vol, volL);
-        _sound[2] = setting(@"Music volume", @"MusicVolume", vol, volL);
-        self.open = -1; self.hover = HIT_NONE;
+        _display[0] = setting(@"Screen", @"StartFullScreen", @[@NO, @YES], @[@"Window", @"Full Screen"],
+                              @[@"A window you can resize; ⌃⌘F switches", @"The whole display; ⌃⌘F switches"]);
+        _display[1] = setting(@"Pixels", @"SmoothPixels", @[@NO, @YES], @[@"Sharp", @"Smooth"],
+                              @[@"Square pixels, as the game drew them", @"Softened as they are scaled up"]);
+        _display[2] = setting(@"Aspect", @"Stretch", @[@NO, @YES], @[@"4:3", @"Fill the Window"],
+                              @[@"The shape a 1994 monitor gave it", @"Stretched to the window's shape"]);
+        _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"],
+                            @[@"Sound Blaster effects and General MIDI music", @"The park is silent"]);
+        _sound[1] = setting(@"Effects Volume", @"SoundVolume", vol, volL, volN);
+        _sound[2] = setting(@"Music Volume", @"MusicVolume", vol, volL, volN);
+        _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
+                            @[@"The Mac's pointer hides over the game", @"The Mac's pointer stays visible too"]);
+        self.open = -1; self.hover = HIT_NONE; self.focus = -1;
         NSDictionary *env = NSProcessInfo.processInfo.environment;
         if (env[@"TP_LAUNCHER_OPEN"]) {
             NSUInteger g = [_groups indexOfObject:[env[@"TP_LAUNCHER_OPEN"] capitalizedString]];
             self.open = g == NSNotFound || g == 3 ? -1 : (NSInteger)g;
         }
-        self.focus = env[@"TP_LAUNCHER_FOCUS"] ? [env[@"TP_LAUNCHER_FOCUS"] integerValue] : -1;
+        if (env[@"TP_LAUNCHER_FOCUS"]) self.focus = [env[@"TP_LAUNCHER_FOCUS"] integerValue];
+        if (env[@"TP_LAUNCHER_HOVER"]) self.hover = [env[@"TP_LAUNCHER_HOVER"] integerValue];
     }
     return self;
 }
@@ -103,7 +147,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 || self.open == 1 ? 3 : self.open < 0 ? 4 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 4 : self.open == 1 ? 3 : self.open < 0 ? 2 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -117,32 +161,36 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
             if (fabs([s->values[k] doubleValue] - [v doubleValue]) < 0.05) i = k;
     return i == NSNotFound ? 0 : (NSInteger)i;
 }
-- (void)set:(NSInteger)k to:(NSInteger)i {
-    Setting *s = [self rowSetting:k];
-    [NSUserDefaults.standardUserDefaults setObject:s->values[i] forKey:s->key];
-    self.needsDisplay = YES;
-}
+- (NSString *)valueOf:(Setting *)s { return s->labels[[self valueIndex:s]]; }
 - (void)step:(NSInteger)k by:(NSInteger)d {
     Setting *s = [self rowSetting:k];
     NSInteger n = (NSInteger)s->values.count;
-    [self set:k to:([self valueIndex:s] + d + n) % n];
+    [NSUserDefaults.standardUserDefaults setObject:s->values[([self valueIndex:s] + d + n) % n] forKey:s->key];
+    self.needsDisplay = YES;
 }
 
 /* ---- layout ---- */
-- (CGFloat)rowsTop { return self.open < 0 ? BANNER_H + 28 : BANNER_H + 84; }
-- (NSRect)labelRect:(NSInteger)k { return NSMakeRect(44, self.rowsTop + 52 * k, 210, 30); }
-- (NSRect)fieldRect:(NSInteger)k { return NSMakeRect(265, self.rowsTop + 52 * k, WIN_W - 265 - 44, 30); }
-- (NSRect)groupRect:(NSInteger)g {
-    CGFloat w = (WIN_W - 88 - 20) / 2;
-    return NSMakeRect(44 + (g % 2) * (w + 20), BANNER_H + 252 + (g / 2) * 66, w, 48);
+- (NSRect)topFrame { return NSMakeRect(56, BANNER_H + 26, WIN_W - 112, 2 * 70 + 16); }
+- (NSRect)panel { return NSMakeRect(42, 132, WIN_W - 84, 512); }
+- (NSRect)rowRect:(NSInteger)k {
+    if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 8 + 70 * k, f.size.width - 20, 70); }
+    NSRect p = self.panel; return NSMakeRect(p.origin.x + 26, p.origin.y + 82 + 74 * k, p.size.width - 52, 70);
 }
-- (NSRect)quitRect { return NSMakeRect(WIN_W / 2 - 252, WIN_H - 116, 236, 48); }
-- (NSRect)playRect { return NSMakeRect(WIN_W / 2 + 16, WIN_H - 116, 236, 48); }
+- (NSRect)arrow:(NSInteger)k right:(BOOL)right {
+    NSRect r = [self rowRect:k];
+    return NSMakeRect(right ? NSMaxX(r) - 46 : NSMaxX(r) - 326, r.origin.y + 10, 34, 30);
+}
+- (NSRect)groupRect:(NSInteger)g { return NSMakeRect(g % 2 ? WIN_W / 2 + 14 : WIN_W / 2 - 14 - 296, BANNER_H + 214 + (g / 2) * 92, 296, 56); }
+- (NSRect)quitRect { return NSMakeRect(WIN_W / 2 - 14 - 230, WIN_H - 92, 230, 58); }
+- (NSRect)playRect { return NSMakeRect(WIN_W / 2 + 14, WIN_H - 92, 230, 58); }
 
 - (NSInteger)hit:(NSPoint)p {
     if (NSPointInRect(p, self.playRect)) return HIT_PLAY;
     if (NSPointInRect(p, self.quitRect)) return self.open >= 0 ? HIT_BACK : HIT_QUIT;
-    for (NSInteger k = 0; k < self.rowCount; k++) if (NSPointInRect(p, [self fieldRect:k])) return 200 + k;
+    for (NSInteger k = 0; k < self.rowCount; k++) {
+        if (NSPointInRect(p, NSInsetRect([self arrow:k right:NO], -6, -6))) return 100 + k;
+        if (NSPointInRect(p, [self rowRect:k])) return 200 + k;
+    }
     if (self.open < 0) for (NSInteger g = 0; g < 4; g++) if (NSPointInRect(p, [self groupRect:g])) return 300 + g;
     return HIT_NONE;
 }
@@ -154,26 +202,13 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         if (h == 303) [self openFiles];
         else { self.open = h - 300; self.focus = -1; }
     }
-    else if (h >= 200) [self popUp:h - 200];
+    else if (h >= 200) { self.focus = h - 200; [self step:h - 200 by:1]; }
+    else if (h >= 100) { self.focus = h - 100; [self step:h - 100 by:-1]; }
     self.needsDisplay = YES;
 }
-- (void)popUp:(NSInteger)k {   /* the field's choices as a menu, over the field like a pop-up button's */
-    Setting *s = [self rowSetting:k];
-    NSInteger cur = [self valueIndex:s];
-    NSMenu *m = [NSMenu new]; m.autoenablesItems = NO; m.font = demi(15);
-    for (NSUInteger i = 0; i < s->labels.count; i++) {
-        NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:s->labels[i] action:@selector(pick:) keyEquivalent:@""];
-        it.target = self; it.tag = k * 100 + (NSInteger)i; it.state = (NSInteger)i == cur ? NSControlStateValueOn : NSControlStateValueOff;
-        [m addItem:it];
-    }
-    NSRect f = [self fieldRect:k];
-    m.minimumWidth = f.size.width;
-    self.focus = k;
-    [m popUpMenuPositioningItem:m.itemArray[cur] atLocation:NSMakePoint(f.origin.x, NSMaxY(f) - 6) inView:self];
-}
-- (void)pick:(NSMenuItem *)it { [self set:it.tag / 100 to:it.tag % 100]; }
 - (void)openFiles {
-    NSString *root = [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
+    NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
+    NSString *root = env.length ? env : [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
     NSString *saves = [root stringByAppendingPathComponent:@"saves/save"];
     [NSFileManager.defaultManager createDirectoryAtPath:saves withIntermediateDirectories:YES attributes:nil error:nil];
     [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:saves]];
@@ -190,126 +225,146 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     switch (e.keyCode) {
     case 0x24: case 0x4c:                                  /* return: play, or press the focused group */
         if (self.focus >= rows && self.open < 0) [self press:300 + self.focus - rows]; else [self press:HIT_PLAY]; break;
-    case 0x31: if (self.focus >= 0 && self.focus < rows) [self popUp:self.focus]; break;   /* space: the focused field's menu */
     case 0x35: [self press:self.open >= 0 ? HIT_BACK : HIT_QUIT]; break;
     case 0x7e: self.focus = self.focus < 0 ? items - 1 : (self.focus + items - 1) % MAX(items, 1); break;
     case 0x7d: self.focus = (self.focus + 1) % MAX(items, 1); break;
     case 0x7b: if (self.focus >= 0 && self.focus < rows) [self step:self.focus by:-1]; break;
-    case 0x7c: if (self.focus >= 0 && self.focus < rows) [self step:self.focus by:1]; break;
+    case 0x7c: case 0x31: if (self.focus >= 0 && self.focus < rows) [self step:self.focus by:1]; break;
     default: [super keyDown:e]; return;
     }
     self.needsDisplay = YES;
 }
 
 /* ---- drawing ---- */
-- (void)button:(NSRect)r title:(NSString *)t primary:(BOOL)primary lit:(BOOL)lit focused:(BOOL)focused {
-    NSColor *fill = primary ? (lit ? rgb(220, 66, 52) : ride_red()) : (lit ? panel_lit() : panel());
-    [fill setFill]; NSRectFill(r);
-    [gold() setStroke]; NSBezierPath *b = [NSBezierPath bezierPathWithRect:NSInsetRect(r, 0.75, 0.75)]; b.lineWidth = focused ? 3 : 1.5; [b stroke];
-    label(t, heavy(primary ? 30 : 25), cream(), r, NSTextAlignmentCenter, 0);
+- (void)fillGrass:(NSRect)r darken:(CGFloat)k {
+    [rgb(10, 18, 8) setFill]; NSRectFill(r);
+    if (_grass) {
+        [NSGraphicsContext saveGraphicsState]; NSRectClip(r);
+        CGFloat t = 80;                                     /* 40 game pixels at 2 points each */
+        for (CGFloat y = floor(r.origin.y / t) * t; y < NSMaxY(r); y += t)
+            for (CGFloat x = floor(r.origin.x / t) * t; x < NSMaxX(r); x += t)
+                [_grass drawInRect:NSMakeRect(x, y, t, t) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES
+                             hints:@{NSImageHintInterpolation: @(NSImageInterpolationNone)}];
+        [[NSColor colorWithWhite:0 alpha:k] setFill]; NSRectFillUsingOperation(r, NSCompositingOperationSourceOver);
+        [NSGraphicsContext restoreGraphicsState];
+    }
 }
-- (void)drawWheelAt:(NSPoint)c radius:(CGFloat)r {   /* the banner's motif: a big wheel, faint like the other ports' emblems */
-    NSColor *line = [gold() colorWithAlphaComponent:0.17];
-    [line setStroke];
-    NSBezierPath *legs = [NSBezierPath bezierPath]; legs.lineWidth = 7; legs.lineCapStyle = NSLineCapStyleRound;
-    [legs moveToPoint:NSMakePoint(c.x - r * 0.62, BANNER_H - 2)]; [legs lineToPoint:c]; [legs lineToPoint:NSMakePoint(c.x + r * 0.62, BANNER_H - 2)];
-    [legs stroke];
-    NSBezierPath *rim = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - r, c.y - r, 2 * r, 2 * r)]; rim.lineWidth = 6; [rim stroke];
-    NSBezierPath *inner = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - r * 0.82, c.y - r * 0.82, 1.64 * r, 1.64 * r)]; inner.lineWidth = 2; [inner stroke];
-    NSBezierPath *spokes = [NSBezierPath bezierPath]; spokes.lineWidth = 2;
-    for (int i = 0; i < 16; i++) {
-        CGFloat a = i * M_PI / 8;
-        [spokes moveToPoint:c]; [spokes lineToPoint:NSMakePoint(c.x + r * cos(a), c.y + r * sin(a))];
-    }
-    [spokes stroke];
-    [[gold() colorWithAlphaComponent:0.17] setFill];
-    [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - 10, c.y - 10, 20, 20)] fill];
-    for (int i = 0; i < 8; i++) {   /* gondolas hang below the rim */
-        CGFloat a = i * M_PI / 4 + M_PI / 8, x = c.x + r * cos(a), y = c.y + r * sin(a);
-        [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(x - 13, y + 4, 26, 20) xRadius:5 yRadius:5] fill];
-    }
+- (void)sign:(NSRect)r title:(NSString *)t primary:(BOOL)primary state:(int)state {   /* state: 0 idle, 1 hover, 2 focused */
+    NSShadow *sh = [NSShadow new]; sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.7]; sh.shadowOffset = NSMakeSize(0, -4); sh.shadowBlurRadius = 8;
+    [NSGraphicsContext saveGraphicsState]; [sh set]; rounded(r, 10, rgb(60, 14, 10), nil, 0); [NSGraphicsContext restoreGraphicsState];
+    NSColor *top = state ? rgb(222, 64, 48) : rgb(190, 42, 32), *bottom = state ? rgb(150, 28, 22) : rgb(118, 20, 16);
+    NSGradient *g = [[NSGradient alloc] initWithStartingColor:top endingColor:bottom];
+    [g drawInBezierPath:[NSBezierPath bezierPathWithRoundedRect:r xRadius:10 yRadius:10] angle:90];
+    rounded(NSInsetRect(r, 1, 1), 9, nil, rgb(255, 214, 120), state == 2 ? 3 : 1.5);
+    rounded(NSInsetRect(r, 7, 7), 5, nil, [rgb(255, 214, 120) colorWithAlphaComponent:0.45], 1);
+    bulbs(NSInsetRect(r, 7, 7), 22, NO);
+    label(t.uppercaseString, display(primary ? 25 : 21), primary ? gold() : cream(), NSInsetRect(r, 10, 0), NSTextAlignmentCenter, 2, YES);
 }
 - (void)drawBanner {
     NSRect br = NSMakeRect(0, 0, WIN_W, BANNER_H);
-    NSGradient *g = [[NSGradient alloc] initWithStartingColor:rgb(16, 34, 22) endingColor:ground()];
-    [g drawInRect:br angle:90];
-    NSPoint c = NSMakePoint(WIN_W - 150, 108);
-    [NSGraphicsContext saveGraphicsState];
-    NSRectClip(br);
-    [ray() setFill];                                        /* carnival rays from the wheel's hub */
-    for (int i = 0; i < 12; i++) {
-        CGFloat a = i * M_PI / 6, w = M_PI / 26;
-        NSBezierPath *p = [NSBezierPath bezierPath];
-        [p moveToPoint:c];
-        [p lineToPoint:NSMakePoint(c.x + 1400 * cos(a - w), c.y + 1400 * sin(a - w))];
-        [p lineToPoint:NSMakePoint(c.x + 1400 * cos(a + w), c.y + 1400 * sin(a + w))];
-        [p closePath]; [p fill];
-    }
-    [self drawWheelAt:c radius:94];
-    [NSGraphicsContext restoreGraphicsState];
-
-    if (_logo) {   /* 206 x 36 game pixels at the CRT's 1.2 pixel aspect */
-        NSRect dst = NSMakeRect(40, 56, 206 * 2, 36 * 2.4);
-        NSShadow *s = [NSShadow new]; s.shadowColor = [NSColor colorWithWhite:0 alpha:0.6]; s.shadowOffset = NSMakeSize(0, -6); s.shadowBlurRadius = 14;
-        [NSGraphicsContext saveGraphicsState]; [s set];
-        [_logo drawInRect:dst fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES
-                    hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
-        [NSGraphicsContext restoreGraphicsState];
+    if (_keyart) {   /* the riders on the right, the sky on the left for the logo */
+        NSSize s = _keyart.size; CGFloat k = MAX(br.size.width / s.width, br.size.height / s.height), w = br.size.width / k, h = br.size.height / k;
+        NSRect from = NSMakeRect(MAX(0, s.width * 0.83 - w), (s.height - h) * 0.5, w, h);   /* GOG's art fades out on its right */
+        [_keyart drawInRect:br fromRect:from operation:NSCompositingOperationCopy fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+        NSGradient *left = [[NSGradient alloc] initWithColorsAndLocations:[rgb(16, 70, 150) colorWithAlphaComponent:0.55], 0.0, [rgb(16, 70, 150) colorWithAlphaComponent:0.0], 0.55, nil];
+        [left drawInRect:br angle:0];
     } else {
-        label(@"THEME", heavy(74), cream(), NSMakeRect(40, 34, 420, 70), NSTextAlignmentLeft, 0);
-        label(@"PARK", heavy(74), gold(), NSMakeRect(40, 96, 420, 70), NSTextAlignmentLeft, 0);
+        NSGradient *sky = [[NSGradient alloc] initWithStartingColor:rgb(40, 120, 210) endingColor:rgb(20, 70, 150)];
+        [sky drawInRect:br angle:90];
     }
-    label(@"NIGHTLY  ·  MAC NATIVE", mono(14, YES), cream(), NSMakeRect(44, 170, 400, 20), NSTextAlignmentLeft, 0.5);
-    [gold() setFill]; NSRectFill(NSMakeRect(32, BANNER_H - 2, WIN_W - 64, 2));
+    NSGradient *fade = [[NSGradient alloc] initWithColorsAndLocations:[NSColor colorWithWhite:0 alpha:0], 0.0, [NSColor colorWithWhite:0 alpha:0], 0.72, [NSColor colorWithWhite:0 alpha:0.75], 1.0, nil];
+    [fade drawInRect:br angle:90];
+    if (_logo) {
+        CGFloat w = 372, h = w * _logo.size.height / _logo.size.width;
+        NSRect dst = NSMakeRect(44, 58, w, h);
+        NSShadow *s = [NSShadow new]; s.shadowColor = [NSColor colorWithWhite:0 alpha:0.55]; s.shadowOffset = NSMakeSize(0, -5); s.shadowBlurRadius = 12;
+        [NSGraphicsContext saveGraphicsState]; [s set];
+        [_logo drawInRect:dst fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+        [NSGraphicsContext restoreGraphicsState];
+        label(@"NATIVE EDITION FOR MACOS", heavy(15), cream(), NSMakeRect(44, NSMaxY(dst) + 14, w, 22), NSTextAlignmentCenter, 3.2, YES);
+    } else {
+        label(@"THEME PARK", display(56), cream(), NSMakeRect(44, 60, 460, 70), NSTextAlignmentLeft, 2, YES);
+        label(@"NATIVE EDITION FOR MACOS", heavy(15), cream(), NSMakeRect(46, 136, 460, 22), NSTextAlignmentLeft, 3.2, YES);
+    }
+    [rgb(160, 96, 30) setFill]; NSRectFill(NSMakeRect(0, BANNER_H, WIN_W, 2));
 }
 - (void)drawRow:(NSInteger)k {
     Setting *s = [self rowSetting:k];
-    NSRect f = [self fieldRect:k];
-    BOOL lit = self.hover == 200 + k, focused = self.focus == k;
-    label(s->title.uppercaseString, demi(17), gold(), [self labelRect:k], NSTextAlignmentLeft, 0.6);
-    rounded(f, 6, [NSColor colorWithWhite:1 alpha:lit ? 0.13 : 0.08], focused ? gold() : nil, 1.5);
-    label(s->labels[[self valueIndex:s]], medium(17), cream(), NSMakeRect(f.origin.x + 14, f.origin.y, f.size.width - 50, f.size.height), NSTextAlignmentLeft, 0.2);
-    /* the up/down chevrons of a pop-up button */
-    CGFloat x = NSMaxX(f) - 22, y = NSMidY(f);
-    NSBezierPath *ch = [NSBezierPath bezierPath]; ch.lineWidth = 1.8; ch.lineCapStyle = NSLineCapStyleRound; ch.lineJoinStyle = NSLineJoinStyleRound;
-    [ch moveToPoint:NSMakePoint(x - 4, y - 3)]; [ch lineToPoint:NSMakePoint(x, y - 7)]; [ch lineToPoint:NSMakePoint(x + 4, y - 3)];
-    [ch moveToPoint:NSMakePoint(x - 4, y + 3)]; [ch lineToPoint:NSMakePoint(x, y + 7)]; [ch lineToPoint:NSMakePoint(x + 4, y + 3)];
-    [cream() setStroke]; [ch stroke];
+    NSRect r = [self rowRect:k];
+    BOOL focused = self.focus == k, hot = self.hover == 100 + k || self.hover == 200 + k;
+    if (focused || hot) rounded(NSInsetRect(r, 0, 3), 6, [rgb(120, 80, 20) colorWithAlphaComponent:focused ? 0.38 : 0.24], nil, 0);
+    label(s->title.uppercaseString, heavy(19), gold(), NSMakeRect(r.origin.x + 18, r.origin.y + 10, 300, 30), NSTextAlignmentLeft, 2, YES);
+    NSRect la = [self arrow:k right:NO], ra = [self arrow:k right:YES];
+    NSRect va = NSMakeRect(NSMaxX(la) + 4, r.origin.y + 10, ra.origin.x - NSMaxX(la) - 8, 30);
+    label([self valueOf:s], heavy(20), cream(), va, NSTextAlignmentCenter, 1.2, YES);
+    NSString *note = s->notes[[self valueIndex:s]];
+    if (note.length) label(note, plain(14), note_c(), NSMakeRect(va.origin.x - 60, r.origin.y + 42, va.size.width + 120, 20), NSTextAlignmentCenter, 0.6, YES);
+    for (int side = 0; side < 2; side++) {   /* gold pennant arrows */
+        NSRect a = side ? ra : la; BOOL lit = self.hover == (side ? 200 : 100) + k;
+        NSBezierPath *t = [NSBezierPath bezierPath];
+        CGFloat cx = NSMidX(a), cy = NSMidY(a), d = side ? 1 : -1;
+        [t moveToPoint:NSMakePoint(cx + 10 * d, cy)]; [t lineToPoint:NSMakePoint(cx - 9 * d, cy - 11)]; [t lineToPoint:NSMakePoint(cx - 9 * d, cy + 11)]; [t closePath];
+        NSShadow *sh = [NSShadow new]; sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.8]; sh.shadowOffset = NSMakeSize(0, -2); sh.shadowBlurRadius = 3;
+        [NSGraphicsContext saveGraphicsState]; [sh set];
+        [(lit ? rgb(255, 228, 140) : rgb(222, 170, 60)) setFill]; [t fill];
+        [NSGraphicsContext restoreGraphicsState];
+        [rgb(110, 50, 14) setStroke]; t.lineWidth = 1.2; [t stroke];
+    }
+}
+- (NSString *)summary:(NSInteger)g {
+    if (g == 0) return [NSString stringWithFormat:@"%@ · %@ · %@", [self valueOf:&_display[0]], [self valueOf:&_display[1]], [self valueOf:&_display[2]]];
+    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"On · Effects %@ · Music %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[2]]];
+    if (g == 2) return @"Mouse and keyboard, as on a PC";
+    return @"Your saved parks, in the Finder";
 }
 - (void)drawRect:(NSRect)dirty {
-    [ground() setFill]; NSRectFill(self.bounds);
+    [self fillGrass:self.bounds darken:0.64];
     [self drawBanner];
-    NSString *hint;
-    if (self.open >= 0) {
-        NSString *title = self.open == 0 ? @"DISPLAY" : self.open == 1 ? @"SOUND" : @"CONTROLS";
-        label(title, heavy(38), gold(), NSMakeRect(40, BANNER_H + 24, 400, 46), NSTextAlignmentLeft, 0);
-    }
-    if (self.open == 2) [self drawControls];
-    for (NSInteger k = 0; k < self.rowCount; k++) [self drawRow:k];
     if (self.open < 0) {
-        for (NSInteger gi = 0; gi < 4; gi++)
-            [self button:[self groupRect:gi] title:_groups[gi] primary:NO lit:self.hover == 300 + gi focused:self.focus == self.rowCount + gi];
-        hint = @"Original speed is the game as GOG's DOSBox runs it. Escape skips the intro.\nFiles opens your saved parks in the Finder.";
-    } else if (self.open == 0)
-        hint = @"Sharp keeps the game's 320 × 200 pixels crisp; Smooth softens them.\n4:3 shows the picture in the shape a 1994 monitor did.";
-    else if (self.open == 1)
-        hint = @"Effects come from the Sound Blaster, music from General MIDI\nplayed by the Mac's built-in synthesizer.";
-    if (hint) text(hint, medium(16), cream(), NSMakeRect(44, self.open < 0 ? BANNER_H + 386 : BANNER_H + 262, WIN_W - 88, 48), NSTextAlignmentLeft, 0.1);
-    [self button:self.quitRect title:self.open >= 0 ? @"BACK" : @"QUIT" primary:NO lit:self.hover == HIT_QUIT || self.hover == HIT_BACK focused:NO];
-    [self button:self.playRect title:@"PLAY" primary:YES lit:self.hover == HIT_PLAY focused:NO];
+        NSRect f = self.topFrame;
+        rounded(f, 8, [NSColor colorWithWhite:0 alpha:0.45], rgb(170, 110, 40), 2);
+        rounded(NSInsetRect(f, 6, 6), 5, nil, [rgb(170, 110, 40) colorWithAlphaComponent:0.45], 1);
+        [[rgb(170, 110, 40) colorWithAlphaComponent:0.5] setFill];
+        NSRectFill(NSMakeRect(f.origin.x + 24, NSMaxY([self rowRect:0]), f.size.width - 48, 1));
+        for (NSInteger k = 0; k < self.rowCount; k++) [self drawRow:k];
+        for (NSInteger gi = 0; gi < 4; gi++) {
+            NSRect r = [self groupRect:gi];
+            int st = self.focus == self.rowCount + gi ? 2 : self.hover == 300 + gi ? 1 : 0;
+            [self sign:r title:_groups[gi] primary:NO state:st];
+            label([self summary:gi], plain(14), note_c(), NSMakeRect(r.origin.x - 10, NSMaxY(r) + 6, r.size.width + 20, 20), NSTextAlignmentCenter, 0.6, YES);
+        }
+    } else {
+        NSRect p = self.panel;
+        NSShadow *sh = [NSShadow new]; sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.8]; sh.shadowOffset = NSMakeSize(0, -6); sh.shadowBlurRadius = 18;
+        [NSGraphicsContext saveGraphicsState]; [sh set]; [NSColor.blackColor setFill]; NSRectFill(p); [NSGraphicsContext restoreGraphicsState];
+        [self fillGrass:p darken:0.72];
+        [rgb(170, 110, 40) setStroke]; NSBezierPath *o = [NSBezierPath bezierPathWithRect:NSInsetRect(p, 1.5, 1.5)]; o.lineWidth = 3; [o stroke];
+        [[rgb(170, 110, 40) colorWithAlphaComponent:0.5] setStroke]; NSBezierPath *in = [NSBezierPath bezierPathWithRect:NSInsetRect(p, 9, 9)]; in.lineWidth = 1; [in stroke];
+        bulbs(NSInsetRect(p, 1.5, 1.5), 34, YES);
+        NSString *title = self.open == 0 ? @"DISPLAY" : self.open == 1 ? @"SOUND" : @"CONTROLS";
+        label(title, display(30), gold(), NSMakeRect(p.origin.x, p.origin.y + 26, p.size.width, 38), NSTextAlignmentCenter, 4, YES);
+        [[rgb(170, 110, 40) colorWithAlphaComponent:0.7] setFill]; NSRectFill(NSMakeRect(p.origin.x + 50, p.origin.y + 74, p.size.width - 100, 1));
+        if (self.open == 2) [self drawControlsIn:p];
+        for (NSInteger k = 0; k < self.rowCount; k++) {
+            [self drawRow:k];
+            if (k + 1 < self.rowCount) { [[rgb(170, 110, 40) colorWithAlphaComponent:0.4] setFill]; NSRectFill(NSMakeRect(p.origin.x + 50, NSMaxY([self rowRect:k]) + 2, p.size.width - 100, 1)); }
+        }
+    }
+    [self sign:self.quitRect title:self.open >= 0 ? @"Back" : @"Quit" primary:NO state:self.hover == HIT_QUIT || self.hover == HIT_BACK];
+    [self sign:self.playRect title:@"Play" primary:YES state:self.hover == HIT_PLAY];
     NSString *build = NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"dev";
-    label([NSString stringWithFormat:@"BUILD %@  ·  DOS RELEASE (GOG)", build], mono(12, NO), muted(), NSMakeRect(44, WIN_H - 42, 500, 18), NSTextAlignmentLeft, 0.3);
+    label([NSString stringWithFormat:@"Nightly %@", build], plain(11), [note_c() colorWithAlphaComponent:0.6], NSMakeRect(WIN_W - 216, WIN_H - 22, 200, 16), NSTextAlignmentRight, 0.5, NO);
 }
-- (void)drawControls {
+- (void)drawControlsIn:(NSRect)p {
     NSArray *rows = @[
-        @[@"Click", @"Select, build, place"], @[@"Right-click or Control-click", @"Cancel, rotate, close panels"],
+        @[@"Click", @"Select, build, place"], @[@"Right- or Control-click", @"Cancel, rotate, close panels"],
         @[@"Mouse at a screen edge", @"Scroll the park"], @[@"Typing", @"Goes to the game as on a PC keyboard"],
-        @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘Q", @"Quit (the game does not save on its own)"],
+        @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘Q", @"Quit (save in the game first)"],
     ];
     for (NSUInteger i = 0; i < rows.count; i++) {
-        NSRect r = NSMakeRect(44, BANNER_H + 92 + 36 * i, 260, 28);
-        label([rows[i][0] uppercaseString], demi(16), gold(), r, NSTextAlignmentLeft, 0.5);
-        label(rows[i][1], medium(17), cream(), NSMakeRect(300, r.origin.y, WIN_W - 344, 28), NSTextAlignmentLeft, 0.1);
+        CGFloat y = p.origin.y + 96 + 46 * i;
+        label([rows[i][0] uppercaseString], heavy(16), gold(), NSMakeRect(p.origin.x + 50, y, 300, 26), NSTextAlignmentLeft, 1.5, YES);
+        label(rows[i][1], plain(17), cream(), NSMakeRect(p.origin.x + 350, y, p.size.width - 390, 26), NSTextAlignmentLeft, 0.4, YES);
     }
 }
 @end
@@ -320,7 +375,6 @@ BOOL tp_launcher_run(void) {
     TPLaunchView *v = [[TPLaunchView alloc] initWithFrame:frame];
     NSString *shot = NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"];
     if (shot) {                                             /* bounded preview render */
-        v.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
         NSBitmapImageRep *rep = [v bitmapImageRepForCachingDisplayInRect:v.bounds];
         [v cacheDisplayInRect:v.bounds toBitmapImageRep:rep];
         [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:shot atomically:YES];
@@ -330,7 +384,7 @@ BOOL tp_launcher_run(void) {
                                               styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskFullSizeContentView
                                                 backing:NSBackingStoreBuffered defer:NO];
     w.releasedWhenClosed = NO; w.titlebarAppearsTransparent = YES; w.titleVisibility = NSWindowTitleHidden; w.movableByWindowBackground = YES;
-    w.title = @"Theme Park"; w.backgroundColor = ground(); w.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    w.title = @"Theme Park"; w.backgroundColor = NSColor.blackColor; w.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     w.contentView = v;
     [w center];
     [w makeKeyAndOrderFront:nil];
