@@ -1,6 +1,7 @@
 /* Theme Park for macOS: a Cocoa window around the recompiled ARM64 game code
  * and the native DOS host (runtime/host.c). The game runs on its own thread;
- * the window shows the 320x200 VGA frame at 4:3 and forwards keyboard/mouse.
+ * the window shows the game's frame (320x200 or its 640x480 SVGA mode) at 4:3
+ * and forwards keyboard/mouse.
  * Data: ~/Games/ThemeParkNative/{game,saves} (game files copied from the
  * user's own GOG package by tools/build_app.sh). */
 #import <Cocoa/Cocoa.h>
@@ -53,7 +54,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 
 @implementation GameView {
     CALayer *_screen;
-    uint32_t _pixels[320 * 200];
+    uint32_t _pixels[640 * 480];
+    int _sw, _sh, _wh;                   /* the game's screen now: size, park rows (tp_view_geometry) */
     NSTrackingArea *_tracking;
     BOOL _cursorHidden;
     uint32_t _buttons;
@@ -91,14 +93,17 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     [CATransaction commit];
 }
 - (void)present {
-    if (!tp_host_frame_rgba(_pixels)) return;
-    uint32_t *px = _pixels; int w = 320, h = 200;
+    int w, h;
+    if (!tp_host_frame_size(&w, &h) || !tp_host_frame_rgba_any(_pixels, 640 * 480)) return;
+    int fw = w, fh = h; uint32_t *px = _pixels;
+    [self updateGeometry];
     if (_zoomed) [self edgePan];
-    if (_zoomed && tp_view_live()) {    /* the zoomed park, the game's interface and its panel */
+    if (_zoomed && tp_view_live() && fw == _sw) {   /* the zoomed park, the game's interface and its panel */
         CGFloat scale = self.window.backingScaleFactor ?: 2;
-        int k = (int)lround([self screenRect].size.width * scale / 320); k = k < 2 ? 2 : k > 6 ? 6 : k;
-        if (!_big || _bigW != 320 * k) { free(_big); _bigW = 320 * k; _bigH = 200 * k; _big = malloc(sizeof *_big * _bigW * _bigH); }
-        tp_view_compose(_big, _bigW, _bigH, _pixels, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
+        int k = (int)lround([self screenRect].size.width * scale / fw); k = k < 1 ? 1 : k > 6 ? 6 : k;
+        if (fw == 320 && k < 2) k = 2;
+        if (!_big || _bigW != fw * k || _bigH != fh * k) { free(_big); _bigW = fw * k; _bigH = fh * k; _big = malloc(sizeof *_big * _bigW * _bigH); }
+        tp_view_compose(_big, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
         px = _big; w = _bigW; h = _bigH;
     }
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -137,30 +142,40 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 
 /* ---- zoom ---- */
+/* The game's screen mode decides the canvas scale; when it changes ([R] in the
+ * park), the zoomed view carries over to the new scale. */
+- (void)updateGeometry {
+    int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh);
+    if (sw == _sw) return;
+    double k = _sw ? (double)sw / _sw : 1;
+    _sw = sw; _sh = sh; _wh = wh;
+    if (_zoomed) { _cx *= k; _cy *= k; [self clampCenter]; tp_view_set(1, _cx, _cy, _zoom); }
+}
 - (double)minZoom {
     double w, h; tp_view_canvas_size(&w, &h);
-    return fmax(0.1, fmin(320.0 / w, TP_VIEW_WORLD_ROWS / h));
+    return fmax(0.1, fmin(_sw / w, _wh / h));
 }
 - (void)clampCenter {
     double w, h; tp_view_canvas_size(&w, &h);
-    double hw = 160.0 / _zoom, hh = TP_VIEW_WORLD_ROWS / 2.0 / _zoom;
+    double hw = _sw / 2.0 / _zoom, hh = _wh / 2.0 / _zoom;
     _cx = hw * 2 >= w ? w / 2 : fmin(fmax(_cx, hw), w - hw);
     _cy = hh * 2 >= h ? h / 2 : fmin(fmax(_cy, hh), h - hh);
 }
 /* Zoom to z keeping the park point under p (view coordinates; NAN: the centre) in place. */
 - (void)zoomTo:(double)z at:(NSPoint)p {
+    [self updateGeometry];
     if (!_zoomed) {
         if (CACurrentMediaTime() - _offAt > 1.0) tp_view_camera_center(&_cx, &_cy);   /* start where the game's view is */
         _zoom = 1;
     }
     NSRect r = [self screenRect];
     double fx = isnan(p.x) ? 0.5 : (p.x - r.origin.x) / r.size.width;
-    double fy = isnan(p.x) ? TP_VIEW_WORLD_ROWS / 400.0 : 1.0 - (p.y - r.origin.y) / r.size.height;
-    double ax = _cx + (fx - 0.5) * 320 / _zoom, ay = _cy + (fy * 200 - TP_VIEW_WORLD_ROWS / 2.0) / _zoom;
+    double fy = isnan(p.x) ? _wh / 2.0 / _sh : 1.0 - (p.y - r.origin.y) / r.size.height;
+    double ax = _cx + (fx - 0.5) * _sw / _zoom, ay = _cy + (fy * _sh - _wh / 2.0) / _zoom;
     z = fmin(fmax(z, [self minZoom]), 4.0);
     if (fabs(z - 1) < 0.04) z = 1;                   /* a detent at the game's own scale */
     _zoom = z;
-    _cx = ax - (fx - 0.5) * 320 / z; _cy = ay - (fy * 200 - TP_VIEW_WORLD_ROWS / 2.0) / z;
+    _cx = ax - (fx - 0.5) * _sw / z; _cy = ay - (fy * _sh - _wh / 2.0) / z;
     [self clampCenter];
     BOOL on = z != 1;
     if (!on && _zoomed) _offAt = CACurrentMediaTime();
@@ -169,7 +184,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 - (void)panBy:(double)dx :(double)dy {               /* view points */
     if (!_zoomed) return;
-    double k = 320.0 / _zoom / [self screenRect].size.width;
+    double k = _sw / _zoom / [self screenRect].size.width;
     _cx += dx * k; _cy += dy * k;
     [self clampCenter];
     tp_view_set(1, _cx, _cy, _zoom);
@@ -177,7 +192,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)edgePan {                                    /* the pointer at the window's edge scrolls, as in the game */
     if (!_mouseIn || !self.window.isKeyWindow) return;
     NSRect r = [self screenRect]; NSPoint p = _mouse; double m = 6, v = 9;
-    if (1.0 - (p.y - r.origin.y) / r.size.height > TP_VIEW_WORLD_ROWS / 200.0) return;   /* over the panel */
+    if (1.0 - (p.y - r.origin.y) / r.size.height > (double)_wh / _sh) return;   /* over the panel */
     double dx = p.x < NSMinX(r) + m ? -v : p.x > NSMaxX(r) - m ? v : 0;
     double dy = p.y > NSMaxY(r) - m ? -v : 0;
     if (dx || dy) [self panBy:dx :dy];
@@ -401,13 +416,14 @@ static void *game_thread(void *arg) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ tp_view_mouse(x, y, 0); });
         }
         else if ([op isEqual:@"vshot"]) {       /* what the window shows (zoomed or not), 1280x800 */
-            static uint32_t frame[64000]; tp_host_frame_rgba(frame);
-            uint32_t *big = malloc(4 * 1280 * 800);
-            if (tp_view_live()) tp_view_compose(big, 1280, 800, frame, 0);
-            else for (int i = 0; i < 1280 * 800; i++) big[i] = frame[(i / 1280 / 4) * 320 + (i % 1280) / 4];
+            static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
+            tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
+            uint32_t *big = malloc(4 * 1280 * 960); int oh = fw == 640 ? 960 : 800;
+            if (tp_view_live()) tp_view_compose(big, 1280, oh, frame, fw, fh, 0);
+            else for (int i = 0; i < 1280 * oh; i++) big[i] = frame[(i / 1280 * fh / oh) * fw + (i % 1280) * fw / 1280];
             NSString *path = [[p subarrayWithRange:NSMakeRange(2, p.count - 2)] componentsJoinedByString:@":"];
             int tp_host_png_rgba(const char *, const uint32_t *, int, int);
-            tp_host_png_rgba(path.fileSystemRepresentation, big, 1280, 800); free(big);
+            tp_host_png_rgba(path.fileSystemRepresentation, big, 1280, oh); free(big);
             fprintf(stderr, "vshot live=%d\n", tp_view_live());
         }
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];

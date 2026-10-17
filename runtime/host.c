@@ -25,6 +25,7 @@ uint32_t tp_get(unsigned i);
 void tp_set(unsigned i, uint32_t v);
 void tp_descriptor(unsigned selector, unsigned base);
 int tp_run(uint32_t budget);
+void tp_host_palette_rgba(uint32_t pal[256]);
 void tp_view_hook(void);    /* view.c */
 void tp_view_poll(void);    /* view.c: queued pointer events */
 uint32_t tp_blocks(void);
@@ -182,6 +183,7 @@ static void mwrite(uint32_t a, const void *d, uint32_t n) {
 }
 static void put16(uint32_t a, uint16_t v) { mwrite(a, &v, 2); }
 static void put32(uint32_t a, uint32_t v) { mwrite(a, &v, 4); }
+static uint32_t get32(uint32_t a) { uint32_t v; if ((uint64_t)a + 4 > MEMORY) stop("host read outside memory"); memcpy(&v, mem + a, 4); return v; }
 
 static void descriptor(uint32_t sel, uint32_t base, uint8_t access) {
     uint32_t limit = 0xfffff; uint8_t flags = 0xc;
@@ -593,6 +595,70 @@ static void govern(void) {
     }
 }
 
+/* ---- VESA 640x480x256 (mode 101h), the game's SVGA mode ([R] in the park) ----
+ * What the game asks for, as GOG's DOSBox (svga_s3) answers it: controller
+ * and mode information through DPMI 0300h (real-mode INT 10h 4F00h/4F01h, the
+ * window granularity is read from the mode information), INT 10h 4F02h to set
+ * the mode and 4F05h to move the 64 KiB window at A0000h over the 640x480
+ * picture. The picture lives in svga_fb; the window is copied in and out of it
+ * on each bank switch, and flushed before a frame is read. */
+#define SVGA_W 640
+#define SVGA_H 480
+#define SVGA_BYTES (SVGA_W * SVGA_H)
+static uint8_t svga_fb[SVGA_BYTES];
+static int svga_bank;
+static uint32_t bank_bytes(int bank) { uint32_t off = (uint32_t)bank * 65536u; return off >= SVGA_BYTES ? 0 : SVGA_BYTES - off < 65536 ? SVGA_BYTES - off : 65536; }
+static void svga_flush(void) { memcpy(svga_fb + svga_bank * 65536u, mem + 0xa0000, bank_bytes(svga_bank)); }
+static void svga_set_bank(int bank) {
+    if (bank < 0 || bank > 15) return;
+    svga_flush(); svga_bank = bank;
+    memcpy(mem + 0xa0000, svga_fb + bank * 65536u, bank_bytes(bank));
+}
+static void vbe_controller_info(uint32_t at) {          /* 4F00h: VbeInfoBlock (VESA 1.2) */
+    uint8_t b[512] = {0};
+    memcpy(b, "VESA", 4); b[4] = 2; b[5] = 1;            /* version 1.2 */
+    uint16_t seg = (uint16_t)(at >> 4), off = (uint16_t)(at & 15);
+    uint16_t oem = off + 0x100, modes = off + 0x120;
+    memcpy(b + 6, &oem, 2); memcpy(b + 8, &seg, 2);       /* OEM string far pointer */
+    memcpy(b + 14, &modes, 2); memcpy(b + 16, &seg, 2);   /* mode list far pointer */
+    uint16_t mem64k = 16; memcpy(b + 18, &mem64k, 2);     /* 1 MiB */
+    memcpy(b + 0x100, "Theme Park native SVGA", 23);
+    uint16_t list[2] = {0x101, 0xffff}; memcpy(b + 0x120, list, 4);
+    mwrite(at, b, sizeof b);
+}
+static int vbe_mode_info(uint32_t at, uint32_t mode) {  /* 4F01h: ModeInfoBlock */
+    if ((mode & 0x1ff) != 0x101) return 0;
+    uint8_t b[256] = {0};
+    uint16_t attr = 0x9b; memcpy(b, &attr, 2);            /* supported, colour, graphics, extended info */
+    b[2] = 7; b[3] = 0;                                   /* window A: exists, readable, writable */
+    uint16_t gran = 64, size = 64, seg = 0xa000, pitch = SVGA_W, w = SVGA_W, h = SVGA_H;
+    memcpy(b + 4, &gran, 2); memcpy(b + 6, &size, 2); memcpy(b + 8, &seg, 2);
+    memcpy(b + 16, &pitch, 2); memcpy(b + 18, &w, 2); memcpy(b + 20, &h, 2);
+    b[22] = 8; b[23] = 16; b[24] = 1; b[25] = 8; b[26] = 1; b[27] = 4; b[28] = 0; b[29] = 0; b[30] = 1;
+    mwrite(at, b, sizeof b);
+    return 1;
+}
+static int vbe_set_mode(uint32_t bx) {
+    if ((bx & 0x1ff) != 0x101) return 0;
+    video_mode = 0x101; svga_bank = 0;
+    if (!(bx & 0x8000)) { memset(svga_fb, 0, sizeof svga_fb); memset(mem + 0xa0000, 0, 65536); }
+    return 1;
+}
+/* INT 10h AX=4Fxx, from protected mode (r: the caller's registers, written back). */
+static void vbe_call(uint32_t *ax, uint32_t *bx, uint32_t *dx, uint32_t buf) {
+    uint32_t f = *ax & 0xff;
+    uint32_t ok = 0x004f, fail = 0x014f;
+    if (f == 0x00) { vbe_controller_info(buf); *ax = ok; }
+    else if (f == 0x01) *ax = vbe_mode_info(buf, *bx & 0xffff) ? ok : fail;   /* bx carries CX for 4F01h */
+    else if (f == 0x02) *ax = vbe_set_mode(*bx) ? ok : fail;
+    else if (f == 0x03) { *bx = video_mode == 0x101 ? 0x101 : video_mode; *ax = ok; }
+    else if (f == 0x05) {
+        if (((*bx >> 8) & 255) == 0) { if ((*bx & 255) == 0) svga_set_bank((int)(*dx & 0xffff)); *ax = ok; }
+        else { *dx = (uint32_t)svga_bank; *ax = ok; }
+    }
+    else *ax = fail;
+}
+
 static void interrupt(uint32_t number) {
     int_calls++;
     static int trace_ints = -1; if (trace_ints < 0) trace_ints = getenv("TP_TRACE_INTS") ? atoi(getenv("TP_TRACE_INTS")) : 0;
@@ -714,6 +780,7 @@ static void interrupt(uint32_t number) {
     if (number == 0x2f && ax == 0x1600) { S(EAX, a & ~255u); return; }   /* Windows enhanced mode: not present */
     if (number == 0x33) {
         if (ax == 0x2f) return;
+        if (ax == 0x0f || ax == 0x1a || ax == 0x1d) return;   /* mickey ratio, sensitivity, display page: no effect here */
         if (ax == 0) { S(EAX, 0xffff); S(EBX, 3); return; }
         if (ax == 1 || ax == 2) { mouse.visible = ax == 1; return; }
         if (ax == 3) { S(EBX, mouse.buttons); S(ECX, mouse.x); S(EDX, mouse.y); return; }
@@ -723,7 +790,15 @@ static void interrupt(uint32_t number) {
         if (ax == 0xc) { mouse.has_cb = 1; mouse.cb_mask = c & 65535; mouse.cb_sel = G(ES); mouse.cb_pc = d; return; }
     }
     if (number == 0x10) {
-        if (ah == 0xf) { S(EAX, (a & 0xffff0000u) | 0x5000 | video_mode); S(EBX, b & ~0xff00u); return; }
+        if (ah == 0x4f) {                         /* VESA BIOS extensions */
+            uint32_t r_ax = ax, r_bx = (ax & 0xff) == 1 ? (c & 0xffff) : (b & 0xffff), r_dx = d & 0xffff;
+            vbe_call(&r_ax, &r_bx, &r_dx, ((ax & 0xff) <= 1) ? address(ES, G(EDI)) : 0);
+            S(EAX, (a & 0xffff0000u) | r_ax);
+            if ((ax & 0xff) == 3) S(EBX, (b & 0xffff0000u) | r_bx);
+            if ((ax & 0xff) == 5) S(EDX, (d & 0xffff0000u) | r_dx);
+            return;
+        }
+        if (ah == 0xf) { S(EAX, (a & 0xffff0000u) | 0x5000 | (video_mode & 0x7f)); S(EBX, b & ~0xff00u); return; }
         if (ah == 0) {
             video_mode = a & 127;
             if (video_mode != 3 && video_mode != 0x13) stop("unsupported VGA mode %x", video_mode);
@@ -787,6 +862,19 @@ static void interrupt(uint32_t number) {
         }
         if (ax == 0x0200) { S(ECX, (c & 0xffff0000u) | 0xf000); S(EDX, (d & 0xffff0000u) | 0xff53); carry(0); return; }
         if (ax == 0x0201) { carry(0); return; }  /* real-mode vectors: no real mode here */
+        if (ax == 0x0300 && (b & 255) == 0x10) {  /* simulate a real-mode INT 10h: the VESA calls (above) */
+            uint32_t rc = address(ES, G(EDI));       /* the real-mode call structure */
+            uint32_t r_ax = get32(rc + 0x1c) & 0xffff, r_bx = get32(rc + 0x10) & 0xffff, r_cx = get32(rc + 0x18) & 0xffff;
+            uint32_t r_dx = get32(rc + 0x14) & 0xffff, r_di = get32(rc + 0x00) & 0xffff;
+            uint32_t es = mem[rc + 0x22] | mem[rc + 0x23] << 8;
+            if ((r_ax >> 8) != 0x4f) { carry(0x8001); return; }
+            uint32_t fn = r_ax & 0xff, pbx = fn == 1 ? r_cx : r_bx;
+            vbe_call(&r_ax, &pbx, &r_dx, es * 16 + r_di);
+            put32(rc + 0x1c, (get32(rc + 0x1c) & 0xffff0000u) | r_ax);
+            if (fn == 3) put32(rc + 0x10, (get32(rc + 0x10) & 0xffff0000u) | pbx);
+            put32(rc + 0x14, (get32(rc + 0x14) & 0xffff0000u) | r_dx);
+            carry(0); return;
+        }
         if (ax == 0x0400) { S(EAX, 0x005a); S(EBX, 3); S(ECX, (c & 0xffffff00u) | 4); S(EDX, 0x0870); carry(0); return; }
         if (ax == 6) {
             uint32_t sel = b & 65535;
@@ -1008,6 +1096,26 @@ int tp_host_frame_rgba(uint32_t *out) {
     return 1;
 }
 
+/* The screen's pixels in the current mode, for the emulation thread (view.c). */
+const uint8_t *tp_host_screen(void) {
+    if (video_mode == 0x101) { svga_flush(); return svga_fb; }
+    return mem + 0xa0000;
+}
+/* The frame in either mode: 320x200 (mode 13h) or 640x480 (VESA 101h). */
+int tp_host_frame_size(int *w, int *h) {
+    if (video_mode == 0x13) { *w = 320; *h = 200; return 1; }
+    if (video_mode == 0x101) { *w = SVGA_W; *h = SVGA_H; return 1; }
+    return 0;
+}
+int tp_host_frame_rgba_any(uint32_t *out, int max_pixels) {
+    if (video_mode == 0x13) return max_pixels >= 64000 ? tp_host_frame_rgba(out) : 0;
+    if (video_mode != 0x101 || max_pixels < SVGA_BYTES) return 0;
+    uint32_t pal[256]; tp_host_palette_rgba(pal);
+    int bank = svga_bank; uint32_t lo = bank * 65536u, hi = lo + bank_bytes(bank);
+    for (uint32_t i = 0; i < SVGA_BYTES; i++) out[i] = pal[i >= lo && i < hi ? mem[0xa0000 + i - lo] : svga_fb[i]];
+    return 1;
+}
+
 static void be32(uint8_t *p, uint32_t v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
 static void chunk(FILE *f, const char *kind, const uint8_t *data, uint32_t n) {
     uint8_t h[8]; be32(h, n); memcpy(h + 4, kind, 4); fwrite(h, 1, 8, f);
@@ -1087,8 +1195,8 @@ static void push_mouse(int x, int y, uint32_t buttons) {
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 void tp_host_mouse(double fx, double fy, uint32_t buttons) {
     int x0 = mouse.rx0, x1 = mouse.rx1, y0 = mouse.ry0, y1 = mouse.ry1;
-    /* The game's range is in the driver's 640x400 space for mode 13h. */
-    int x = clampi((int)(fx * 640.0), x0, x1), y = clampi((int)(fy * 400.0), y0, y1);
+    /* The game's range is in the driver's 640x400 space for mode 13h, 640x480 in VESA 101h. */
+    int x = clampi((int)(fx * 640.0), x0, x1), y = clampi((int)(fy * (video_mode == 0x101 ? 480.0 : 400.0)), y0, y1);
     push_mouse(x, y, buttons);
 }
 static double acc_x, acc_y;
