@@ -25,6 +25,8 @@ uint32_t tp_get(unsigned i);
 void tp_set(unsigned i, uint32_t v);
 void tp_descriptor(unsigned selector, unsigned base);
 int tp_run(uint32_t budget);
+void tp_view_hook(void);    /* view.c */
+void tp_view_poll(void);    /* view.c: queued pointer events */
 uint32_t tp_blocks(void);
 const char *tp_error(void);
 void tp_io_callback(int (*fn)(int, unsigned, unsigned, unsigned));
@@ -370,6 +372,7 @@ static void debug_stats(void) {
 }
 static void realtime_events(void) {
     debug_stats();
+    tp_view_poll();
     if (in_callback && tp_watch_hit) in_callback = 0;
     if (!(G(EFLAGS) & 0x200)) return;
     double t = now_s();
@@ -930,6 +933,35 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     return 0;
 }
 
+/* Calls a game function from the host (cdecl arguments) and runs it to its
+ * return, servicing DOS/BIOS interrupts as usual but no hardware interrupts.
+ * Registers are restored afterwards. Returns EAX, or -1 if it did not return. */
+#define GUEST_RETURN 0xf0f0u      /* no block there: the run stops on arriving */
+int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks) {
+    uint32_t saved[16]; for (int i = 0; i < 16; i++) saved[i] = G(i);
+    uint32_t sp = (G(ESP) - 4096) & ~15u;
+    for (int i = nargs - 1; i >= 0; i--) { sp -= 4; put32(sp, args[i]); }
+    sp -= 4; put32(sp, GUEST_RETURN);
+    S(ESP, sp); S(EIP, fn);
+    int64_t result = -1;
+    jmp_buf outer; memcpy(outer, stop_jb, sizeof outer);
+    if (!setjmp(stop_jb)) {
+        uint32_t ran = 0;
+        while (ran < max_blocks) {
+            int n = tp_run(20000); ran += 20000;
+            if (n == -2 && G(EIP) == GUEST_RETURN) { result = G(EAX); break; }
+            if (n == -3) { extern int tp_hook_armed; tp_hook_armed = 0; continue; }   /* hooks do not apply inside host calls */
+            if (n < 0) break;
+            if (n) interrupt((uint32_t)n);
+        }
+    }
+    memcpy(stop_jb, outer, sizeof outer);
+    for (int i = 0; i < 16; i++) S(i, saved[i]);
+    return result;
+}
+uint8_t *tp_host_memory(void) { return mem; }
+int tp_host_is_realtime(void) { return !deterministic; }
+
 int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
     if (stopped) return -1;
     double deadline = now_s() + ms / 1000.0;
@@ -943,6 +975,7 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
             if (blocks_limit - blocks < budget) budget = (uint32_t)(blocks_limit - blocks);
         }
         int n = tp_run(budget);
+        if (n == -3) { extern int tp_hook_armed; tp_view_hook(); tp_hook_armed = 0; n = 0; }   /* a point the native view watches (view.c) */
         if (stopped) { snprintf(status + strlen(status), sizeof status - strlen(status), " (port I/O)"); return -1; }
         if (n < 0 || (n == 0 && !quantum)) {
             snprintf(status, sizeof status, "native %d at %08x: %s", n, G(EIP), n == -2 ? "no compiled block" : tp_error());
@@ -1005,6 +1038,33 @@ int tp_host_png(const char *path, char hex[65]) {
         for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", md[i]);
     }
     return 1;
+}
+
+/* The current palette as RGBA words (the view's composite uses it). */
+void tp_host_palette_rgba(uint32_t pal[256]) {
+    uint8_t mask = port_val[0x3c6] ? port_val[0x3c6] : 0xff;
+    for (int i = 0; i < 256; i++) {
+        int j = i & mask;
+        uint8_t r = palette[j * 3], g = palette[j * 3 + 1], b = palette[j * 3 + 2];
+        r = (r << 2) | (r >> 4); g = (g << 2) | (g >> 4); b = (b << 2) | (b >> 4);
+        pal[i] = 0xff000000u | (b << 16) | (g << 8) | r;
+    }
+}
+/* An RGBA image as PNG (development output). */
+int tp_host_png_rgba(const char *path, const uint32_t *px, int w, int h) {
+    size_t rowlen = (size_t)w * 3 + 1, len = rowlen * h;
+    uint8_t *rows = malloc(len);
+    for (int y = 0; y < h; y++) {
+        uint8_t *r = rows + y * rowlen; *r++ = 0;
+        for (int x = 0; x < w; x++) { uint32_t v = px[(size_t)y * w + x]; *r++ = v; *r++ = v >> 8; *r++ = v >> 16; }
+    }
+    uLongf n = compressBound(len); uint8_t *z = malloc(n);
+    compress2(z, &n, rows, len, 3); free(rows);
+    FILE *f = fopen(path, "wb"); if (!f) { free(z); return 0; }
+    fwrite("\x89PNG\r\n\x1a\n", 1, 8, f);
+    uint8_t ihdr[13]; be32(ihdr, w); be32(ihdr + 4, h); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = ihdr[11] = ihdr[12] = 0;
+    chunk(f, "IHDR", ihdr, 13); chunk(f, "IDAT", z, (uint32_t)n); chunk(f, "IEND", NULL, 0);
+    fclose(f); free(z); return 1;
 }
 
 void tp_host_key(uint32_t key) {
