@@ -118,6 +118,17 @@ int main(int argc, char **argv) {
                     char p[1024]; snprintf(p, sizeof p, "%s/%s.png", out, name);
                     int tp_host_png_rgba(const char *, const uint32_t *, int, int); tp_host_png_rgba(p, big, ow, oh); free(big);
                     fprintf(stderr, "view shot %s live=%d\n", p, tp_view_live());
+                    if (getenv("TP_VIEW_BENCH")) {        /* development: the compositor's cost at full-screen sizes */
+                        struct timespec a0, a1; uint32_t *o2 = malloc(4 * 2048 * 1536);
+                        for (int sm = 0; sm < 2; sm++) {
+                            clock_gettime(CLOCK_MONOTONIC, &a0);
+                            for (int r = 0; r < 10; r++) tp_view_compose(o2, fw * (fw == 320 ? 6 : 3), fh * (fw == 320 ? 6 : 3), frame, fw, fh, sm);
+                            clock_gettime(CLOCK_MONOTONIC, &a1);
+                            fprintf(stderr, "compose %dx%d smooth=%d: %.2f ms\n", fw * (fw == 320 ? 6 : 3), fh * (fw == 320 ? 6 : 3), sm,
+                                    ((a1.tv_sec - a0.tv_sec) * 1e3 + (a1.tv_nsec - a0.tv_nsec) / 1e6) / 10);
+                        }
+                        free(o2);
+                    }
                 } else { uint32_t key = (uint32_t)strtoul(e, &e, 16); tp_host_key(key); tp_host_key_raw(key >> 8, 1); tp_host_key_raw(key >> 8, 0); }
                 k = *e ? e + 1 : e;
             }
