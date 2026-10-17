@@ -178,7 +178,9 @@ static uint16_t pub_overlay[MAX_SCREEN];         /* 0xffff: no interface there *
 static uint32_t pub_pal[256];
 static double pub_time;
 #define CUR 64                                    /* the game's cursor, cut out of its last frame */
-static uint16_t pub_cursor[CUR * CUR]; static int pub_cur_x, pub_cur_y, pub_cur_ok;   /* offset from the hotspot */
+static uint16_t pub_cursor[CUR * CUR]; static int pub_cur_x, pub_cur_y, pub_cur_ok, pub_cur_w, pub_cur_h, pub_cur_serial;
+static uint8_t pub_panel[MAX_SCREEN];             /* the panel rows as published (without the game's cursor) */
+int tp_view_hw_cursor;                            /* the app shows the cursor itself (a Mac cursor): compose leaves it out */   /* offset from the hotspot */
 static double ptr_fx = -1, ptr_fy = -1;           /* the app's pointer (screen 0..1) */
 static int pub_cx, pub_cy, pub_s;                  /* the published picture's scale */
 
@@ -877,43 +879,37 @@ void tp_view_hook(void) {
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
         if (!active) break;
-        /* The game's cursor, every frame: the screen now is the last frame's back buffer with the cursor
-         * drawn into it (so this compares consecutive presents, published or not). */
         pthread_mutex_lock(&lock);
         const uint8_t *bb = M + r32(DISP_BUF);
-        if (pre_ok) {   /* the screen now = the last back buffer + the cursor drawn at the last mouse position */
-            const uint8_t *tp_host_screen(void); const uint8_t *vga = tp_host_screen();
-            int x0 = SW, y0 = SH, x1 = -1, y1 = -1;
-            for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < SH && y < pre_hy + CUR / 2; y++)
-                for (int x = pre_hx - CUR / 2 < 0 ? 0 : pre_hx - CUR / 2; x < SW && x < pre_hx + CUR / 2; x++)
-                    if (vga[y * SW + x] != pre_cursor[y * SW + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-            /* Only a pointer-sized change is the cursor (the game's are at most about 24 x 28): a bigger one has
-             * park changes in it too, which would be drawn at the pointer, unzoomed; then the last cursor stays. */
-            if (x1 >= 0 && x1 - x0 < 28 && y1 - y0 < 32) {
-                for (int i = 0; i < CUR * CUR; i++) pub_cursor[i] = 0xffff;
-                for (int y = y0; y <= y1 && y - y0 < CUR; y++)
-                    for (int x = x0; x <= x1 && x - x0 < CUR; x++)
-                        if (vga[y * SW + x] != pre_cursor[y * SW + x]) pub_cursor[(y - y0) * CUR + x - x0] = vga[y * SW + x];
-                pub_cur_x = x0 - pre_hx; pub_cur_y = y0 - pre_hy; pub_cur_ok = 1;
-                if (getenv("TP_VIEW_CURSOR")) { static int big; if (x1 - x0 > 24 || y1 - y0 > 28) { if (big++ < 20) fprintf(stderr, "view cursor: box %dx%d at %d,%d (pointer %d,%d)\n", x1 - x0 + 1, y1 - y0 + 1, x0, y0, pre_hx, pre_hy); }
-                    static long n; if (++n % 300 == 0) fprintf(stderr, "view cursor: %ld captures, %d too big\n", n, big); }
-            }
+        {   /* The game's cursor, read where the game keeps it (0x17d2dd draws it in the copy to the screen):
+             * [0x1becb4] shown, [0x1de58c]/[0x1de58e] width and height, [0x1de590] the image (rows
+             * [0x1de594] apart, colour 0xfe transparent), drawn with its corner at the mouse position. */
+            int cw = (uint16_t)r16(0x1de58c), chh = (uint16_t)r16(0x1de58e); uint32_t data = r32(0x1de590), stride = r32(0x1de594);
+            if (r32(0x1becb4) && cw > 0 && chh > 0 && cw <= CUR && chh <= CUR && stride >= (uint32_t)cw && stride <= 640 && data > 0x10000 && data + stride * chh < (64u << 20)) {
+                static uint16_t nc[CUR * CUR];
+                for (int i = 0; i < CUR * CUR; i++) nc[i] = 0xffff;
+                for (int y = 0; y < chh; y++) for (int x = 0; x < cw; x++) { uint8_t v = M[data + (uint32_t)y * stride + x]; if (v != 0xfe) nc[y * CUR + x] = v; }
+                if (memcmp(nc, pub_cursor, sizeof nc) || !pub_cur_ok) { memcpy(pub_cursor, nc, sizeof nc); pub_cur_serial++; }
+                pub_cur_w = cw; pub_cur_h = chh; pub_cur_x = 0; pub_cur_y = 0; pub_cur_ok = 1;
+            } else if (pub_cur_ok) { pub_cur_ok = 0; pub_cur_serial++; }
         }
-        memcpy(pre_cursor, bb, (size_t)SW * SH); pre_ok = 1;
-        { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx * SW / 640; pre_hy = G.s == 1 ? my / 2 : my; }   /* the driver's 640x400 / 640x480 */
         /* Publish only frames whose park picture is coherent: the passes and the real frame drawn
          * from the same game moment (have_world, set when this frame had passes). */
         if (!have_world) { pthread_mutex_unlock(&lock); break; }
         have_world = 0;
         for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
-        { /* The furniture (the date, the advisor buttons) is drawn with the park at times, so it can be in
-           * world_only too: there, what differs from the passes' picture of the park is interface. */
-          int hr[4], bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
-          for (int r = 0; hud_rect(r, hr); r++)
-              for (int y = hr[1]; y < hr[3] && y < WORLD_H; y++) for (int x = hr[0]; x < hr[2]; x++) {
-                  int X = bx + x, Y = by + y, i = y * SW + x;
-                  if (pub_overlay[i] == 0xffff && X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X]) pub_overlay[i] = bb[i];
-              }
+        {   /* The date is usually drawn by the extras (so world_only lacks it: interface), but at times with the
+             * park: then nothing differs there. Only in that case, the date's rectangle is what differs from
+             * the passes' park (not the whole time: the game's frame lacks rides anchored above its top). */
+            int hr[4], n = 0; hud_rect(0, hr);
+            for (int y = hr[1]; y < hr[3]; y++) for (int x = hr[0]; x < hr[2]; x++) n += pub_overlay[y * SW + x] != 0xffff;
+            if (n < 30) {
+                int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
+                for (int y = hr[1]; y < hr[3]; y++) for (int x = hr[0]; x < hr[2]; x++) {
+                    int X = bx + x, Y = by + y, i = y * SW + x;
+                    if (X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X]) pub_overlay[i] = bb[i];
+                }
+            }
         }
         /* Interface pixels that happen to be the colour of the park under them do not differ from it:
          * holes (text over a road, a speech bubble's white over a white flower) that would show the
@@ -947,6 +943,7 @@ void tp_view_hook(void) {
             for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] != 0xffff) { n++; int x = i % SW, y = i / SW; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             fprintf(stderr, "view overlay: %d px, %d,%d..%d,%d\n", n, x0, y0, x1, y1); } }
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
+        memcpy(pub_panel + (size_t)SW * WORLD_H, bb + (size_t)SW * WORLD_H, (size_t)SW * (SH - WORLD_H));
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
@@ -1109,6 +1106,18 @@ void tp_view_camera_center(double *cx, double *cy) {
 }
 int tp_view_camera_moves(void) { return camera_moves; }
 void tp_view_canvas_size(double *w, double *h) { Geo g = geo(vis_s); *w = g.cw; *h = g.ch; }
+/* The game's cursor as RGBA (CUR x CUR, w x h used), its corner's offset from the pointer in screen
+ * pixels; returns a number that changes when it does (0: no cursor). */
+int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy) {
+    pthread_mutex_lock(&lock);
+    int serial = pub_cur_ok ? pub_cur_serial * 2 + 1 : 0;
+    if (pub_cur_ok) {
+        for (int i = 0; i < CUR * CUR; i++) out[i] = pub_cursor[i] == 0xffff ? 0 : pub_pal[pub_cursor[i]];
+        *w = pub_cur_w; *h = pub_cur_h; *ox = pub_cur_x; *oy = pub_cur_y;
+    }
+    pthread_mutex_unlock(&lock);
+    return serial;
+}
 /* Is the zoomed view being drawn (the game is showing its park, at the app's scale)? */
 int tp_view_live(void) {
     pthread_mutex_lock(&lock); int live = want && pub_time && pub_s == vis_s && now() - pub_time < 0.5; pthread_mutex_unlock(&lock);
@@ -1139,7 +1148,7 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
         for (int x = 0; x < ow; x++) {
             double lx = (x + 0.5) * lpx; int ix = (int)floor(lx - col);
             if (ix >= 0 && ix < g.sw) {                                /* the screen column: panel and interface */
-                if (panel_row) { o[x] = frame[(size_t)(iy * fh / g.sh) * fw + ix * fw / g.sw]; continue; }
+                if (panel_row) { o[x] = pub_pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
                 uint16_t u = pub_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pub_pal[u]; continue; }
             }
@@ -1169,7 +1178,8 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
     /* The game's cursor at the pointer, at the screen's scale (over the panel the frame has it already). */
     double plx = ptr_fx * lw, ply = ptr_fy * g.sh;
     int over_panel = ply >= g.wh && plx - col >= 0 && plx - col < g.sw;
-    if (pub_cur_ok && ptr_fy >= 0 && !over_panel) {
+    (void)over_panel;
+    if (pub_cur_ok && ptr_fy >= 0 && !tp_view_hw_cursor) {
         double kx = 1 / lpx, ky = 1 / lpy;
         int hx = (int)(ptr_fx * ow), hy = (int)(ptr_fy * oh);
         for (int y = 0; y < CUR; y++) for (int x = 0; x < CUR; x++) {

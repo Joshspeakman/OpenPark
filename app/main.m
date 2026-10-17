@@ -19,6 +19,8 @@ struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
 void tp_qol_init(void);
+extern int tp_view_hw_cursor;
+int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy);
 int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 
 static NSString *dataRoot(void) {
@@ -71,6 +73,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     int _sw, _sh, _wh;                   /* the game's screen now: size, park rows (tp_view_geometry) */
     NSTrackingArea *_tracking;
     BOOL _cursorHidden;
+    NSCursor *_gameCursor; int _curSerial; double _curKx, _curKy;   /* the game's cursor as a Mac cursor (park view) */
     uint32_t _buttons;
     /* The park view (runtime/view.c): on when zoomed, or when the window is wider
      * than 4:3 (widescreen: the park fills it, the interface stays in a centred
@@ -149,7 +152,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         tp_view_compose(_big, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
         px = _big; w = _bigW; h = _bigH;
     }
-    if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; }
+    if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; if (live) [self setCursorHidden:NO]; }
+    [self updateGameCursor];
     [self updateScanlines:fh];
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs,
@@ -198,12 +202,49 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     NSRect r = _live ? [self viewRect] : [self screenRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
-    /* In the park view, the view draws the game's cursor at the pointer (view.c), as the game does. */
-    [self setCursorHidden:inside && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
+    /* The game's own screen draws its cursor: the Mac's hides over it. The park view shows the game's
+     * cursor as a Mac cursor instead (smooth at the display's rate; the menu bar keeps its own). */
+    [self setCursorHidden:inside && !_live && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     if (_live) tp_view_mouse(fx, fy, _buttons);      /* mapped into the park */
     else tp_host_mouse(fx, fy, _buttons);            /* the game's own screen */
+}
+
+/* The game's cursor (view.c reads it from the game) as the Mac cursor over the park view, at the view's scale. */
+- (void)updateGameCursor {
+    BOOL want = _live && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"];
+    tp_view_hw_cursor = want;
+    if (!want) { if (_gameCursor) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; } return; }
+    static uint32_t px[64 * 64]; int w = 0, h = 0, ox = 0, oy = 0;
+    int serial = tp_view_cursor_rgba(px, &w, &h, &ox, &oy);
+    NSRect vr = [self viewRect];
+    double kx = vr.size.width / [self layoutW], ky = vr.size.height / _sh;   /* points per game pixel */
+    if (serial == _curSerial && fabs(kx - _curKx) < 0.01 && fabs(ky - _curKy) < 0.01 && (_gameCursor || !serial)) return;
+    _curSerial = serial; _curKx = kx; _curKy = ky;
+    if (!serial || w <= 0 || h <= 0) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; return; }
+    double cap = getenv("TP_CURSOR_CAP") ? atof(getenv("TP_CURSOR_CAP")) : 64;      /* macOS shows no cursor larger than 64 points */
+    if (w * kx > cap || h * ky > cap) { double f = cap / fmax(w * kx, h * ky); kx *= f; ky *= f; }
+    CGFloat scale = self.window.backingScaleFactor ?: 2;
+    int pw = (int)lround(w * kx * scale), ph = (int)lround(h * ky * scale);
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:pw pixelsHigh:ph bitsPerSample:8 samplesPerPixel:4
+                                                                     hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:pw * 4 bitsPerPixel:32];
+    uint8_t *d = rep.bitmapData;
+    for (int y = 0; y < ph; y++) for (int x = 0; x < pw; x++) {
+        uint32_t c = px[(y * h / ph) * 64 + x * w / pw];
+        uint8_t *o = d + (size_t)y * pw * 4 + x * 4;
+        if (!c) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
+        o[0] = c & 255; o[1] = (c >> 8) & 255; o[2] = (c >> 16) & 255; o[3] = 255;
+    }
+    rep.size = NSMakeSize(w * kx, h * ky);
+    NSImage *img = [[NSImage alloc] initWithSize:rep.size]; [img addRepresentation:rep];
+    _gameCursor = [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(fmax(0, -ox * kx), fmax(0, -oy * ky))];
+    [self.window invalidateCursorRectsForView:self];
+    if (_mouseIn && self.window.isKeyWindow) [_gameCursor set];
+    if (getenv("TP_CURSOR_DEBUG")) fprintf(stderr, "cursor: serial %d, %dx%d px -> %.0fx%.0f pt, mouse in %d, key %d, hidden %d\n", serial, w, h, w * kx, h * ky, _mouseIn, self.window.isKeyWindow, _cursorHidden);
+}
+- (void)resetCursorRects {
+    if (_gameCursor) [self addCursorRect:[self viewRect] cursor:_gameCursor];
 }
 
 /* A pointer from elsewhere (a game controller), in 0..1 of what is shown. */
@@ -283,7 +324,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     double lw = [self layoutW], col = (lw - _sw) / 2 / lw;
     if (fy > (double)_wh / _sh && fx >= col && fx < 1 - col) return;   /* over the panel */
     double dx = p.x < NSMinX(r) + m ? -v : p.x > NSMaxX(r) - m ? v : 0;
-    double dy = p.y > NSMaxY(r) - m ? -v : p.y < NSMinY(r) + m ? v : 0;
+    double dy = p.y < NSMinY(r) + m ? v : 0;        /* (not at the top: in full screen the pointer goes there for the menu bar) */
     if (dx || dy) [self panBy:dx :dy];
 }
 - (void)magnifyWithEvent:(NSEvent *)e {
