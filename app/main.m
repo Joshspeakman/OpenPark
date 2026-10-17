@@ -18,6 +18,7 @@ BOOL tp_launcher_run(void);
 struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
+void tp_qol_init(void);
 int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 
 static NSString *dataRoot(void) {
@@ -417,6 +418,23 @@ static void *game_thread(void *arg) {
         if (tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
             game_result = -1; break;
         }
+        {   /* Launcher: Tweaks and Free Mode (qol.c reads them; the environment wins, for tests) */
+            NSUserDefaults *u = NSUserDefaults.standardUserDefaults; char v[32];
+            #define QOL_ENV(name, value) do { if (!getenv(name)) { snprintf(v, sizeof v, "%ld", (long)(value)); setenv(name, v, 1); } } while (0)
+            QOL_ENV("TP_EW_GAP", [u integerForKey:@"GrossOutGap"]);
+            QOL_ENV("TP_RIDE_MUSIC", [u boolForKey:@"RideMusic"]);
+            QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
+            QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
+            QOL_ENV("TP_FREE_BUS", [u integerForKey:@"FreeBus"]);
+            #undef QOL_ENV
+            NSDictionary *tunes = [u dictionaryForKey:@"RideTunes"];
+            if (tunes.count && !getenv("TP_RIDE_TUNES")) {
+                NSMutableArray *parts = [NSMutableArray array];
+                for (NSString *k in tunes) [parts addObject:[NSString stringWithFormat:@"%@:%@", k, tunes[k]]];
+                setenv("TP_RIDE_TUNES", [parts componentsJoinedByString:@","].UTF8String, 1);
+            }
+        }
+        tp_qol_init();                                   /* quality-of-life hooks (qol.c), MAIN.EXE's code */
         int r;
         do r = tp_host_run(4000, 0, 50); while (r == 0);
         game_result = r;
@@ -448,7 +466,8 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES}];
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
+                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
@@ -464,6 +483,7 @@ static void *game_thread(void *arg) {
     [NSFileManager.defaultManager createDirectoryAtPath:_saves withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *logPath = [root stringByAppendingPathComponent:@"theme-park.log"];
     freopen(logPath.fileSystemRepresentation, "a", stderr);
+    setvbuf(stderr, NULL, _IOLBF, 0);                  /* (a file: whole lines at once, so the log is current) */
     fprintf(stderr, "--- Theme Park started %s\n", NSDate.date.description.UTF8String);
 
     NSRect frame = NSMakeRect(0, 0, 960, 720);

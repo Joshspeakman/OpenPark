@@ -47,7 +47,7 @@ void tp_host_palette_rgba(uint32_t pal[256]);
 int tp_host_png_rgba(const char *path, const uint32_t *px, int w, int h);
 void tp_host_mouse(double fx, double fy, uint32_t buttons);
 void tp_host_mouse_pos(int *x, int *y);
-extern uint32_t tp_hook_pcs[8];
+extern uint32_t tp_hook_pcs[24];
 void tp_hooks_changed(void);
 extern int tp_hook_which;
 extern uint64_t tp_insns, tp_rep;
@@ -64,6 +64,15 @@ extern uint64_t tp_insns, tp_rep;
  * preview at the pointer: the ghost of a ride or shop being placed, paths, scenery. That is park
  * too (it must zoom with it), so what 0x1149a4 draws goes into the park picture when it returns. */
 #define TOOL_PREVIEW 0x1149a4u
+/* The weather, 0x147606 (from the frame at 0x111f92, after the park): rain as random streaks
+ * in colour 0xc0 over the screen (640x480 units), lightning, the thunder sound. Screen space
+ * like the interface, so in widescreen it would cover only the 4:3 column: what it draws is
+ * kept as a layer the compositor also lays over the side areas (rain is new each frame, so a
+ * repeat of the column's does not show). */
+#define WEATHER      0x147606u
+#define RAIN_COLOUR  0xc0           /* .. 0xc5: a streak fades along its length */
+#define WEATHER2     0x147a27u      /* the other weather (bit 1 of [0x1b14cc]): 360 drifting particles at 0x1d2bb0 */
+#define WEATHER_FLAGS 0x1b14ccu     /* bit 0 rain, 1 particles, 2 storm (rain and lightning) */
 #define PRESENT      0x180210u
 #define PRESENT_HI   0x155507u      /* the same in 640x480 (banked VESA copy) */
 #define CAM_X        0x1d667au
@@ -162,6 +171,8 @@ static uint8_t canvas[MAX_CANVAS], world_only[MAX_SCREEN];
 static uint8_t pre_cursor[MAX_SCREEN]; static int pre_ok, pre_hx, pre_hy;   /* back buffer before the cursor */
 static uint8_t pre_extras[MAX_SCREEN]; static int have_pre_extras;
 static uint8_t pre_tool[MAX_SCREEN];             /* the back buffer as the tool preview starts */
+static uint8_t pre_weather[MAX_SCREEN], weather[MAX_SCREEN]; static int weather_n;   /* what the weather drew (0: nothing) */
+static uint8_t pub_weather[MAX_SCREEN]; static int pub_weather_n;
 static volatile int tool_shown;                   /* the last frame had a tool preview */
 static int active, have_world, in_frame;
 static int16_t seen_cx = -999, seen_cy = -999;   /* the camera as last seen or set by the view */
@@ -577,8 +588,11 @@ static void hooks(int on) {
     tp_hook_pcs[3] = on ? AFTER_SKIP : 0xffffffffu;
     tp_hook_pcs[4] = on ? BEFORE_EXTRAS : 0xffffffffu;
     tp_hook_pcs[5] = on ? TOOL_PREVIEW : 0xffffffffu; tp_hook_pcs[6] = 0xffffffffu;
+    tp_hook_pcs[8] = on ? WEATHER : 0xffffffffu; tp_hook_pcs[9] = 0xffffffffu;
+    tp_hook_pcs[10] = on ? WEATHER2 : 0xffffffffu; tp_hook_pcs[11] = 0xffffffffu;
     if (getenv("TP_VIEW_PROBE")) {   /* development: the back buffer after more steps of the frame */
-        static const uint32_t probe[] = {0x13e149, 0x14e75e, 0x14e6c7};
+        uint32_t probe[3] = {0x13e149, 0x14e75e, 0x14e6c7}; const char *e = getenv("TP_VIEW_PROBE");   /* "a,b,c" (hex) or 1 */
+        for (int k = 0; k < 3 && strchr(e, ','); k++) { probe[k] = (uint32_t)strtoul(e, (char **)&e, 16); if (*e == ',') e++; }
         for (int k = 0; k < 3; k++) tp_hook_pcs[5 + k] = on ? probe[k] : 0xffffffffu;
     }
     tp_hooks_changed();
@@ -608,6 +622,8 @@ void tp_view_hook(void) {
     case 0:                                               /* FRAME_RENDER */
         if (getenv("TP_VIEW_DEBUG")) { static double l; static int c; c++; if (now() - l > 1) { fprintf(stderr, "view: %d game frames/s\n", c); c = 0; l = now(); } }
         hires_step(sc);
+        { static int force = -2; if (force == -2) force = getenv("TP_DEV_WEATHER") ? atoi(getenv("TP_DEV_WEATHER")) : -1;
+          if (force >= 0) M[WEATHER_FLAGS] = (uint8_t)force; }   /* development: 1 rain, 2 particles, 4 storm */
         if (in_frame) break;                              /* an interrupt returned here: same frame */
         poster_step();
         if (!ngrid) make_grid();
@@ -702,6 +718,27 @@ void tp_view_hook(void) {
             tool_shown = n > 0;
         }
         break;
+    case 8: case 10:                                      /* WEATHER, WEATHER2: entered */
+        if (tp_hook_pcs[tp_hook_which] != (tp_hook_which == 8 ? WEATHER : WEATHER2)) break;
+        if (active) {
+            extern uint32_t tp_get(unsigned);
+            memcpy(pre_weather, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
+            tp_hook_pcs[tp_hook_which + 1] = r32(tp_get(4)); tp_hooks_changed();
+        }
+        break;
+    case 9: case 11:                                      /* ... returned: rain pixels (not the lightning), or the particles */
+        tp_hook_pcs[tp_hook_which] = 0xffffffffu; tp_hooks_changed();
+        if (active) {
+            const uint8_t *bb = M + r32(DISP_BUF); int n = weather_n, rain_only = tp_hook_which == 9;
+            if (!n) memset(weather, 0, (size_t)SW * WORLD_H);
+            for (int i = 0; i < SW * WORLD_H; i++)
+                if (bb[i] != pre_weather[i] && (!rain_only || (bb[i] & 0xf8) == RAIN_COLOUR)) { weather[i] = bb[i]; n++; }
+            weather_n = n;
+            if (getenv("TP_VIEW_DEBUG")) { static int k; if (k++ < 6) { int h[256] = {0}, tot = 0;
+                for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] != pre_weather[i]) { h[bb[i]]++; tot++; }
+                fprintf(stderr, "weather %d: %d changed, kept %d:", tp_hook_which, tot, n); for (int c = 0; c < 256; c++) if (h[c] > 5) fprintf(stderr, " %#x x%d", c, h[c]); fprintf(stderr, "\n"); } }
+        }
+        break;
     case 7:
     probe:                                               /* development probes */
         { static int n[8]; if (getenv("TP_VIEW_DUMP") && ++n[tp_hook_which] == 30) {
@@ -712,7 +749,7 @@ void tp_view_hook(void) {
         if (active && have_world) {
             const uint8_t *bb = M + r32(DISP_BUF); int d = 0;
             for (int i = 0; i < SW * WORLD_H; i++) d += bb[i] != world_only[i];
-            static int shown; if (shown++ < 60) fprintf(stderr, "view probe %d (%#x): %d park pixels changed\n", tp_hook_which, tp_hook_pcs[tp_hook_which], d);
+            static int shown; if (shown++ < 4000) fprintf(stderr, "view probe %d (%#x): %d park pixels changed\n", tp_hook_which, tp_hook_pcs[tp_hook_which], d);
         }
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
@@ -770,6 +807,8 @@ void tp_view_hook(void) {
         memcpy(pre_cursor, bb, (size_t)SW * SH); pre_ok = 1;
         { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx * SW / 640; pre_hy = G.s == 1 ? my / 2 : my; }   /* the driver's 640x400 / 640x480 */
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
+        pub_weather_n = weather_n; if (weather_n) memcpy(pub_weather, weather, (size_t)SW * WORLD_H);
+        weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now();
         pthread_mutex_unlock(&lock);
@@ -888,7 +927,7 @@ static void poster_step(void) {
 static int enabled;
 void tp_view_enable(int main_game) {
     pthread_mutex_lock(&lock); enabled = main_game; if (!enabled) want = 0; pthread_mutex_unlock(&lock);
-    if (!main_game) { for (int h = 0; h < 8; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
+    if (!main_game) { for (int h = 0; h < 12; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
     active = 0; have_world = 0; in_frame = 0;
 }
 void tp_view_geometry(int *sw, int *sh, int *wh);
@@ -959,6 +998,11 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
                 if (panel_row) { o[x] = frame[(size_t)(iy * fh / g.sh) * fw + ix * fw / g.sw]; continue; }
                 uint16_t u = pub_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pub_pal[u]; continue; }
+            }
+            /* Beside the 4:3 column (widescreen): the weather the game drew in it, repeated. */
+            if (pub_weather_n && (ix < 0 || ix >= g.sw)) {
+                int wx = ((ix % g.sw) + g.sw) % g.sw, wy = iy % g.wh;
+                if (pub_weather[wy * g.sw + wx]) { o[x] = pub_pal[pub_weather[wy * g.sw + wx]]; continue; }
             }
             double px = vx + lx / z;
             if (ss == 1 && !smooth) {

@@ -237,6 +237,49 @@ Later: the native renderer replaces passes; widescreen, hi-res UI, simulation.
 2. Regenerate driver images automatically (script the dump/mask procedure).
 3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
 
+## Quality of life and free mode (runtime/qol.c) — 2026-10-17
+
+Host hooks at game functions (hook slots 12..23; view.c has 0..11; slots now
+24, with a 4096-entry pre-check so the per-block test stays cheap), set from
+the launcher's new Tweaks and Free Mode pages through the environment:
+- **Grossed-out sounds** (Tweaks; TP_EW_GAP): the "ew" is SICK.RAW (bank 0,
+  sample 13), played only at 0x122fc5 through 0x180c80 when a visitor reacts to
+  a mess in its cell (0x122e22). Every time / at most once per 5, 15 or 30 s /
+  off; skipped calls return to the caller at entry. Demo park, 60 s: 11 of 11
+  as the game; gap 5: 7 played, 3 skipped; off: 9 of 9 skipped.
+- **Ride music** (Tweaks; TP_RIDE_MUSIC, TP_RIDE_TUNES, TP_PARK_TUNE): tunes are
+  MIDI (MUSIC0: RIDE1..17.HMP, then jingles). The park renderer picks the
+  music ride while drawing (first running ride with a tune on screen, or the
+  one under the pointer; [0x1d3ae8], state [0x1d6632]) and at its end plays
+  its type's tune (type table 0x1cced0, 29 records of 0xc8, tune byte +0xb7;
+  play_tune 0x180a20 returns to 0x11c1c7) or stops (0x180990 from
+  0x11c183/0x11c193). The hook at play_tune changes or silences the tune per
+  ride type (off redirects to stop); the park tune plays where no ride's music
+  does (at stop, and at block 0x11c198 when no ride was seen). Checked in the
+  demo park: type 12 tune 1 → 3, → none; park tune 19 becomes current in a
+  park with no running rides. Sound and music calls inside the view's game
+  passes (other cameras) are now dropped.
+- **Free mode** (sandbox parks only, sim level byte 0x1d66f1: 0 sandbox, 1 sim,
+  2 full; found by diffing three new parks): visitors cap — the immediate 800
+  at 0x167ff6 (0x167cd4, how many leave an arriving bus) is now a variable,
+  tp_tune_max_people, made by tools/build_game.py's tunables step (exact
+  instruction match; defined in dispatch.c); up to 1000 (the things pool,
+  1200 records with rides, staff and cars, gives visitors ~1,100 slots). Bus
+  size — the park record's +0x48 raised to the setting (up to 255) as a bus
+  arrives (the game's 20..150 by level, table 0x1b78cc). Sandbox park, bus 150:
+  ~460 visitors within the test. Larger parks are not possible as a setting:
+  the map is a fixed 64x64 grid (4-byte cells at [0x1d3b08]) already walled
+  to its edges by 0x118bc0 with hard-coded offsets; a bigger grid means ~350
+  map references, the minimap, saves and our renderer.
+- **Weather in widescreen**: the weather is drawn in screen space after the
+  park (0x147606 rain, colour 0xc0..0xc5 streaks, and storms with lightning;
+  0x147a27 drifting particles), flags [0x1b14cc] (bit 0 rain, 1 particles, 2
+  storm). view.c captures what each draws (entry snapshot, diff at return) and
+  the compositor repeats the rain and particles across the areas beside the
+  4:3 column; the storm's palette flash already covers the window. Lightning
+  bolts stay where the game draws them, in the column. TP_DEV_WEATHER forces
+  a kind for tests.
+
 ## Done so far
 
 - 2026-10-17 (Claude Code, headed playtest; the user saw "visual instability,

@@ -233,7 +233,21 @@ def main():
             sources.append((a, source.replace('f_%08x(' % a, name + '('), name, data))
             names.setdefault(a, []).append((name, data, len(decoded)))
 
-    header = '#include "rt.h"\nextern uint32_t tp_seg[6], tp_base[8192];\nextern uint64_t tp_insns, tp_rep;\n' \
+    # Tunables: immediates the host may change at run time (runtime/qol.c, the free-mode levers).
+    # Applied only where the instruction is exactly as expected; each becomes a variable defined in
+    # dispatch.c with the game's value.
+    TUNABLES = {0x167ff6: ('cmp eax, 0x320', 'b = 0x320u', 'tp_tune_max_people', 0x320)}   # visitors in the park (0x167cd4)
+    applied = {}
+    for i, (a, src, name, data) in enumerate(sources):
+        for at, (asm, old, var, value) in TUNABLES.items():
+            tag = '/* %08x: %s */' % (at, asm)
+            if tag in src:
+                lines = src.split('\n')
+                lines = [l.replace(old, 'b = ' + var, 1) if tag in l else l for l in lines]
+                src = '\n'.join(lines); applied[var] = value
+        sources[i] = (a, src, name, data)
+    tunable_decls = ''.join('extern uint32_t %s;\n' % v for v in applied)
+    header = '#include "rt.h"\nextern uint32_t tp_seg[6], tp_base[8192];\nextern uint64_t tp_insns, tp_rep;\n' + tunable_decls + \
              'void tp_set_segment(unsigned n, unsigned selector);\n' \
              'uint32_t tp_io(Ctx *c, int output, unsigned port, unsigned size, unsigned value);\n' \
              'void tp_interrupt(Ctx *c, uint32_t number);\n'
@@ -317,7 +331,7 @@ def main():
                 a, ''.join('\\x%02x' % b for b in data), len(data), name) for name, data, _ in variants)
             guarded.append('static void %s(Ctx *c) {\n%s rt_unhandled(c, c->tc, "uncompiled self-modified code variant");\n}\n' % (fn, body))
             entries.append('{0x%xu, %s, %d},' % (a, fn, count))
-    dispatch = header + '\n'.join(decls) + '\n' + ''.join(guarded) + '''
+    dispatch = header + ''.join('uint32_t %s = 0x%xu;\n' % (v, val) for v, val in applied.items()) + '\n'.join(decls) + '\n' + ''.join(guarded) + '''
 typedef void (*Block)(Ctx *);
 static const struct { uint32_t address; Block fn; uint8_t insns; } blocks[] = {
 %s
