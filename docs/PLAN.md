@@ -367,6 +367,14 @@ TP_VIEW_VERIFY 0 bad frames.
   taller native pass has): 0 differing pixels, demo park 320x200 and 640x480
   and the test park.
 
+Also (same day): frames were captured twice when an interrupt returned the game
+to AFTER_RENDER (a capture after the pointer had moved the camera: ~1 frame in
+30 dropped while hovering); now once per frame (0 dropped). The lost first click
+after a menu opened: the view stayed "live" for 0.5 s after the park stopped
+being drawn, so the window kept showing the park and clicks went through the
+park mapping to the wrong place; now it switches to the game's screen from the
+second present without the park (a click on a menu's tick buys at once).
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what

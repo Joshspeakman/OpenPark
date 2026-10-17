@@ -201,7 +201,8 @@ static uint8_t pub_weather[MAX_SCREEN], pub_weather_rep[MAX_SCREEN]; static int 
 static volatile int tool_shown;                   /* the last frame had a tool preview */
 static int16_t fr_cx, fr_cy;                     /* the camera as the frame began */
 static long skipped_moved;                        /* frames left out: the camera moved while drawn */
-static int active, have_world, in_frame, coherent;   /* coherent: this frame had passes */
+static int active, have_world, in_frame, coherent;
+static int frame_park, park_gap; static volatile int pub_park;   /* this frame drew the park; presents since one did; the game shows its park */   /* coherent: this frame had passes */
 static int16_t seen_cx = -999, seen_cy = -999;   /* the camera as last seen or set by the view */
 static volatile int drag_held;                    /* the pointer is dragging in the park (tp_view_poll) */
 static volatile int camera_moves;                 /* the game moved it itself (or the park appeared): the app recentres */
@@ -795,10 +796,10 @@ void tp_view_hook(void) {
             static int old = -1; if (old < 0) old = getenv("TP_VIEW_OLD") != NULL;
             if (t - last >= (old ? 1.0 / 30 : 1.0 / 60)) { last = t; render_visible(vx, vy, vw, vh, 0); coherent = 1; }
         }
-        in_frame = active;
+        in_frame = active; frame_park = active;
         break;
     case 1: case 3:                                       /* AFTER_RENDER (or AFTER_SKIP): the real frame's park */
-        if (tp_hook_which == 3 && !in_frame) break;       /* already taken after the extras */
+        if (!in_frame) break;                             /* already taken (after the extras; or an interrupt returned here) */
         in_frame = 0;
         if (!active) break;
         real_cx = r16(CAM_X); real_cy = r16(CAM_Y);
@@ -808,7 +809,11 @@ void tp_view_hook(void) {
         if (!coherent) { have_pre_extras = 0; break; }
         /* The camera must be the one the frame (and its passes) was drawn with: the game's own scrolling
          * (its mouse handler at the screen's edge, keys) can move it while the frame is drawn. */
-        if (real_cx != fr_cx || real_cy != fr_cy) { have_pre_extras = 0; skipped_moved++; break; }
+        if (real_cx != fr_cx || real_cy != fr_cy) {
+            if (getenv("TP_VIEW_DEBUG")) { int mx, my; tp_host_mouse_pos(&mx, &my);
+                fprintf(stderr, "view: camera moved while drawn %d,%d -> %d,%d (mouse %d,%d, topbar %d)\n", fr_cx, fr_cy, real_cx, real_cy, mx, my, topbar); }
+            have_pre_extras = 0; skipped_moved++; break;
+        }
         real_cx = r16(CAM_X); real_cy = r16(CAM_Y);
         if (tp_hook_which == 1 && have_pre_extras) {      /* the furniture's rectangles from before the extras */
             uint8_t *bb = M + r32(DISP_BUF);
@@ -902,6 +907,10 @@ void tp_view_hook(void) {
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
         if (!active) break;
+        /* Frames presented without the park (a full-screen menu or window): the view is not live from the
+         * second one (not after a timeout), so the game's screen shows and clicks go straight to it. */
+        if (frame_park) park_gap = 0; else if (++park_gap == 2) { pthread_mutex_lock(&lock); pub_park = 0; pthread_mutex_unlock(&lock); }
+        frame_park = 0;
         pthread_mutex_lock(&lock);
         const uint8_t *bb = M + r32(DISP_BUF);
         {   /* The game's cursor, read where the game keeps it (0x17d2dd draws it in the copy to the screen):
@@ -971,7 +980,7 @@ void tp_view_hook(void) {
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
-        pub_cx = real_cx; pub_cy = real_cy; pub_time = now();
+        pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1;
         if (getenv("TP_VIEW_VERIFY")) verify_canvas();    /* development: the picture against fresh native passes */
         pthread_mutex_unlock(&lock);
         break;
@@ -1035,7 +1044,8 @@ void tp_view_poll(void) {
                 ny = ny < GAME_CY0 ? GAME_CY0 : ny > GAME_CY1 ? GAME_CY1 : ny;
                 int nx = (int)lround((px - OX - SW / 2.0 - UYX * ny) / UX);
                 nx = nx < GAME_CX0 ? GAME_CX0 : nx > GAME_CX1 ? GAME_CX1 : nx;
-                if (nx != cx || ny != cy) { w16(CAM_X, (int16_t)nx); w16(CAM_Y, (int16_t)ny); w16(LAND_DIRTY, 1); seen_cx = (int16_t)nx; seen_cy = (int16_t)ny; }
+                if (nx != cx || ny != cy) { w16(CAM_X, (int16_t)nx); w16(CAM_Y, (int16_t)ny); w16(LAND_DIRTY, 1); seen_cx = (int16_t)nx; seen_cy = (int16_t)ny;
+                    if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view poll: camera %d,%d -> %d,%d (in_frame %d)\n", cx, cy, nx, ny, in_frame); }
                 sx = px - cam_ox(nx, ny); sy = py - cam_oy(ny);
             }
             if (sx < 0) sx = 0; if (sx > SW - 1) sx = SW - 1;
@@ -1148,7 +1158,7 @@ int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy) {
 }
 /* Is the zoomed view being drawn (the game is showing its park, at the app's scale)? */
 int tp_view_live(void) {
-    pthread_mutex_lock(&lock); int live = want && pub_time && pub_s == vis_s && now() - pub_time < 0.5; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); int live = want && pub_time && pub_park && pub_s == vis_s && now() - pub_time < 0.5; pthread_mutex_unlock(&lock);
     return live;
 }
 /* A pointer event, in the game screen's 0..1 coordinates (as tp_host_mouse). */
