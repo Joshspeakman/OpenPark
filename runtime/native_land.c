@@ -445,6 +445,167 @@ static int class14(uint32_t t, int x, int y) {
     }
     return missing;
 }
+static int rem_7be8;                                    /* 0x1d7be8: the last bystander pose picked by a kind-8 ride */
+/* The ride renderer (0x169840): the ride's frame (word 10) with its seats filled. The rider
+ * chain (word 0x47 links, at most 36) goes into 40 slots by the ride's kind (byte 0xb3 of the
+ * ride record 0x1cced0 + word 0x16, capacity word 0xa6): kinds 0/1 rotate the riders by dword
+ * 0x20, 5/7 (and 9 while running) seat them in order, filling up with empty seats; seats are
+ * frame elements with flag 0x80, taken from the slots downwards, the rider's sprite in place of
+ * the seat's (table 0x1b9a58 by pose when word 0x92 is negative, else 0x1b9a78 as class 0x0e).
+ * Kind 8 draws the frame's first element and one animated figure: a rider (or a bystander pose
+ * with an offset, from table 0x1b4e5a) picked at random, which the game remembers in word 0x4d;
+ * other kinds draw the frame without seats. Scaled mode (0x167182) is not native. */
+static int ride_draw(uint32_t t, int x, int y) {
+    uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES), things = r32(THINGS), deco = r32(DECO_TABLE);
+    uint32_t fr = frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
+    if (r16(FRAME_MODE)) return (M[FRAME_MODE] & 8) ? 0x304 : 0;
+    uint32_t rec = 0x1cced0 + (uint32_t)(uint16_t)r16(t + 0x16);
+    uint32_t slot[0x28]; int n = 0, start = 0, mode = 2;
+    if (r16(t + 0x47)) {
+        int cap = r16(rec + 0xa6), kind = M[rec + 0xb3];
+        if (kind == 9 && !r16(t + 0x32)) kind = 2;
+        if (kind == 0 || kind == 1 || kind == 5 || kind == 7) {
+            if (cap <= 0 || cap > 0x28) return 0x440 | kind;          /* (the game would divide by 0 / overrun its slots) */
+            uint32_t r = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
+            for (int cnt = 0;; ) {
+                slot[n++] = r;
+                if (!r16(r + 0x47)) break;
+                r = things + (uint32_t)(uint16_t)r16(r + 0x47) * 0xc8;
+                if (cnt++ >= 0x23) break;
+            }
+            int rot = kind <= 1 ? (int)(r32(t + 0x20) % (uint32_t)cap) : 0;
+            start = kind <= 1 ? n - cap + rot : n;
+            if (n > cap) for (int i = n - cap - 1; i >= 0; i--) slot[i] = 0;
+            else if (n < cap) {
+                if (kind <= 1) start = (n + rot) % cap;
+                for (; n < cap; n++) slot[n] = 0xffffffffu;
+            }
+            for (int i = n; i < 0x28; i++) slot[i] = 0;
+            mode = 0;
+        } else if (kind == 8) {
+            if (!r16(t + 0x4d)) {
+                int idx = r16(t + 0x47);
+                uint32_t r = things + (uint32_t)(uint16_t)idx * 0xc8;
+                for (int cnt = 0;; ) {
+                    slot[n++] = (uint32_t)(int16_t)idx;
+                    if (!r16(r + 0x47)) break;
+                    idx = r16(r + 0x47);
+                    r = things + (uint32_t)(uint16_t)idx * 0xc8;
+                    if (cnt++ >= 0x23) break;
+                }
+                for (int i = 0; i < 3; i++) slot[n++] = (uint32_t)-(int)(int16_t)idx;
+                for (int i = n; i < 0x28; i++) slot[i] = 0;
+            }
+            mode = 4;
+        }
+    }
+    if (mode == 2 || mode == 0) {
+        for (uint32_t e = elems + (uint32_t)(uint16_t)r16(fr) * 10, guard = 0; e > elems && guard < 256;
+             e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, guard++) {
+            int fl = (uint16_t)r16(e + 6);
+            if (fl & 0x80) {
+                if (mode == 2 || !r16(t + 0x47)) continue;
+                uint32_t p = 0; int probes = 0;
+                for (; probes < 0x29; probes++) {
+                    if ((uint16_t)start == 0) start = 0x28;
+                    start--;
+                    p = slot[(uint16_t)start];
+                    if (p) break;
+                }
+                if (!p) return 0x450;                                 /* (the game would spin here) */
+                slot[(uint16_t)start] = 0;
+                if (p == 0xffffffffu) continue;
+                uint32_t os = sprites + (uint16_t)r16(e), ns = 0;
+                if ((int16_t)r16(t + 0x92) < 0)
+                    ns = sprites + (uint16_t)r16(0x1b9a58 + (uint32_t)M[p + 0x59] * 4 + (uint32_t)(r16(t + 0x92) & 1) * 2);
+                else if (M[p + 0x59]) {
+                    for (int i = 0; i < 0x2f; i++) if (r16(0x1b9a78 + (uint32_t)i * 2) == r16(e)) {
+                        ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[p + 0x59] * 0x5e + (uint32_t)i * 2);
+                        break;
+                    }
+                    if (!ns) continue;
+                } else {
+                    if (os > sprites) log_blit(os, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl);
+                    continue;
+                }
+                if (ns <= sprites) continue;
+                int bx = (int16_t)x - (M[ns + 4] >> 1) + (M[os + 4] >> 1), by = y - M[ns + 5] + M[os + 5];
+                log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+            } else {
+                uint32_t s = sprites + (uint16_t)r16(e);
+                if (s > sprites) log_blit(s, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl);
+            }
+        }
+        return 0;
+    }
+    /* mode 4 */
+    uint32_t e0 = elems + (uint32_t)(uint16_t)r16(fr) * 10, s0 = sprites + (uint16_t)r16(e0);
+    if (s0 > sprites) log_blit(s0, (int16_t)(x + r16(e0 + 2)), (int16_t)(y + r16(e0 + 4)), (uint16_t)r16(e0 + 6));
+    int ox = 0, oy = 0, cur = r16(t + 0x4d), f;
+    uint32_t r;
+    if (!cur) {
+        for (int k = 0; (uint16_t)k < (uint16_t)n; k++) {
+            cur = (int16_t)slot[(int16_t)(rand15() % (uint16_t)n)];
+            if ((uint16_t)r16(t + 0x85) != cur) break;
+        }
+        if ((int16_t)cur > 0) {
+            r = things + (uint32_t)(int16_t)cur * 0xc8;
+            f = (uint16_t)r16(deco + (uint32_t)(uint16_t)r16(0x1b4a0e + (uint32_t)M[r + 0x59] * 0x24) * 2);
+        } else {
+            r = things + (uint32_t)(-(int16_t)cur) * 0xc8;
+            int rem = rand15() % 9;
+            f = (uint16_t)r16(deco + (uint32_t)(uint16_t)r16(0x1b4e5a + (uint32_t)rem * 6) * 2);
+            rem_7be8 = rem;
+            ox = r16(0x1b4e5c + (uint32_t)rem * 6); oy = r16(0x1b4e5e + (uint32_t)rem * 6);
+        }
+    } else if ((int16_t)cur < 0) {
+        r = things + (uint32_t)(-(int16_t)cur) * 0xc8;
+        f = (uint16_t)r16(r + 0xa);
+        ox = r16(0x1b4e5c + (uint32_t)(uint16_t)rem_7be8 * 6); oy = r16(0x1b4e5e + (uint32_t)(uint16_t)rem_7be8 * 6);
+    } else {
+        r = things + (uint32_t)(int16_t)cur * 0xc8;
+        f = (uint16_t)r16(r + 0xa);
+    }
+    if (tick_is(3)) {                                                 /* advanced, then drawn (the end of a pose stops it) */
+        f = next_frame(f);
+        if (M[frames + (uint32_t)f * 8 + 5] & 1) return 0;
+    }
+    for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10, guard = 0; e > elems && guard < 256;
+         e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, guard++) {
+        uint32_t s = sprites + (uint16_t)r16(e);
+        if (s > sprites) log_blit(s, (int16_t)(x + r16(e + 2) + ox), (int16_t)(y + r16(e + 4) + oy), (uint16_t)r16(e + 6));
+    }
+    return 0;
+}
+/* Class 4, rides (0x11d87a): sub-kinds 2, 4, 6, 0x1e, 0x26 (raised by byte 0xb1) are placed like
+ * people; while running (word 0x2e at least byte 0xa8 of the record) the ride shakes a pixel
+ * and has an overlay animation (word 0x8e, stepped by speed before drawing); 0x1e adds up to
+ * two frames (words 0x87, 0x89). Sub-kind 0x24 is a scaled sprite (0x166dfa): not native. */
+static int class4(uint32_t t, int x, int y) {
+    int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
+    if (sub == 0x24) {
+        uint32_t fr = r32(FRAMES) + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
+        uint32_t e = r32(ELEMENTS) + (uint32_t)(uint16_t)r16(fr) * 10;
+        return r32(SPRITES) + (uint16_t)r16(e) > r32(SPRITES) ? 0x424 : 0;
+    }
+    if (sub == 0x26) y = (int16_t)(y - M[t + 0xb1]);
+    else if (sub != 2 && sub != 4 && sub != 6 && sub != 0x1e) return 0;
+    uint32_t rec = 0x1cced0 + (uint32_t)(uint16_t)r16(t + 0x16);
+    int px = (int16_t)((int16_t)x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
+    int py = (int16_t)((int16_t)y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
+    if ((uint16_t)r16(t + 0x2e) >= M[rec + 0xa8]) {
+        py = (int16_t)(py + (M[0x1d3afc] & 3) - 1);
+        missing = ride_draw(t, px, py);
+        int c = (int16_t)(2 * M[rec + 0xa8] - r16(t + 0x2e)), f = (uint16_t)r16(t + 0x8e);
+        if (c <= 1 || r32(0x1d3afc) % (uint32_t)c != 0) f = next_frame(f);
+        frame_logged(f, px, py);
+    } else if (r16(t + 0xa)) missing = ride_draw(t, px, py);
+    if (sub == 0x1e) {
+        if (r16(t + 0x87)) frame_logged((uint16_t)r16(t + 0x87), px, py);
+        if (r16(t + 0x32) == 2) frame_logged((uint16_t)r16(t + 0x89), px, py);
+    }
+    return missing;
+}
 /* (The renderer's hover test, 0x120ff5, is not drawing: passes turn it off, view.c.)
  * One cell's things (0x11c22a). Returns 0 if every thing in it is native, else the first class that is not. */
 static int cell_things(int idx, int x, int y) {
@@ -476,6 +637,9 @@ static int cell_things(int idx, int x, int y) {
         } else if (cls == 0x12) {
             int m = class12(t, x, y);
             if (m && !missing) missing = m;
+        } else if (cls == 4) {
+            int m = class4(t, x, y);
+            if (m && !missing) missing = m;
         } else if (!missing) missing = cls ? cls : 0x100;
         idx = r16(t + 2);
     }
@@ -483,7 +647,7 @@ static int cell_things(int idx, int x, int y) {
 }
 /* The things loop for camera (cx0, cy0): cell markers and draw calls to the log. */
 void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg, void *ctx) {
-    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); rng = r32(0x1d3af4);
+    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR);
     uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
