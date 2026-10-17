@@ -931,9 +931,14 @@ void tp_view_hook(void) {
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
         if (!active) break;
-        /* Frames presented without the park (a full-screen menu or window): the view is not live from the
-         * second one (not after a timeout), so the game's screen shows and clicks go straight to it. */
-        if (frame_park) park_gap = 0; else if (++park_gap == 2) { pthread_mutex_lock(&lock); pub_park = 0; pthread_mutex_unlock(&lock); }
+        /* Frames presented without the park (a full-screen menu or window): the view is not live once that has
+         * lasted 150 ms (not 0.5 s), so the game's screen shows and clicks go straight to it. */
+        /* (by time: the game also presents a few frames without the park in play, after a camera move) */
+        { static double since; static int maxgap; double t = now();
+          if (frame_park) { if (park_gap > maxgap && getenv("TP_VIEW_DEBUG")) { maxgap = park_gap; fprintf(stderr, "view: longest run of presents without the park %d\n", maxgap); }
+                            park_gap = 0; since = t; }
+          else if (park_gap++ >= 0 && t - since > 0.15 && pub_park) { pthread_mutex_lock(&lock); pub_park = 0; pthread_mutex_unlock(&lock);
+              if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view: no park for %.0f ms (%d presents): the game's screen\n", (t - since) * 1e3, park_gap); } }
         frame_park = 0;
         pthread_mutex_lock(&lock);
         const uint8_t *bb = M + r32(DISP_BUF);
@@ -1183,7 +1188,10 @@ int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy) {
 }
 /* Is the zoomed view being drawn (the game is showing its park, at the app's scale)? */
 int tp_view_live(void) {
-    pthread_mutex_lock(&lock); int live = want && pub_time && pub_park && pub_s == vis_s && now() - pub_time < 0.5; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); int live = want && pub_time && pub_park && pub_s == vis_s && now() - pub_time < 0.5;
+    if (getenv("TP_VIEW_DEBUG")) { static int last = -1; if (live != last) { fprintf(stderr, "view live %d: want %d published %d park %d scale %d/%d age %.3f\n",
+        live, want, pub_time != 0, pub_park, pub_s, vis_s, pub_time ? now() - pub_time : -1); last = live; } }
+    pthread_mutex_unlock(&lock);
     return live;
 }
 /* A pointer event, in the game screen's 0..1 coordinates (as tp_host_mouse). */

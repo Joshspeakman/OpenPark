@@ -19,6 +19,7 @@ struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
 void tp_qol_init(void);
+uint8_t *tp_host_memory(void);
 extern int tp_view_hw_cursor;
 int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy);
 int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
@@ -134,6 +135,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     [self updateGeometry];
     if ((_zoom != 1 || [self wide]) != _viewOn || (_viewOn && fabs([self layoutW] - _lastLW) > 0.5)) [self applyView];
     if (_viewOn && tp_view_camera_moves() != _camMoves) {   /* the game moved its camera itself: look there */
+        if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "app: recentre on the game's camera (moves %d -> %d)\n", _camMoves, tp_view_camera_moves());
         _camMoves = tp_view_camera_moves();
         tp_view_camera_center(&_cx, &_cy); [self clampCenter];
         tp_view_set(1, _cx, _cy, _zoom, _lastLW = [self layoutW]);
@@ -722,6 +724,10 @@ static uint32_t key_of_char(unichar c) {
         else if ([op isEqual:@"ack"]) {
             FILE *f = fopen([path stringByAppendingString:@".ack"].fileSystemRepresentation, "a");
             if (f) { fprintf(f, "%s\n", p.count > 1 ? [p[1] UTF8String] : ""); fclose(f); }
+        }
+        else if ([op isEqual:@"peek"]) {                 /* peek ADDR(hex) LEN: guest memory to the log */
+            uint8_t *m = tp_host_memory(); uint32_t a = (uint32_t)strtoul([p[1] UTF8String], NULL, 16); int len = p.count > 2 ? [p[2] intValue] : 4;
+            fprintf(stderr, "peek %06x:", a); for (int i = 0; i < len && i < 64; i++) fprintf(stderr, " %02x", m[a + i]); fprintf(stderr, "\n");
         }
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
