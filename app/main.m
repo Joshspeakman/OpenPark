@@ -57,6 +57,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b;
 - (void)zoomIn:(id)sender;
 - (void)zoomOut:(id)sender;
+- (void)centerOn:(double)cx :(double)cy;
 @end
 
 @implementation GameView {
@@ -269,6 +270,11 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     [self clampCenter];
     tp_view_set(1, _cx, _cy, _zoom, _lastLW = [self layoutW]);
 }
+- (void)centerOn:(double)cx :(double)cy {           /* canvas point (development control) */
+    [self updateGeometry];
+    if (!_viewOn) _zoom = _zoom ?: 1;
+    _cx = cx; _cy = cy; [self applyViewKeepingCenter];
+}
 - (void)edgePan {                                    /* the pointer at the window's edge scrolls, as in the game */
     if (!_mouseIn || !self.window.isKeyWindow || !_live) return;
     NSRect r = [self viewRect]; NSPoint p = _mouse; double m = 6, v = 9;
@@ -450,7 +456,7 @@ static void *game_thread(void *arg) {
         if ([u objectForKey:@"Cycles"] && [u doubleForKey:@"Cycles"] == 10000) [u setDouble:15000 forKey:@"Cycles"];
         [u setInteger:2 forKey:@"SpeedModel"];
     }
-    BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0;
+    BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0 || NSProcessInfo.processInfo.environment[@"TP_CONTROL"].length > 0;
     if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
     if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }
     if (!getenv("TP_CYCLES")) tp_host_set_cycles([u doubleForKey:@"Cycles"]);
@@ -572,7 +578,97 @@ static void *game_thread(void *arg) {
     menu = nm;
 }
 
+/* Development: live control for playtests (TP_CONTROL=<file>). Lines appended to the file run in
+ * order, one batch per tick: key HEX | type TEXT | mouse X Y B | click X Y [B] | vmouse X Y B |
+ * vclick X Y [B] | raw SCAN 1|0 | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
+ * sleep S | ack TAG | quit. mouse/click are in the game frame's pixels (320x200 or 640x480);
+ * vmouse/vclick in a vshot's pixels (what the window shows, 960 rows high). ack appends TAG to
+ * <file>.ack once everything before it has run. */
+static int vshot_size(int *ow, int *oh, NSView *v) {
+    *oh = 960; *ow = 1280;
+    NSRect vb = v.bounds;
+    if (tp_view_live() && vb.size.width * 3 > vb.size.height * 4 * 1.02) *ow = (int)lround(*oh * vb.size.width / vb.size.height);
+    return 1;
+}
+- (void)vshot:(NSString *)path {
+    static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
+    tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
+    int ow, oh; vshot_size(&ow, &oh, _view);
+    uint32_t *big = malloc(4 * (size_t)ow * oh);
+    if (tp_view_live()) tp_view_compose(big, ow, oh, frame, fw, fh, 0);
+    else for (int i = 0; i < ow * oh; i++) big[i] = frame[(i / ow * fh / oh) * fw + (i % ow) * fw / ow];
+    int tp_host_png_rgba(const char *, const uint32_t *, int, int);
+    tp_host_png_rgba(path.fileSystemRepresentation, big, ow, oh); free(big);
+    fprintf(stderr, "vshot %s %dx%d live=%d\n", path.UTF8String, ow, oh, tp_view_live());
+}
+static uint32_t key_of_char(unichar c) {
+    static const char *row1 = "1234567890", *q = "QWERTYUIOP", *a = "ASDFGHJKL", *z = "ZXCVBNM";
+    c = (unichar)toupper(c);
+    for (int i = 0; row1[i]; i++) if (row1[i] == c) return (uint32_t)(0x02 + i) << 8 | c;
+    for (int i = 0; q[i]; i++) if (q[i] == c) return (uint32_t)(0x10 + i) << 8 | c;
+    for (int i = 0; a[i]; i++) if (a[i] == c) return (uint32_t)(0x1e + i) << 8 | c;
+    for (int i = 0; z[i]; i++) if (z[i] == c) return (uint32_t)(0x2c + i) << 8 | c;
+    if (c == ' ') return 0x3920;
+    return 0;
+}
+- (void)runControl {
+    static NSString *path; static unsigned long long off; static NSMutableArray *queue; static double until;
+    if (!path) { path = NSProcessInfo.processInfo.environment[@"TP_CONTROL"]; if (!path.length) return; queue = [NSMutableArray array]; }
+    NSFileHandle *h = [NSFileHandle fileHandleForReadingAtPath:path];
+    if (h) {
+        [h seekToFileOffset:off]; NSData *d = [h readDataToEndOfFile]; [h closeFile];
+        const char *b = d.bytes; NSUInteger end = d.length; while (end && b[end - 1] != '\n') end--;   /* whole lines only */
+        if (end) {
+            NSString *txt = [[NSString alloc] initWithBytes:b length:end encoding:NSUTF8StringEncoding]; off += end;
+            for (NSString *l in [txt componentsSeparatedByString:@"\n"]) if (l.length) [queue addObject:l];
+        }
+    }
+    double t = CACurrentMediaTime();
+    while (queue.count && t >= until) {
+        NSString *line = queue[0]; [queue removeObjectAtIndex:0];
+        NSArray *p = [line componentsSeparatedByString:@" "]; NSString *op = p[0];
+        double a1 = p.count > 1 ? [p[1] doubleValue] : 0, a2 = p.count > 2 ? [p[2] doubleValue] : 0;
+        uint32_t b = p.count > 3 ? (uint32_t)[p[3] intValue] : 1;
+        int fw = 320, fh = 200; tp_host_frame_size(&fw, &fh);
+        int ow, oh; vshot_size(&ow, &oh, _view);
+        if ([op isEqual:@"key"]) { uint32_t k = (uint32_t)strtoul([p[1] UTF8String], NULL, 16); tp_host_key(k); tp_host_key_raw(k >> 8, 1); tp_host_key_raw(k >> 8, 0); }
+        else if ([op isEqual:@"shift"]) tp_host_shift((uint32_t)strtoul([p[1] UTF8String], NULL, 16));   /* BIOS shift flags */
+        else if ([op isEqual:@"raw"]) tp_host_key_raw((uint8_t)strtoul([p[1] UTF8String], NULL, 16), (int)a2);   /* raw SCAN 1|0 */
+        else if ([op isEqual:@"type"]) {
+            NSString *s = [line substringFromIndex:5];
+            for (NSUInteger i = 0; i < s.length; i++) { uint32_t k = key_of_char([s characterAtIndex:i]); if (k) { tp_host_key(k); tp_host_key_raw(k >> 8, 1); tp_host_key_raw(k >> 8, 0); } }
+        }
+        else if ([op isEqual:@"mouse"]) tp_host_mouse(a1 / fw, a2 / fh, p.count > 3 ? b : 0);
+        else if ([op isEqual:@"vmouse"]) [_view pointerAt:a1 / ow :a2 / oh buttons:p.count > 3 ? b : 0];
+        else if ([op isEqual:@"click"] || [op isEqual:@"vclick"]) {   /* press, hold 150 ms, release */
+            BOOL v = [op isEqual:@"vclick"];
+            NSString *m = v ? @"vmouse" : @"mouse";
+            if (v) [_view pointerAt:a1 / ow :a2 / oh buttons:0]; else tp_host_mouse(a1 / fw, a2 / fh, 0);
+            [queue insertObject:[NSString stringWithFormat:@"%@ %g %g %u", m, a1, a2, b] atIndex:0];
+            [queue insertObject:@"sleep 0.15" atIndex:1];
+            [queue insertObject:[NSString stringWithFormat:@"%@ %g %g 0", m, a1, a2] atIndex:2];
+            [queue insertObject:@"sleep 0.1" atIndex:3];
+            until = t + 0.05; continue;
+        }
+        else if ([op isEqual:@"zoom"]) [_view zoomTo:a1 at:NSMakePoint(NAN, NAN)];
+        else if ([op isEqual:@"center"]) [_view centerOn:a1 :a2];
+        else if ([op isEqual:@"pan"]) [_view panBy:a1 :a2];
+        else if ([op isEqual:@"size"]) [_window setContentSize:NSMakeSize(a1, a2)];
+        else if ([op isEqual:@"cycles"]) tp_host_set_cycles(a1);
+        else if ([op isEqual:@"shot"]) { char hex[65]; tp_host_png([line substringFromIndex:5].fileSystemRepresentation, hex); fprintf(stderr, "shot %s\n", [line substringFromIndex:5].UTF8String); }
+        else if ([op isEqual:@"vshot"]) [self vshot:[line substringFromIndex:6]];
+        else if ([op isEqual:@"sleep"]) { until = t + a1; break; }
+        else if ([op isEqual:@"ack"]) {
+            FILE *f = fopen([path stringByAppendingString:@".ack"].fileSystemRepresentation, "a");
+            if (f) { fprintf(f, "%s\n", p.count > 1 ? [p[1] UTF8String] : ""); fclose(f); }
+        }
+        else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
+        else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
+    }
+}
+
 - (void)tick {
+    [self runControl];
     [self runTestScript];
     [self pollController];
     [_view present];

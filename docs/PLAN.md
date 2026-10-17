@@ -239,6 +239,49 @@ Later: the native renderer replaces passes; widescreen, hi-res UI, simulation.
 
 ## Done so far
 
+- 2026-10-17 (Claude Code, headed playtest; the user saw "visual instability,
+  especially mousing over the entrance"): the app under live control
+  (TP_CONTROL=<file>: key/type/raw/shift, mouse/vmouse/click/vclick, zoom/
+  center/pan/size/cycles, shot/vshot, sleep, ack; work-only client and
+  scripts in work/playtest, scratch data, muted, launcher skipped) built a
+  sandbox park with the HORZA cheats (Shift+C money, Alt+Z rides, Ctrl+Z
+  shops, Shift+Z scenery: they work through the app's BIOS shift flags):
+  paths, eight rides and shows (five kinds), three shops, scenery, two guards, then opened it ('O')
+  to visitors. Zoomed-view bugs found and fixed (view.c):
+  - the real frame was copied whole into the canvas, but like a pass its sides
+    and bottom miss objects whose cells are outside it (the entrance's arch
+    when its cell is just below): as the pointer moved the camera, the arch
+    and other tall things flickered. Now only its complete part (TX0..TX1,
+    rows above TY1) is copied; passes draw the rest — the reported bug;
+  - the tool preview (0x1149a4 from the interface 0x1145fb: a ride's or
+    shop's ghost, path and scenery previews) is drawn after the park is
+    captured, so it showed unzoomed at the screen's scale. Its pixels now go
+    into the park picture (snapshot at its entry, diff at its return), and
+    while one shows the pointer is kept low and central in the game's view so
+    the ghost is not cut by the view's top;
+  - drags (paths, queues) bent into L and U shapes: the camera moved under the
+    game while the button was down or as it went down. No camera moves now on
+    a button change or during a drag (past the view's edge the game scrolls
+    itself, as at 1x), and the app does not recentre on a drag's scrolling;
+  - the date (and advisor buttons) are sometimes drawn with the park, so they
+    could be stamped into the canvas or vanish from the screen; they are left
+    out of the real-frame copy, always redrawn by passes, and anything there
+    that differs from the passes' park is interface;
+  - interface pixels equal to the park pixel under them (text over a road, a
+    speech bubble's white over white flowers) showed the zoomed park through
+    them: gaps up to 4 px with interface on both sides are interface.
+  Checks during the playtest (TP_NATIVE_PASS=2 + TP_NATIVE_THINGS in the app):
+  88,600 native passes against the game's, 0 differing pixels; 125,022 cells'
+  draw calls, 0 differ, nothing not native. Demo park headless at 0.161 /
+  0.4 / wide 1x: 5,600 passes checked, 0 differ.
+  Not done: queues for the built rides (the game calls them rails; the
+  entrance's front tile was not found), so no one rode them — riders were
+  covered by the demo park; track rides not built; the first click after a
+  menu opens was sometimes lost in the app session (never headless, events
+  all reach the game's callback: unexplained); weather (rain, lightning) is
+  drawn in screen space by the game, so it does not zoom and covers only the
+  4:3 column in widescreen.
+
 - 2026-10-17 night (Claude Code, the user away; budget: under 40% of tokens):
   widescreen park, Tab fast forward, start in 640x480, pause when hidden, Save
   Park Picture, language choice, SoundFont music, drag pan, CRT scanlines, game

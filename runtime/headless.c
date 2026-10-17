@@ -123,7 +123,9 @@ int main(int argc, char **argv) {
                     if (fw == 320) ow = (int)lround(1280 * hl_wide);
                     uint32_t *big = malloc(4 * ow * oh); tp_view_compose(big, ow, oh, frame, fw, fh, 0);
                     char p[1024]; snprintf(p, sizeof p, "%s/%s.png", out, name);
-                    int tp_host_png_rgba(const char *, const uint32_t *, int, int); tp_host_png_rgba(p, big, ow, oh); free(big);
+                    int tp_host_png_rgba(const char *, const uint32_t *, int, int); tp_host_png_rgba(p, big, ow, oh);
+                    if (getenv("TP_SHOT_RAW")) { snprintf(p, sizeof p, "%s/%s.rgba", out, name); FILE *f = fopen(p, "wb"); if (f) { fwrite(big, 4, (size_t)ow * oh, f); fclose(f); } }
+                    free(big);
                     fprintf(stderr, "view shot %s live=%d\n", p, tp_view_live());
                     if (getenv("TP_VIEW_BENCH")) {        /* development: the compositor's cost at full-screen sizes */
                         struct timespec a0, a1; uint32_t *o2 = malloc(4 * 2048 * 1536);
