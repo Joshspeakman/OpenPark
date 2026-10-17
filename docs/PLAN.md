@@ -280,6 +280,26 @@ the launcher's new Tweaks and Free Mode pages through the environment:
   bolts stay where the game draws them, in the column. TP_DEV_WEATHER forces
   a kind for tests.
 
+## Zoomed/widescreen view: coherent frames (2026-10-17)
+
+The player saw garbled sprites when hovering rides or the entrance and the bus
+breaking up as it left. Cause: the game draws its frame 100–180 times a second
+but the passes ran at most 30 times, and every game frame's real view was
+copied into the picture. Things moving across the real view's edges were drawn
+from different moments (walkers, the bus, thought bubbles), and hovering moves
+the camera (so the edges move over rides and the entrance). Now the real frame
+is captured only on frames that had passes (all from one game moment), passes
+run up to 60 times a second (~3.5 ms each), the app publishes only those
+frames (the game's cursor is still tracked every frame), pointer events that
+would move the camera wait until the frame is captured, and a frame whose
+camera changed while drawn (the game's own scrolling) is left out.
+Checked in the real app window with a 1,000-visitor park (TP_VIEW_VERIFY:
+every visible piece of each published picture against fresh native passes
+of the same moment; TP_VIEW_OLD restores the old behaviour for comparison):
+old, 273 of 1,200 frames had a piece off by more than 3,000 pixels and 4,600
+to 7,400 stale pixels a frame; new, none after the first frame. Window
+captures (screencapture of the game's window) confirm.
+
 ## Done so far
 
 - 2026-10-17 (Claude Code, headed playtest; the user saw "visual instability,

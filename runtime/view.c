@@ -174,7 +174,9 @@ static uint8_t pre_tool[MAX_SCREEN];             /* the back buffer as the tool 
 static uint8_t pre_weather[MAX_SCREEN], weather[MAX_SCREEN]; static int weather_n;   /* what the weather drew (0: nothing) */
 static uint8_t pub_weather[MAX_SCREEN]; static int pub_weather_n;
 static volatile int tool_shown;                   /* the last frame had a tool preview */
-static int active, have_world, in_frame;
+static int16_t fr_cx, fr_cy;                     /* the camera as the frame began */
+static long skipped_moved;                        /* frames left out: the camera moved while drawn */
+static int active, have_world, in_frame, coherent;   /* coherent: this frame had passes */
 static int16_t seen_cx = -999, seen_cy = -999;   /* the camera as last seen or set by the view */
 static volatile int drag_held;                    /* the pointer is dragging in the park (tp_view_poll) */
 static volatile int camera_moves;                 /* the game moved it itself (or the park appeared): the app recentres */
@@ -510,11 +512,16 @@ static int edge_check(void) { static int on = -1; if (on < 0) on = getenv("TP_VI
 static void edge_compare(int cx, int cy) {
     if (!edge_fresh) return; edge_fresh = 0;
     static long rows[480], cols[640], frames; int bx = cam_ox(cx, cy), by = cam_oy(cy);
-    for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) {
+    long nd = 0;
+    for (int y = 0; y < TY1 && y < WORLD_H; y++) for (int x = TX0; x < TX1 && x < SW; x++) {   /* the trusted part */
         int X = bx + x, Y = by + y; if (X < 0 || Y < 0 || X >= CW || Y >= CH) continue;
-        if (canvas[(size_t)Y * CW + X] != world_only[y * SW + x]) { rows[y]++; cols[x]++; }
+        if (canvas[(size_t)Y * CW + X] != world_only[y * SW + x]) { rows[y]++; cols[x]++; nd++; }
     }
-    if (frames == 150 && getenv("TP_VIEW_EDGE")[0]) {     /* the real frame, the passes under it, the differences */
+    static int dumps; static long total, bad;
+    total++; if (nd > 400) bad++;
+    if (total % 300 == 0) fprintf(stderr, "view edge: %ld frames, %ld with more than 400 differing pixels\n", total, bad);
+    if (nd > 400 && dumps < 4 && getenv("TP_VIEW_EDGE")[0]) {     /* the real frame, the passes under it, the differences */
+        char path[600]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_EDGE"), dumps++);
         uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * WORLD_H * 3);
         for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) {
             int X = bx + x, Y = by + y; uint8_t c = X >= 0 && Y >= 0 && X < CW && Y < CH ? canvas[(size_t)Y * CW + X] : 0, r = world_only[y * SW + x];
@@ -523,8 +530,8 @@ static void edge_compare(int cx, int cy) {
         /* (three rows per park row interleaved is awkward to view: write them stacked instead) */
         uint32_t *st = malloc(4 * SW * WORLD_H * 3);
         for (int k = 0; k < 3; k++) for (int y = 0; y < WORLD_H; y++) memcpy(st + ((size_t)k * WORLD_H + y) * SW, px + (size_t)(y * 3 + k) * SW, 4 * SW);
-        tp_host_png_rgba(getenv("TP_VIEW_EDGE"), st, SW, WORLD_H * 3); free(px); free(st);
-        fprintf(stderr, "view edge: dumped at camera %d,%d\n", cx, cy);
+        tp_host_png_rgba(path, st, SW, WORLD_H * 3); free(px); free(st);
+        fprintf(stderr, "view edge: %ld differ, dumped %s at camera %d,%d\n", nd, path, cx, cy);
     }
     if (++frames % 100 == 0) {
         fprintf(stderr, "view edge (%ld frames) rows:", frames); for (int y = 0; y < WORLD_H; y++) if (rows[y]) fprintf(stderr, " %d:%ld", y, rows[y]);
@@ -581,6 +588,48 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
     if (snap) { diff_report(snap); free(snap); }
 }
 
+/* Development (TP_VIEW_VERIFY=prefix): each visible pass's rectangle of the canvas against a fresh native
+ * pass (same game state: this runs at PRESENT, before the game moves on). Moving people make small
+ * differences; a piece drawn for the wrong place makes thousands. */
+static void verify_canvas(void) {
+    static long frames, badf; static int dumps; frames++;
+    int vx0 = (int)vis_x, vy0 = (int)vis_y, vx1 = vx0 + (int)((vis_lw > 0 ? vis_lw : SW) / vis_z), vy1 = vy0 + (int)(SH / vis_z);
+    int rcx = real_cx, rcy = real_cy, rx0 = cam_ox(rcx, rcy) + TX0, rx1 = cam_ox(rcx, rcy) + TX1, ry0 = cam_oy(rcy), ry1 = ry0 + TY1;
+    int worst = 0, wk = -1; long sum = 0; static long total_sum;
+    for (int k = 0; k < ngrid; k++) {
+        Pass *p = &grid[k];
+        if (p->x1 < vx0 || p->x0 > vx1 || p->y1 < vy0 || p->y0 > vy1) continue;
+        int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32;
+        if (native_pass(p->cx, p->cy, ((G.s == 1 ? 400 : 480) + th0 - 1) / th0) != 0) continue;
+        int bx = cam_ox(p->cx, p->cy), by = cam_oy(p->cy), n = 0;
+        for (int y = 0; y < p->y1 - p->y0; y++) for (int x = TX0; x < TX1; x++) {
+            int X = bx + x, Y = by + y; if (X < 0 || Y < 0 || X >= CW || Y >= CH) continue;
+            if (Y >= ry0 && Y < ry1 && X >= rx0 && X < rx1) continue;   /* the real frame's (hover, tools) */
+            n += canvas[(size_t)Y * CW + X] != np_out[y * SW + x];
+        }
+        if (n > worst) { worst = n; wk = k; }
+        sum += n;
+    }
+    if (worst > 3000) badf++;
+    total_sum += sum;
+    if (frames % 300 == 0) fprintf(stderr, "view verify: %ld frames, %ld with a piece off by more than 3000 px; %.0f stale pixels a frame on average; %ld frames skipped (camera moved)\n",
+                                   frames, badf, (double)total_sum / frames, skipped_moved);
+    if (worst > 3000 && dumps < 6) {
+        Pass *p = &grid[wk];
+        int th0 = (uint16_t)r16(TILE_H); if (th0 <= 0) th0 = 32;
+        native_pass(p->cx, p->cy, ((G.s == 1 ? 400 : 480) + th0 - 1) / th0);
+        int h = p->y1 - p->y0, bx = cam_ox(p->cx, p->cy), by = cam_oy(p->cy);
+        uint32_t *px = malloc(4 * SW * h * 2);
+        for (int y = 0; y < h; y++) for (int x = 0; x < SW; x++) {
+            int X = bx + x, Y = by + y; uint8_t c = X >= 0 && Y >= 0 && X < CW && Y < CH ? canvas[(size_t)Y * CW + X] : 0;
+            px[y * SW + x] = pub_pal[c]; px[(h + y) * SW + x] = pub_pal[np_out[y * SW + x]];
+        }
+        char path[600]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_VERIFY"), dumps++);
+        tp_host_png_rgba(path, px, SW, h * 2); free(px);
+        fprintf(stderr, "view verify: pass %d,%d off by %d px (dumped %s); real camera %d,%d, seen %d,%d, coherent %d\n",
+                p->cx, p->cy, worst, path, rcx, rcy, seen_cx, seen_cy, coherent);
+    }
+}
 static void hooks(int on) {
     tp_hook_pcs[0] = FRAME_RENDER;
     tp_hook_pcs[1] = on ? AFTER_RENDER : 0xffffffffu;
@@ -649,14 +698,17 @@ void tp_view_hook(void) {
                 seen_cx = cx; seen_cy = cy; if (!drag_held) camera_moves++;   /* (a drag's own scrolling: the view stays) */
             }
         }
-        if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); }
+        coherent = 0; weather_n = 0; fr_cx = r16(CAM_X); fr_cy = r16(CAM_Y);
+        if (getenv("TP_VIEW_OLD")) coherent = 1;          /* development: the behaviour before (every frame captured) */
+        if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); coherent = 1; }
         else if (!w) {                                    /* the view is off: no hooks at all until it is wanted */
             active = 0; hooks(0);
             if (!hires_wanted && !poster_wanted) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
         }
-        else if (active) {                                /* passes at most 30 times a second (the game draws faster) */
+        else if (active) {                                /* passes at most 60 times a second (the game draws faster) */
             static double last; double t = now();
-            if (t - last >= 1.0 / 30) { last = t; render_visible(vx, vy, vw, vh, 0); }
+            static int old = -1; if (old < 0) old = getenv("TP_VIEW_OLD") != NULL;
+            if (t - last >= (old ? 1.0 / 30 : 1.0 / 60)) { last = t; render_visible(vx, vy, vw, vh, 0); coherent = 1; }
         }
         in_frame = active;
         break;
@@ -664,6 +716,14 @@ void tp_view_hook(void) {
         if (tp_hook_which == 3 && !in_frame) break;       /* already taken after the extras */
         in_frame = 0;
         if (!active) break;
+        real_cx = r16(CAM_X); real_cy = r16(CAM_Y);
+        /* The game draws its frame 100+ times a second, the passes run at most 60: only a frame that had
+         * passes goes into the picture, so everything in it is from one moment (else things moving
+         * across the real frame's edges tear: walkers, the bus, thought bubbles). */
+        if (!coherent) { have_pre_extras = 0; break; }
+        /* The camera must be the one the frame (and its passes) was drawn with: the game's own scrolling
+         * (its mouse handler at the screen's edge, keys) can move it while the frame is drawn. */
+        if (real_cx != fr_cx || real_cy != fr_cy) { have_pre_extras = 0; skipped_moved++; break; }
         real_cx = r16(CAM_X); real_cy = r16(CAM_Y);
         if (tp_hook_which == 1 && have_pre_extras) {      /* the furniture's rectangles from before the extras */
             uint8_t *bb = M + r32(DISP_BUF);
@@ -753,10 +813,31 @@ void tp_view_hook(void) {
         }
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
-        if (!active || !have_world) break;
-        have_world = 0;
+        if (!active) break;
+        /* The game's cursor, every frame: the screen now is the last frame's back buffer with the cursor
+         * drawn into it (so this compares consecutive presents, published or not). */
         pthread_mutex_lock(&lock);
         const uint8_t *bb = M + r32(DISP_BUF);
+        if (pre_ok) {   /* the screen now = the last back buffer + the cursor drawn at the last mouse position */
+            const uint8_t *tp_host_screen(void); const uint8_t *vga = tp_host_screen();
+            int x0 = SW, y0 = SH, x1 = -1, y1 = -1;
+            for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < SH && y < pre_hy + CUR / 2; y++)
+                for (int x = pre_hx - CUR / 2 < 0 ? 0 : pre_hx - CUR / 2; x < SW && x < pre_hx + CUR / 2; x++)
+                    if (vga[y * SW + x] != pre_cursor[y * SW + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+            if (x1 >= 0) {
+                for (int i = 0; i < CUR * CUR; i++) pub_cursor[i] = 0xffff;
+                for (int y = y0; y <= y1 && y - y0 < CUR; y++)
+                    for (int x = x0; x <= x1 && x - x0 < CUR; x++)
+                        if (vga[y * SW + x] != pre_cursor[y * SW + x]) pub_cursor[(y - y0) * CUR + x - x0] = vga[y * SW + x];
+                pub_cur_x = x0 - pre_hx; pub_cur_y = y0 - pre_hy; pub_cur_ok = 1;
+            }
+        }
+        memcpy(pre_cursor, bb, (size_t)SW * SH); pre_ok = 1;
+        { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx * SW / 640; pre_hy = G.s == 1 ? my / 2 : my; }   /* the driver's 640x400 / 640x480 */
+        /* Publish only frames whose park picture is coherent: the passes and the real frame drawn
+         * from the same game moment (have_world, set when this frame had passes). */
+        if (!have_world) { pthread_mutex_unlock(&lock); break; }
+        have_world = 0;
         for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
         { /* The furniture (the date, the advisor buttons) is drawn with the park at times, so it can be in
            * world_only too: there, what differs from the passes' picture of the park is interface. */
@@ -787,30 +868,23 @@ void tp_view_hook(void) {
               if (near_u[i] <= GAP && d <= GAP) hole[i] = 1;
           }
           for (int i = 0; i < SW * WORLD_H; i++) if (hole[i]) pub_overlay[i] = bb[i]; }
+        if (getenv("TP_VIEW_OVERLAY")) { static int k, dumped; k++;
+            int n = 0; for (int i = 0; i < SW * WORLD_H; i++) n += pub_overlay[i] != 0xffff;
+            if (n > 800 && dumped < 6 && k % 7 == 0) {       /* development: frames with much "interface" over the park */
+                uint32_t *px = malloc(4 * SW * WORLD_H * 2);
+                for (int i = 0; i < SW * WORLD_H; i++) { px[i] = pub_pal[bb[i]]; px[SW * WORLD_H + i] = pub_overlay[i] != 0xffff ? pub_pal[pub_overlay[i]] : 0xff202020u; }
+                char path[600]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_OVERLAY"), dumped++);
+                tp_host_png_rgba(path, px, SW, WORLD_H * 2); free(px); fprintf(stderr, "view overlay: %d px, dumped %s\n", n, path);
+            } }
         if (getenv("TP_VIEW_DEBUG")) { static double l; if (now() - l > 0.5) { l = now(); int n = 0, x0 = SW, y0 = SH, x1 = -1, y1 = -1;
             for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] != 0xffff) { n++; int x = i % SW, y = i / SW; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             fprintf(stderr, "view overlay: %d px, %d,%d..%d,%d\n", n, x0, y0, x1, y1); } }
-        if (pre_ok) {   /* the screen now = the last back buffer + the cursor drawn at the last mouse position */
-            const uint8_t *tp_host_screen(void); const uint8_t *vga = tp_host_screen();
-            int x0 = SW, y0 = SH, x1 = -1, y1 = -1;
-            for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < SH && y < pre_hy + CUR / 2; y++)
-                for (int x = pre_hx - CUR / 2 < 0 ? 0 : pre_hx - CUR / 2; x < SW && x < pre_hx + CUR / 2; x++)
-                    if (vga[y * SW + x] != pre_cursor[y * SW + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-            if (x1 >= 0) {
-                for (int i = 0; i < CUR * CUR; i++) pub_cursor[i] = 0xffff;
-                for (int y = y0; y <= y1 && y - y0 < CUR; y++)
-                    for (int x = x0; x <= x1 && x - x0 < CUR; x++)
-                        if (vga[y * SW + x] != pre_cursor[y * SW + x]) pub_cursor[(y - y0) * CUR + x - x0] = vga[y * SW + x];
-                pub_cur_x = x0 - pre_hx; pub_cur_y = y0 - pre_hy; pub_cur_ok = 1;
-            }
-        }
-        memcpy(pre_cursor, bb, (size_t)SW * SH); pre_ok = 1;
-        { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx * SW / 640; pre_hy = G.s == 1 ? my / 2 : my; }   /* the driver's 640x400 / 640x480 */
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
         pub_weather_n = weather_n; if (weather_n) memcpy(pub_weather, weather, (size_t)SW * WORLD_H);
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now();
+        if (getenv("TP_VIEW_VERIFY")) verify_canvas();    /* development: the picture against fresh native passes */
         pthread_mutex_unlock(&lock);
         break;
     }
@@ -821,6 +895,9 @@ void tp_view_hook(void) {
  * at their place in that view; panel points go straight through. */
 void tp_view_poll(void) {
     if (!evn && !restore) return;
+    /* Not inside a frame (between the passes and the real frame's capture): a camera move there would
+     * draw the real frame elsewhere than the passes left room for, leaving stale strips. */
+    if (in_frame && !getenv("TP_VIEW_OLD")) return;
     M = tp_host_memory();
     Ev q[256]; int n;
     pthread_mutex_lock(&lock);
