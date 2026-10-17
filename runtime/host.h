@@ -45,16 +45,20 @@ void tp_host_set_cycles(double per_ms);
 int  tp_host_checkpoint(const char *path);   /* state snapshot for tools/spotcheck.py */
 
 /* Native park view (view.c): the whole park drawn by passes of the game's own
- * renderer, shown at any zoom. Canvas coordinates are 320x200-scale pixels of
- * the park picture. */
+ * renderer, shown at any zoom. Canvas coordinates are pixels of the park picture
+ * at the scale of the game's screen mode (tp_view_geometry). */
 void tp_view_enable(int main_game);           /* only for MAIN.EXE's code (not the intro) */
 int  tp_view_set(int on, double cx, double cy, double zoom);   /* (cx, cy): canvas point at the park area's centre; 0: not now */
 void tp_view_camera_center(double *cx, double *cy);          /* where the game's own view is */
 void tp_view_canvas_size(double *w, double *h);
 int  tp_view_live(void);                      /* the zoomed picture is current (the park is on screen) */
 void tp_view_mouse(double fx, double fy, uint32_t buttons);  /* as tp_host_mouse; mapped when zoomed */
-void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int smooth);   /* ow x oh: 320x200 layout */
-#define TP_VIEW_WORLD_ROWS 178                /* park rows of the 320x200 screen; the panel is below */
+void tp_view_geometry(int *sw, int *sh, int *wh);   /* the screen in the game's mode now: size and park rows */
+void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int fw, int fh, int smooth);   /* screen layout at ow x oh */
+
+/* The frame in either video mode: 320x200 (13h) or 640x480 (VESA 101h, the game's [R] toggle). */
+int  tp_host_frame_size(int *w, int *h);
+int  tp_host_frame_rgba_any(uint32_t *out, int max_pixels);
 
 /* Saved files below the overlay (sha256), for tests. */
 void tp_host_list_saved(void (*fn)(const char *rel, const char *sha256_hex, void *), void *ctx);

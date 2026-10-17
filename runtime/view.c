@@ -23,11 +23,11 @@
  *   0x113b9a  the game's per-frame call of render_park, from 0x111e4e, which
  *             then calls 0x14de1a (park-anchored extras) and returns to
  *             0x111e90, or skips it and goes on at 0x111e98
- *   0x180210  the copy of the back buffer to the screen (320x200); it draws
- *             the game's own cursor into the back buffer first
+ *   0x180210  the copy of the back buffer to the screen (320x200), 0x155507
+ *             in 640x480; both draw the game's own cursor into it first
  *   0x1d667a  camera x, 0x1d6666 camera y (int16; the game keeps x 4..51,
- *             y 0..51). A step in x moves the picture 24 pixels (320x200
- *             scale); a step in y 16 down and 8 across (measured, exact)
+ *             y 0..51). A step in x moves the picture 24 pixels, a step in y
+ *             16 down and 8 across (measured, exact, the same in both modes)
  *   0x1d666e  landscape cache dirty flag
  *   0x1de5f6  screen mode: 1 = 320x200, 8 = 640x480 (only 320x200 so far)
  *   0x1de5b8  display pitch, 0x1de5bc back buffer, 0x1de5c0 display height
@@ -60,8 +60,8 @@ extern uint64_t tp_insns, tp_rep;
 /* The extras also draw the screen's furniture: the date (top left) and the
  * advisor buttons (top right). Those rectangles of the park are taken before
  * the extras, so they stay interface. */
-static const int hud[][4] = {{0, 0, 64, 12}, {248, 0, 320, 16}};
 #define PRESENT      0x180210u
+#define PRESENT_HI   0x155507u      /* the same in 640x480 (banked VESA copy) */
 #define CAM_X        0x1d667au
 #define CAM_Y        0x1d6666u
 #define LAND_DIRTY   0x1d666eu
@@ -70,37 +70,67 @@ static const int hud[][4] = {{0, 0, 64, 12}, {248, 0, 320, 16}};
 #define DISP_BUF     0x1de5bcu
 #define DISP_H       0x1de5c0u
 #define LAND_CACHE   0x1d3b98u
+#define TILE_H       0x1d6654u      /* row height for the renderer's row count (0x113b9a) */
 
-/* 320x200 geometry */
-#define SW 320
-#define WORLD_H 178                 /* park rows; the panel is below */
-#define UX 24                       /* camera x step */
-#define UYX 8                       /* across, per camera y step */
-#define UY 16                       /* down, per camera y step */
-#define TX0 16                      /* the part of a pass trusted to be complete: */
-#define TX1 (TX0 + 12 * UX)         /* objects of cells outside the pass are cut */
-#define TY1 (7 * UY)                /* off near its edges, so passes overlap */
-#define STEP_X 12
-#define STEP_Y 7
+/* Geometry of the screen mode the game is in: 320x200 (s = 1) or its
+ * 640x480 SVGA mode (s = 2, VESA 101h). Camera steps and the art scale with s. */
+typedef struct { int s, sw, sh, wh, ux, uyx, uy, tx0, tx1, ty1, stx, sty, ox, oy, cw, ch; } Geo;
+static Geo G;                       /* the emulation thread's (tp_view_hook) */
+#define SW G.sw                     /* screen width */
+#define SH G.sh                     /* screen height */
+#define WORLD_H G.wh                /* park rows; the panel is below */
+#define UX G.ux                     /* camera x step */
+#define UYX G.uyx                   /* across, per camera y step */
+#define UY G.uy                     /* down, per camera y step */
+#define TX0 G.tx0                   /* the part of a pass trusted to be complete: */
+#define TX1 G.tx1                   /* objects of cells outside the pass are cut */
+#define TY1 G.ty1                   /* off near its edges, so passes overlap */
+#define OX G.ox
+#define OY G.oy
+#define CW G.cw
+#define CH G.ch
+#define STEP_X G.stx                /* passes, in camera steps */
+#define STEP_Y G.sty
 #define CXMIN 2
 #define CXMAX 53
 #define CYMIN (-2)
 #define CYMAX 53
-#define OX (-(UX * CXMIN + UYX * CYMIN))
-#define OY (-(UY * CYMIN))
-#define CW (UX * CXMAX + UYX * CYMAX + SW + OX)
-#define CH (UY * CYMAX + WORLD_H + OY)
 #define GAME_CX0 4
 #define GAME_CX1 51
 #define GAME_CY0 0
 #define GAME_CY1 51
+#define MAX_SCREEN (640 * 480)
+#define MAX_CANVAS (3968 * 2200)
+/* The art is the same size in both modes (measured: a camera step moves the
+ * picture (24, 0) or (8, 16) pixels in either); 640x480 shows more of the park. */
+static Geo geo(int s) {
+    Geo g; if (s != 2) s = 1;
+    g.s = s; g.sw = 320 * s; g.sh = s == 1 ? 200 : 480; g.wh = s == 1 ? 178 : 436;
+    g.ux = 24; g.uyx = 8; g.uy = 16;
+    g.stx = s == 1 ? 12 : 24; g.sty = s == 1 ? 7 : 20;
+    g.tx0 = 16; g.tx1 = g.tx0 + g.stx * g.ux; g.ty1 = g.sty * g.uy;
+    g.ox = -(g.ux * CXMIN + g.uyx * CYMIN); g.oy = -(g.uy * CYMIN);
+    g.cw = g.ux * CXMAX + g.uyx * CYMAX + g.sw + g.ox; g.ch = g.uy * CYMAX + g.wh + g.oy;
+    return g;
+}
+static int hud_rect(int k, int *r) {               /* the furniture's rectangles in this mode */
+    if (k == 0) { r[0] = 0; r[1] = 0; r[2] = 64; r[3] = 12; return 1; }
+    if (k == 1) { r[0] = SW - 72; r[1] = 0; r[2] = SW; r[3] = 16; return 1; }
+    return 0;
+}
 
 static uint8_t *M;
 static int16_t r16(uint32_t a) { int16_t v; memcpy(&v, M + a, 2); return v; }
 static uint32_t r32(uint32_t a) { uint32_t v; memcpy(&v, M + a, 4); return v; }
 static void w16(uint32_t a, int16_t v) { memcpy(M + a, &v, 2); }
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
-static int lowres(void) { return (r16(SCREEN_MODE) & 1) && r32(DISP_PITCH) == SW && r32(DISP_H) == 200; }
+/* The game's screen mode as a scale: 1 (320x200), 2 (640x480) or 0 (neither, not drawable here). */
+static int mode_scale(void) {
+    uint32_t pitch = r32(DISP_PITCH), h = r32(DISP_H);
+    if ((r16(SCREEN_MODE) & 1) && pitch == 320 && h == 200) return 1;
+    if (r16(SCREEN_MODE) == 8 && pitch == 640 && h == 480) return 2;
+    return 0;
+}
 static int cam_ox(int cx, int cy) { return UX * cx + UYX * cy + OX; }   /* the canvas position of a view's corner */
 static int cam_oy(int cy) { return UY * cy + OY; }
 
@@ -108,22 +138,23 @@ static int cam_oy(int cy) { return UY * cy + OY; }
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static int want;                                  /* the app shows the zoomed view */
 static double vis_x, vis_y, vis_z = 1;            /* visible canvas: corner and zoom */
+static int vis_s = 1;                             /* the scale the app's canvas coordinates are in */
 typedef struct { double fx, fy; uint32_t buttons; } Ev;
 static Ev evq[256]; static int evn;
 static int restore, restore_cx, restore_cy;       /* camera for the game's own view after zooming */
-static uint8_t pub_canvas[CW * CH];
-static uint16_t pub_overlay[SW * WORLD_H];        /* 0xffff: no interface there */
+static uint8_t pub_canvas[MAX_CANVAS];
+static uint16_t pub_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
 static uint32_t pub_pal[256];
 static double pub_time;
 #define CUR 64                                    /* the game's cursor, cut out of its last frame */
 static uint16_t pub_cursor[CUR * CUR]; static int pub_cur_x, pub_cur_y, pub_cur_ok;   /* offset from the hotspot */
 static double ptr_fx = -1, ptr_fy = -1;           /* the app's pointer (screen 0..1) */
-static int pub_cx, pub_cy;
+static int pub_cx, pub_cy, pub_s;                  /* the published picture's scale */
 
 /* ---- emulation thread ---- */
-static uint8_t canvas[CW * CH], world_only[SW * WORLD_H];
-static uint8_t pre_cursor[SW * 200]; static int pre_ok, pre_hx, pre_hy;   /* back buffer before the cursor */
-static uint8_t pre_extras[SW * WORLD_H]; static int have_pre_extras;
+static uint8_t canvas[MAX_CANVAS], world_only[MAX_SCREEN];
+static uint8_t pre_cursor[MAX_SCREEN]; static int pre_ok, pre_hx, pre_hy;   /* back buffer before the cursor */
+static uint8_t pre_extras[MAX_SCREEN]; static int have_pre_extras;
 static int active, have_world, in_frame;
 static int16_t real_cx, real_cy;
 
@@ -132,7 +163,8 @@ static int16_t real_cx, real_cy;
 static int pass(int cx, int cy) {
     int16_t ox = r16(CAM_X), oy = r16(CAM_Y);
     w16(CAM_X, (int16_t)cx); w16(CAM_Y, (int16_t)cy); w16(LAND_DIRTY, 1);
-    uint32_t args[3] = {(uint32_t)cx, (uint32_t)cy, (uint32_t)((400 + 31) / 32)};
+    int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32;
+    uint32_t args[3] = {(uint32_t)cx, (uint32_t)cy, (uint32_t)(((G.s == 1 ? 400 : 480) + th - 1) / th)};   /* rows, as 0x113b9a */
     int64_t r = tp_host_guest_call(RENDER_PARK, args, 3, 50000000);
     w16(CAM_X, ox); w16(CAM_Y, oy); w16(LAND_DIRTY, 1);
     return r < 0 ? -1 : 0;
@@ -199,7 +231,7 @@ static void state_restore(void) { size_t o = 0; for (int i = 0; i < nsaved; i++)
 /* Passes for the visible part of the canvas, within a time budget; the rest
  * of a large view is refreshed over the next frames (round robin). */
 static void diff_report(const uint8_t *snap) {     /* development: what passes changed (TP_VIEW_DIFF) */
-    uint32_t buf = r32(DISP_BUF), cache = r32(LAND_CACHE), bytes = SW * 200, sp = 0;
+    uint32_t buf = r32(DISP_BUF), cache = r32(LAND_CACHE), bytes = SW * SH, sp = 0;
     { extern uint32_t tp_get(int); sp = tp_get(4); }
     int shown = 0; uint32_t run = 0, start = 0;
     for (uint32_t a = 0x10000; a < (64u << 20); a++) {
@@ -234,7 +266,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
 static void hooks(int on) {
     tp_hook_pcs[0] = FRAME_RENDER;
     tp_hook_pcs[1] = on ? AFTER_RENDER : 0xffffffffu;
-    tp_hook_pcs[2] = on ? PRESENT : 0xffffffffu;
+    tp_hook_pcs[2] = on ? (G.s == 2 ? PRESENT_HI : PRESENT) : 0xffffffffu;
     tp_hook_pcs[3] = on ? AFTER_SKIP : 0xffffffffu;
     tp_hook_pcs[4] = on ? BEFORE_EXTRAS : 0xffffffffu;
     if (getenv("TP_VIEW_PROBE")) {   /* development: the back buffer after more steps of the frame */
@@ -251,12 +283,34 @@ void tp_view_hook(void) {
     int w = want; double vx = vis_x, vy = vis_y, vw = SW / vis_z, vh = WORLD_H / vis_z;
     pthread_mutex_unlock(&lock);
     static int dbg = -1; if (dbg < 0) dbg = getenv("TP_VIEW_DEBUG_HOOKS") ? 400 : 0;
-    if (dbg > 0) { dbg--; fprintf(stderr, "view hook %d want %d active %d lowres %d\n", tp_hook_which, w, active, lowres()); }
-    if (!lowres()) { if (active) { active = 0; hooks(0); } return; }
+    int sc = mode_scale();
+    if (dbg > 0) { dbg--; fprintf(stderr, "view hook %d want %d active %d scale %d\n", tp_hook_which, w, active, sc); }
+    if (!sc) { if (active) { active = 0; hooks(0); } return; }
+    if (sc != G.s) {                                      /* the game changed its screen mode ([R]): start again */
+        G = geo(sc); ngrid = 0; memset(canvas, 0, (size_t)CW * CH);
+        have_world = have_pre_extras = pre_ok = 0; in_frame = 0;
+        pthread_mutex_lock(&lock); pub_time = 0; pub_cur_ok = 0; pthread_mutex_unlock(&lock);
+        if (active) { active = 0; hooks(0); }
+        return;
+    }
     switch (tp_hook_which) {
     case 0:                                               /* FRAME_RENDER */
         if (!ngrid) make_grid();
         if (in_frame) break;                              /* an interrupt returned here: same frame */
+        if (getenv("TP_VIEW_STEPS") && !in_frame) {        /* development: passes one camera step apart */
+            static int done; if (!done++) {
+                int cx = r16(CAM_X), cy = r16(CAM_Y); static const int st[5][2] = {{0, 0}, {1, 0}, {0, -1}, {0, -3}, {0, -6}};
+                for (int k = 0; k < 5; k++) {
+                    pass(cx + st[k][0], cy + st[k][1]);
+                    uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * SH);
+                    const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * SH; i++) px[i] = pal[bb[i]];
+                    char path[512]; snprintf(path, sizeof path, "%s.%d.png", getenv("TP_VIEW_STEPS"), k);
+                    tp_host_png_rgba(path, px, SW, SH); free(px);
+                    snprintf(path, sizeof path, "%s.%d.raw", getenv("TP_VIEW_STEPS"), k);
+                    FILE *f = fopen(path, "wb"); if (f) { fwrite(bb, 1, (size_t)SW * SH, f); fclose(f); }
+                }
+            }
+        }
         if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); }
         else if (!w && active) { active = 0; hooks(0); }
         else if (active) render_visible(vx, vy, vw, vh, 0);
@@ -269,35 +323,36 @@ void tp_view_hook(void) {
         real_cx = r16(CAM_X); real_cy = r16(CAM_Y);
         if (tp_hook_which == 1 && have_pre_extras) {      /* the furniture's rectangles from before the extras */
             uint8_t *bb = M + r32(DISP_BUF);
-            static uint8_t keep[SW * WORLD_H]; memcpy(keep, bb, sizeof keep);
-            for (unsigned r = 0; r < sizeof hud / sizeof hud[0]; r++)
-                for (int y = hud[r][1]; y < hud[r][3]; y++)
-                    memcpy(bb + y * SW + hud[r][0], pre_extras + y * SW + hud[r][0], (size_t)(hud[r][2] - hud[r][0]));
-            memcpy(world_only, bb, sizeof world_only);
+            static uint8_t keep[MAX_SCREEN]; size_t n = (size_t)SW * WORLD_H; memcpy(keep, bb, n);
+            int hr[4];
+            for (int r = 0; hud_rect(r, hr); r++)
+                for (int y = hr[1]; y < hr[3]; y++)
+                    memcpy(bb + y * SW + hr[0], pre_extras + y * SW + hr[0], (size_t)(hr[2] - hr[0]));
+            memcpy(world_only, bb, n);
             blit_to_canvas(real_cx, real_cy, 0, SW, 0, WORLD_H);
-            memcpy(bb, keep, sizeof keep);                /* the game's frame goes on as it drew it */
+            memcpy(bb, keep, n);                          /* the game's frame goes on as it drew it */
             have_world = 1; have_pre_extras = 0;
             break;
         }
         { static int dumped; if (getenv("TP_VIEW_DUMP") && ++dumped == 30) {   /* development: the back buffer at capture */
-            uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * 200);
-            const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * 200; i++) px[i] = pal[bb[i]];
-            tp_host_png_rgba(getenv("TP_VIEW_DUMP"), px, SW, 200); free(px);
+            uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * SH);
+            const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * SH; i++) px[i] = pal[bb[i]];
+            tp_host_png_rgba(getenv("TP_VIEW_DUMP"), px, SW, SH); free(px);
             fprintf(stderr, "view dump at hook %d\n", tp_hook_which); } }
         if (getenv("TP_VIEW_DEBUG")) { int mx, my; tp_host_mouse_pos(&mx, &my); fprintf(stderr, "view frame: camera %d,%d mouse %d,%d\n", real_cx, real_cy, mx / 2, my / 2); }
-        memcpy(world_only, M + r32(DISP_BUF), sizeof world_only);
+        memcpy(world_only, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
         blit_to_canvas(real_cx, real_cy, 0, SW, 0, WORLD_H);
         have_world = 1;
         break;
     case 4:                                               /* BEFORE_EXTRAS */
-        if (active && in_frame) { memcpy(pre_extras, M + r32(DISP_BUF), sizeof pre_extras); have_pre_extras = 1; }
+        if (active && in_frame) { memcpy(pre_extras, M + r32(DISP_BUF), (size_t)SW * WORLD_H); have_pre_extras = 1; }
         break;
     case 5: case 6: case 7:                              /* development probes */
         { static int n[8]; if (getenv("TP_VIEW_DUMP") && ++n[tp_hook_which] == 30) {
             char path[512]; snprintf(path, sizeof path, "%s.%d.png", getenv("TP_VIEW_DUMP"), tp_hook_which);
-            uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * 200);
-            const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * 200; i++) px[i] = pal[bb[i]];
-            tp_host_png_rgba(path, px, SW, 200); free(px); } }
+            uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t *px = malloc(4 * SW * SH);
+            const uint8_t *bb = M + r32(DISP_BUF); for (int i = 0; i < SW * SH; i++) px[i] = pal[bb[i]];
+            tp_host_png_rgba(path, px, SW, SH); free(px); } }
         if (active && have_world) {
             const uint8_t *bb = M + r32(DISP_BUF); int d = 0;
             for (int i = 0; i < SW * WORLD_H; i++) d += bb[i] != world_only[i];
@@ -311,9 +366,9 @@ void tp_view_hook(void) {
         const uint8_t *bb = M + r32(DISP_BUF);
         for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
         if (pre_ok) {   /* the screen now = the last back buffer + the cursor drawn at the last mouse position */
-            const uint8_t *vga = M + 0xa0000;
-            int x0 = SW, y0 = 200, x1 = -1, y1 = -1;
-            for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < 200 && y < pre_hy + CUR / 2; y++)
+            const uint8_t *tp_host_screen(void); const uint8_t *vga = tp_host_screen();
+            int x0 = SW, y0 = SH, x1 = -1, y1 = -1;
+            for (int y = pre_hy - CUR / 2 < 0 ? 0 : pre_hy - CUR / 2; y < SH && y < pre_hy + CUR / 2; y++)
                 for (int x = pre_hx - CUR / 2 < 0 ? 0 : pre_hx - CUR / 2; x < SW && x < pre_hx + CUR / 2; x++)
                     if (vga[y * SW + x] != pre_cursor[y * SW + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             if (x1 >= 0) {
@@ -324,9 +379,9 @@ void tp_view_hook(void) {
                 pub_cur_x = x0 - pre_hx; pub_cur_y = y0 - pre_hy; pub_cur_ok = 1;
             }
         }
-        memcpy(pre_cursor, bb, sizeof pre_cursor); pre_ok = 1;
-        { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx / 2; pre_hy = my / 2; }
-        memcpy(pub_canvas, canvas, sizeof canvas);
+        memcpy(pre_cursor, bb, (size_t)SW * SH); pre_ok = 1;
+        { int mx, my; tp_host_mouse_pos(&mx, &my); pre_hx = mx * SW / 640; pre_hy = G.s == 1 ? my / 2 : my; }   /* the driver's 640x400 / 640x480 */
+        memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now();
         pthread_mutex_unlock(&lock);
@@ -344,13 +399,13 @@ void tp_view_poll(void) {
     pthread_mutex_lock(&lock);
     if (restore) { w16(CAM_X, (int16_t)restore_cx); w16(CAM_Y, (int16_t)restore_cy); w16(LAND_DIRTY, 1); restore = 0; }
     n = evn; memcpy(q, evq, sizeof(Ev) * n); evn = 0;
-    double vx = vis_x, vy = vis_y, z = vis_z; int on = want && active;
+    double vx = vis_x, vy = vis_y, z = vis_z; int on = want && active && vis_s == G.s;
     pthread_mutex_unlock(&lock);
     for (int i = 0; i < n; i++) {
         double fx = q[i].fx, fy = q[i].fy;
         int ui = 0;                                       /* the game's interface under the pointer: straight through */
         if (on) {
-            int ox = (int)(fx * SW), oy = (int)(fy * 200);
+            int ox = (int)(fx * SW), oy = (int)(fy * SH);
             pthread_mutex_lock(&lock);
             for (int dy = -2; dy <= 2 && !ui; dy++) for (int dx = -2; dx <= 2 && !ui; dx++) {
                 int x = ox + dx, y = oy + dy;
@@ -358,8 +413,8 @@ void tp_view_poll(void) {
             }
             pthread_mutex_unlock(&lock);
         }
-        if (on && !ui && fy * 200 < WORLD_H) {
-            double px = vx + fx * SW / z, py = vy + fy * 200 / z;          /* canvas point */
+        if (on && !ui && fy * SH < WORLD_H) {
+            double px = vx + fx * SW / z, py = vy + fy * SH / z;           /* canvas point */
             int cx = r16(CAM_X), cy = r16(CAM_Y);
             double sx = px - cam_ox(cx, cy), sy = py - cam_oy(cy);
             if (sx < 32 || sx > SW - 32 || sy < 24 || sy > WORLD_H - 24) {
@@ -373,7 +428,7 @@ void tp_view_poll(void) {
             if (sx < 0) sx = 0; if (sx > SW - 1) sx = SW - 1;
             if (sy < 0) sy = 0; if (sy > WORLD_H - 1) sy = WORLD_H - 1;
             if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view poll: canvas %.0f,%.0f camera %d,%d -> screen %.0f,%.0f\n", px, py, r16(CAM_X), r16(CAM_Y), sx, sy);
-            tp_host_mouse(sx / SW, sy / 200, q[i].buttons);
+            tp_host_mouse(sx / SW, sy / SH, q[i].buttons);
         } else tp_host_mouse(fx, fy, q[i].buttons);
     }
 }
@@ -387,31 +442,43 @@ void tp_view_enable(int main_game) {
     if (!main_game) { for (int h = 0; h < 8; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
     active = 0; have_world = 0; in_frame = 0;
 }
+void tp_view_geometry(int *sw, int *sh, int *wh);
 int tp_view_set(int on, double cx, double cy, double zoom) {
     pthread_mutex_lock(&lock);
     if (!enabled && on) { pthread_mutex_unlock(&lock); return 0; }
+    Geo g = geo(vis_s);
     if (!on && want) {                                   /* back to the game's own view, where the zoomed one was */
-        int ny = (int)lround((cy - OY - WORLD_H / 2.0) / UY);
+        int ny = (int)lround((cy - g.oy - g.wh / 2.0) / g.uy);
         restore_cy = ny < GAME_CY0 ? GAME_CY0 : ny > GAME_CY1 ? GAME_CY1 : ny;
-        int nx = (int)lround((cx - OX - SW / 2.0 - UYX * restore_cy) / UX);
+        int nx = (int)lround((cx - g.ox - g.sw / 2.0 - g.uyx * restore_cy) / g.ux);
         restore_cx = nx < GAME_CX0 ? GAME_CX0 : nx > GAME_CX1 ? GAME_CX1 : nx;
         restore = 1;
     }
     if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); }
     want = on; vis_z = zoom > 0.05 ? zoom : 0.05;
-    vis_x = cx - SW / 2.0 / vis_z; vis_y = cy - WORLD_H / 2.0 / vis_z;
+    vis_x = cx - g.sw / 2.0 / vis_z; vis_y = cy - g.wh / 2.0 / vis_z;
     pthread_mutex_unlock(&lock);
     return 1;
+}
+/* The screen the view works in, as the game's mode is now: width, height and
+ * park rows (320x200 with 178, or 640x480 with 436). Canvas coordinates are in
+ * this screen's pixels, so when it changes the app starts its zoom again. */
+void tp_view_geometry(int *sw, int *sh, int *wh) {
+    M = tp_host_memory();
+    int sc = mode_scale(); Geo g = geo(sc ? sc : 1);
+    pthread_mutex_lock(&lock); vis_s = g.s; pthread_mutex_unlock(&lock);
+    *sw = g.sw; *sh = g.sh; *wh = g.wh;
 }
 /* The canvas point at the centre of the game's own view (where zooming starts). */
 void tp_view_camera_center(double *cx, double *cy) {
     M = tp_host_memory();
-    *cx = cam_ox(r16(CAM_X), r16(CAM_Y)) + SW / 2.0; *cy = cam_oy(r16(CAM_Y)) + WORLD_H / 2.0;
+    Geo g = geo(vis_s); int x = r16(CAM_X), y = r16(CAM_Y);
+    *cx = g.ux * x + g.uyx * y + g.ox + g.sw / 2.0; *cy = g.uy * y + g.oy + g.wh / 2.0;
 }
-void tp_view_canvas_size(double *w, double *h) { *w = CW; *h = CH; }
-/* Is the zoomed view being drawn (the game is showing its park)? */
+void tp_view_canvas_size(double *w, double *h) { Geo g = geo(vis_s); *w = g.cw; *h = g.ch; }
+/* Is the zoomed view being drawn (the game is showing its park, at the app's scale)? */
 int tp_view_live(void) {
-    pthread_mutex_lock(&lock); int live = want && pub_time && now() - pub_time < 0.5; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); int live = want && pub_time && pub_s == vis_s && now() - pub_time < 0.5; pthread_mutex_unlock(&lock);
     return live;
 }
 /* A pointer event, in the game screen's 0..1 coordinates (as tp_host_mouse). */
@@ -422,54 +489,55 @@ void tp_view_mouse(double fx, double fy, uint32_t buttons) {
     pthread_mutex_unlock(&lock);
     if (!on) tp_host_mouse(fx, fy, buttons);
 }
-/* The picture at ow x oh (the game screen's 320x200 layout, any multiple):
- * the visible canvas in the park area with the interface overlay on top, and
- * the panel from the game's own frame (frame: 320x200 RGBA, tp_host_frame_rgba). */
-void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int smooth) {
+/* The picture at ow x oh (the game screen's layout at any size): the visible
+ * canvas in the park area with the interface overlay on top, and the panel from
+ * the game's own frame (frame: fw x fh RGBA, tp_host_frame_rgba_any). */
+void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int fw, int fh, int smooth) {
     pthread_mutex_lock(&lock);
+    Geo g = geo(pub_s);
     double z = vis_z, vx = vis_x, vy = vis_y;
-    int wh = oh * WORLD_H / 200;
-    double sx = (double)SW / z / ow, sy = (double)WORLD_H / z / wh;    /* canvas pixels per output pixel */
+    int wh = oh * g.wh / g.sh;
+    double sx = (double)g.sw / z / ow, sy = (double)g.wh / z / wh;     /* canvas pixels per output pixel */
     int ss = sx > 1.4 ? 2 : 1;                                         /* minifying: average 2x2 */
     for (int y = 0; y < oh; y++) {
         uint32_t *o = out + (size_t)y * ow;
         if (y >= wh) {                                                 /* the panel */
-            const uint32_t *f = frame + (y * 200 / oh) * SW;
-            for (int x = 0; x < ow; x++) o[x] = f[x * SW / ow];
+            const uint32_t *f = frame + (size_t)(y * fh / oh) * fw;
+            for (int x = 0; x < ow; x++) o[x] = f[x * fw / ow];
             continue;
         }
-        const uint16_t *ov = pub_overlay + (y * WORLD_H / wh) * SW;
+        const uint16_t *ov = pub_overlay + (y * g.wh / wh) * g.sw;
         double py = vy + (y + 0.5) * sy;
         for (int x = 0; x < ow; x++) {
-            uint16_t u = ov[x * SW / ow];
+            uint16_t u = ov[x * g.sw / ow];
             if (u != 0xffff) { o[x] = pub_pal[u]; continue; }
             double px = vx + (x + 0.5) * sx;
             if (ss == 1 && !smooth) {
                 int ix = (int)floor(px), iy = (int)floor(py);
-                o[x] = ix >= 0 && iy >= 0 && ix < CW && iy < CH ? pub_pal[pub_canvas[iy * CW + ix]] : 0xff000000u;
+                o[x] = ix >= 0 && iy >= 0 && ix < g.cw && iy < g.ch ? pub_pal[pub_canvas[(size_t)iy * g.cw + ix]] : 0xff000000u;
                 continue;
             }
             /* 2x2 samples: an average when minifying, bilinear-ish when smooth */
-            uint32_t r = 0, g = 0, b = 0;
+            uint32_t r = 0, gg = 0, b = 0;
             for (int k = 0; k < 4; k++) {
                 double qx = ss == 2 ? px + ((k & 1) - 0.5) * sx * 0.5 : px - 0.5 + (k & 1);
                 double qy = ss == 2 ? py + ((k >> 1) - 0.5) * sy * 0.5 : py - 0.5 + (k >> 1);
                 int ix = (int)floor(qx), iy = (int)floor(qy);
-                uint32_t c = ix >= 0 && iy >= 0 && ix < CW && iy < CH ? pub_pal[pub_canvas[iy * CW + ix]] : 0xff000000u;
-                r += c & 255; g += (c >> 8) & 255; b += (c >> 16) & 255;
+                uint32_t c = ix >= 0 && iy >= 0 && ix < g.cw && iy < g.ch ? pub_pal[pub_canvas[(size_t)iy * g.cw + ix]] : 0xff000000u;
+                r += c & 255; gg += (c >> 8) & 255; b += (c >> 16) & 255;
             }
-            o[x] = 0xff000000u | ((b / 4) << 16) | ((g / 4) << 8) | (r / 4);
+            o[x] = 0xff000000u | ((b / 4) << 16) | ((gg / 4) << 8) | (r / 4);
         }
     }
     /* The game's cursor at the pointer, at the screen's scale (in the panel the frame has it already). */
-    if (pub_cur_ok && ptr_fy >= 0 && ptr_fy * 200 < WORLD_H) {
-        double k = (double)ow / SW;
+    if (pub_cur_ok && ptr_fy >= 0 && ptr_fy * g.sh < g.wh) {
+        double kx = (double)ow / g.sw, ky = (double)oh / g.sh;
         int hx = (int)(ptr_fx * ow), hy = (int)(ptr_fy * oh);
         for (int y = 0; y < CUR; y++) for (int x = 0; x < CUR; x++) {
             uint16_t u = pub_cursor[y * CUR + x]; if (u == 0xffff) continue;
-            int bx = hx + (int)((pub_cur_x + x) * k), by = hy + (int)((pub_cur_y + y) * (double)oh / 200);
-            for (int yy = by; yy < by + (int)ceil((double)oh / 200); yy++) for (int xx = bx; xx < bx + (int)ceil(k); xx++)
-                if (xx >= 0 && yy >= 0 && xx < ow && yy < oh * WORLD_H / 200) out[(size_t)yy * ow + xx] = pub_pal[u];
+            int bx = hx + (int)((pub_cur_x + x) * kx), by = hy + (int)((pub_cur_y + y) * ky);
+            for (int yy = by; yy < by + (int)ceil(ky); yy++) for (int xx = bx; xx < bx + (int)ceil(kx); xx++)
+                if (xx >= 0 && yy >= 0 && xx < ow && yy < wh) out[(size_t)yy * ow + xx] = pub_pal[u];
         }
     }
     pthread_mutex_unlock(&lock);
@@ -481,7 +549,9 @@ static int test_state;
 void tp_view_test(const char *dir) {
     test_dir = dir; test_state = 1;
     tp_view_enable(1);
-    tp_view_set(1, CW / 2.0, CH / 2.0, 320.0 / CW);
+    int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh);
+    double w, h; tp_view_canvas_size(&w, &h);
+    tp_view_set(1, w / 2.0, h / 2.0, sw / w);
 }
 int tp_view_test_step(void) {          /* once published: write the canvas and a composite */
     if (test_state != 1 || !tp_view_live()) return 0;
