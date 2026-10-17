@@ -230,7 +230,14 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @10000, @"PlayIntro": @YES}];
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES}];
+    /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
+     * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
+     * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
+    if ([u integerForKey:@"SpeedModel"] < 2) {
+        if ([u objectForKey:@"Cycles"] && [u doubleForKey:@"Cycles"] == 10000) [u setDouble:15000 forKey:@"Cycles"];
+        [u setInteger:2 forKey:@"SpeedModel"];
+    }
     BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0;
     if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
     if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }

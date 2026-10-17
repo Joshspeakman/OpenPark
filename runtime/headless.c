@@ -117,6 +117,7 @@ int main(int argc, char **argv) {
             if (shots && el >= next_shot) {
                 char p[1024], h[65]; snprintf(p, sizeof p, "%s/rt-%03d.png", out, shot_n++);
                 tp_host_png(p, h); fprintf(stderr, "shot %s t=%.2f\n", p, el); next_shot += shots;
+                if (getenv("TP_SHOT_CKPT")) { snprintf(p, sizeof p, "%s/rt-%03d.ckpt", out, shot_n - 1); tp_host_checkpoint(p); }   /* survey: memory at each shot */
             }
         }
     } else {

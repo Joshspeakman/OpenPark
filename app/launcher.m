@@ -114,8 +114,9 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         NSArray *vol = @[@0.0, @0.1, @0.2, @0.3, @0.4, @0.5, @0.6, @0.7, @0.8, @0.9, @1.0];
         NSArray *volL = @[@"Off", @"10%", @"20%", @"30%", @"40%", @"50%", @"60%", @"70%", @"80%", @"90%", @"100%"];
         NSArray *volN = @[@"", @"", @"", @"", @"", @"", @"", @"", @"", @"", @""];
-        _top[0] = setting(@"Game Speed", @"Cycles", @[@10000, @20000, @40000], @[@"Original", @"Fast", @"Fastest"],
-                          @[@"As GOG's DOSBox runs it", @"Twice the original pace", @"Four times: the seasons fly by"]);
+        _top[0] = setting(@"Game Speed", @"Cycles", @[@10000, @12500, @15000, @20000, @40000], @[@"Original", @"1.25×", @"1.5×", @"2×", @"4×"],
+                          @[@"Exactly as GOG's DOSBox runs it", @"A quarter faster than GOG's DOSBox", @"Half again as fast as GOG's DOSBox",
+                            @"Twice GOG's DOSBox", @"Four times: the seasons fly by"]);
         _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
                           @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
         _groups = @[@"Display", @"Sound", @"Controls", @"Files"];

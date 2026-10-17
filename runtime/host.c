@@ -268,7 +268,13 @@ static void port_out(unsigned port, unsigned size, unsigned value) {
     else if (floating_port(port)) {}
     else stop("unsupported OUT %04x=%x", port, value);
 }
+/* DOSBox charges every port access an I/O delay in cycles (CPU_CycleMax/1024 for
+ * a read, /1365 for a write: 9 and 7 at GOG's 10000); the governor does the same. */
+extern uint64_t tp_insns, tp_rep;
+static uint64_t io_cost;
+static double gov_rate;   /* the governor's instruction rate (below) */
 static int io_cb(int output, unsigned port, unsigned size, unsigned value) {
+    if (gov_rate > 0) { unsigned d = (unsigned)(gov_rate / 1000.0 / (output ? 1365 : 1024)); tp_insns += d; io_cost += d; }
     jmp_buf saved; memcpy(saved, stop_jb, sizeof saved);
     if (setjmp(stop_jb)) { memcpy(stop_jb, saved, sizeof saved); stopped = 1; return -1; }
     int r = 0;
@@ -351,7 +357,10 @@ static void debug_stats(void) {
     static int on = -1; if (on < 0) on = getenv("TP_DEBUG") != NULL;
     if (!on) return;
     double t = now_s(); if (t - last < 1.0) return;
-    static uint64_t lins; fprintf(stderr, "Mins/s=%.1f time/s=%u 3da/s=%u ints/s=%u ", (tp_insns - lins) / 1e6, time_calls - ltime, retrace_reads - lret, int_calls - lint); lins = tp_insns;
+    static uint64_t lins, lrep, lio;
+    fprintf(stderr, "Mins/s=%.2f (rep %.2f io %.2f) time/s=%u 3da/s=%u ints/s=%u ", (tp_insns - lins) / 1e6, (tp_rep - lrep) / 1e6, (io_cost - lio) / 1e6,
+            time_calls - ltime, retrace_reads - lret, int_calls - lint);
+    lins = tp_insns; lrep = tp_rep; lio = io_cost;
     ltime = time_calls; lret = retrace_reads; lint = int_calls;
     { static uint32_t ls; float sb16_peak(void); fprintf(stderr, "sbirq/s=%u pend=%d peak=%.3f midi/s=%u ", sb_irqs_delivered - ls, sb_irq_pending, sb16_peak(), midi_bytes); ls = sb_irqs_delivered; midi_bytes = 0; }
     fprintf(stderr, "t=%.1f irq/s=%u polls/s=%u Mblocks/s=%.1f pit=%u vec8=%x:%x mode=%x eip=%08x keys=%d cb=%d\n",
@@ -562,9 +571,12 @@ static void dos_time(uint32_t a) {
  * the original ran at the speed of the PC. GOG's release pins DOSBox at
  * cycles=fixed 10000 (about ten million instructions a second); natively the
  * loop runs some sixty times faster. Hold the executed x86 instruction rate at
- * TP_CYCLES thousand per second (default 10000) by sleeping when ahead. */
+ * TP_CYCLES thousand per second (default 10000) by sleeping when ahead,
+ * counting as DOSBox's normal core does: one per instruction, one per MOVS/
+ * STOS/LODS repetition (generated code adds them) and an I/O delay per port
+ * access (io_cb). REP repetitions are about half of a running park's count. */
 extern uint64_t tp_insns;
-static double gov_t0; static uint64_t gov_i0; static double gov_rate;
+static double gov_t0; static uint64_t gov_i0;
 void tp_host_set_cycles(double per_ms) { gov_rate = per_ms * 1000.0; gov_t0 = 0; }
 static void govern(void) {
     if (gov_rate <= 0) return;

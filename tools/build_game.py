@@ -233,7 +233,7 @@ def main():
             sources.append((a, source.replace('f_%08x(' % a, name + '('), name, data))
             names.setdefault(a, []).append((name, data, len(decoded)))
 
-    header = '#include "rt.h"\nextern uint32_t tp_seg[6], tp_base[8192];\n' \
+    header = '#include "rt.h"\nextern uint32_t tp_seg[6], tp_base[8192];\nextern uint64_t tp_insns, tp_rep;\n' \
              'void tp_set_segment(unsigned n, unsigned selector);\n' \
              'uint32_t tp_io(Ctx *c, int output, unsigned port, unsigned size, unsigned value);\n' \
              'void tp_interrupt(Ctx *c, uint32_t number);\n'
