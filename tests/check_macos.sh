@@ -67,7 +67,7 @@ PY
 if [[ "${3:-}" == --park ]]; then
   # The app's C DOS host, deterministic mode: the same scenario must give the golden hashes.
   clang -arch arm64 -O2 -w -I "$2/recomp/runtime" -I runtime runtime/host.c runtime/sb16.c runtime/headless.c \
-    runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c work/check-native/game.a -lz -o work/check-native/tp-headless
+    runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c work/check-native/game.a -lz -o work/check-native/tp-headless
   overlay=$(mktemp -d work/check-native/c-host-XXXXXXXX)
   "$PYTHON" tools/export_image.py "$1" work/check-native/MAIN.TPIMG >/dev/null
   work/check-native/tp-headless --game "$(dirname "$1")" --overlay "$PWD/$overlay" --image work/check-native/MAIN.TPIMG \

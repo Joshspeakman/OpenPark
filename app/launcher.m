@@ -84,6 +84,64 @@ static void bulbs(NSRect r, CGFloat step, BOOL sides) {
 typedef struct { NSString *title, *key; NSArray *values; NSArray<NSString *> *labels, *notes; } Setting;
 static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray *n) { Setting s = {t, k, v, l, n}; return s; }
 
+/* ---- music: the game's tunes and its ride types (the type table at 0x1cced0, in order) ---- */
+static NSString *const ride_types[29] = {@"Flight Sim", @"Tree House", @"Pirate Boat", @"Plane Flyer", @"Maze", @"Ghost House",
+    @"Haunted House", @"Rubber Tubing", @"Race Car Ride", @"Roller Coaster", @"Loop the Loop", @"Cork Screw", @"Big Wheel",
+    @"Merry-Go-Round", @"Bouncy Castle", @"Space Shuttle", @"Big Dipper", @"Water Splash", @"Monorail", @"Snakes and Ladders",
+    @"Observation Tower", @"Parasol Chairs", @"Cowboy Acts", @"Clown Acts", @"Dolphin Acts", @"Medieval Acts", @"Super Spinner",
+    @"Observatory", @"Planet Rocket"};
+static const int ride_tune[29] = {13, 5, 6, 12, 5, 4, 4, 9, 15, 2, 0, 0, 1, 1, 15, 13, 14, 0, 17, 11, 12, 17, 7, 8, 16, 10, 12, 3, 1};
+NSString *tp_tune_name(int t) {
+    static NSString *const jingles[5] = {@"Heartbeat", @"Fanfare", @"Takeover", @"Winner", @"Funeral"};
+    return t <= 0 ? @"None" : t <= 17 ? [NSString stringWithFormat:@"Ride Tune %d", t] : jingles[t - 18];
+}
+NSString *tp_tune_note(int t) {                         /* which rides play it in the game */
+    if (t > 17) return @"One of the game's jingles, played on and on";
+    NSMutableArray *who = [NSMutableArray array];
+    for (int i = 0; i < 29; i++) if (ride_tune[i] == t) [who addObject:ride_types[i]];
+    return who.count ? [@"As played by " stringByAppendingString:[who componentsJoinedByString:@", "]] : @"A tune no ride plays in the game";
+}
+/* Per ride type: the game's tune, none, or another (RideTunes: {type index: tune, 0 none}). */
+void tp_ride_tunes_window(NSWindow *parent) {
+    NSDictionary *cur = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"RideTunes"] ?: @{};
+    NSPanel *w = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 520, 560) styleMask:NSWindowStyleMaskTitled
+                                              backing:NSBackingStoreBuffered defer:NO];
+    w.title = @"Ride Tunes";
+    NSView *content = w.contentView;
+    NSScrollView *sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(20, 60, 480, 480)];
+    sv.hasVerticalScroller = YES; sv.borderType = NSBezelBorder;
+    NSView *doc = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 460, 29 * 30 + 10)];
+    NSMutableArray<NSPopUpButton *> *pops = [NSMutableArray array];
+    for (int i = 0; i < 29; i++) {
+        CGFloat y = doc.frame.size.height - 36 - i * 30;
+        NSTextField *l = [NSTextField labelWithString:ride_types[i]]; l.frame = NSMakeRect(12, y + 3, 180, 20); [doc addSubview:l];
+        NSPopUpButton *pb = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(200, y, 250, 26) pullsDown:NO];
+        [pb addItemWithTitle:ride_tune[i] ? [NSString stringWithFormat:@"The Game's (%@)", tp_tune_name(ride_tune[i])] : @"The Game's (none)"];
+        [pb addItemWithTitle:@"None"];
+        for (int t = 1; t <= 22; t++) [pb addItemWithTitle:tp_tune_name(t)];
+        NSNumber *v = cur[[NSString stringWithFormat:@"%d", i]];
+        [pb selectItemAtIndex:v ? [v intValue] + 1 : 0];
+        [doc addSubview:pb]; [pops addObject:pb];
+    }
+    sv.documentView = doc; [content addSubview:sv];
+    [doc scrollPoint:NSMakePoint(0, doc.frame.size.height)];
+    NSButton *done = [NSButton buttonWithTitle:@"Done" target:NSApp action:@selector(stopModal)];
+    done.frame = NSMakeRect(410, 16, 90, 30); done.keyEquivalent = @"\r"; [content addSubview:done];
+    NSButton *reset = [NSButton buttonWithTitle:@"All The Game's" target:nil action:nil];
+    reset.frame = NSMakeRect(20, 16, 150, 30); [content addSubview:reset];
+    NSBlockOperation *resetAll = [NSBlockOperation blockOperationWithBlock:^{ for (NSPopUpButton *pb in pops) [pb selectItemAtIndex:0]; }];
+    reset.target = resetAll; reset.action = @selector(main);       /* (a button's target is weak: resetAll lives to the end) */
+    [w center];
+    [NSApp runModalForWindow:w];
+    (void)resetAll;
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    for (int i = 0; i < 29; i++) { NSInteger k = pops[i].indexOfSelectedItem; if (k > 0) out[[NSString stringWithFormat:@"%d", i]] = @(k - 1); }
+    if (out.count) [NSUserDefaults.standardUserDefaults setObject:out forKey:@"RideTunes"];
+    else [NSUserDefaults.standardUserDefaults removeObjectForKey:@"RideTunes"];
+    [w orderOut:nil];
+    (void)parent;
+}
+
 @interface TPLaunchView : NSView
 @property NSInteger focus, hover, open;   /* open: -1 or group index */
 @property BOOL result, done;
@@ -98,7 +156,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[4];
+    Setting _display[7], _sound[4], _tweaks[4], _free[2];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -122,7 +180,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                             @"Textos y asesores del juego", @"Textes et conseillers du jeu"]);
         _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
                           @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
-        _groups = @[@"Display", @"Sound", @"Controls", @"Files"];
+        _groups = @[@"Display", @"Sound", @"Controls", @"Files", @"Tweaks", @"Free Mode"];
         _display[0] = setting(@"Screen", @"StartFullScreen", @[@NO, @YES], @[@"Window", @"Full Screen"],
                               @[@"A window you can resize; ⌃⌘F switches", @"The whole display; ⌃⌘F switches"]);
         _display[1] = setting(@"Pixels", @"SmoothPixels", @[@0, @1, @2], @[@"Sharp", @"Smooth", @"CRT"],
@@ -143,6 +201,22 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"Zoomed-out views drawn by the new engine: faster", @"Zoomed-out views drawn by the game's own code"]);
         _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
                             @[@"The Mac's pointer hides over the game", @"The Mac's pointer stays visible too"]);
+        /* Tweaks: the whole game (runtime/qol.c). Free Mode: sandbox parks only. */
+        NSMutableArray *tunes = [NSMutableArray arrayWithObject:@0], *tuneL = [NSMutableArray arrayWithObject:@"None"],
+                       *tuneN = [NSMutableArray arrayWithObject:@"Quiet where no ride's music plays"];
+        for (int t = 1; t <= 22; t++) { [tunes addObject:@(t)]; [tuneL addObject:tp_tune_name(t)]; [tuneN addObject:tp_tune_note(t)]; }
+        _tweaks[0] = setting(@"Grossed-Out Sounds", @"GrossOutGap", @[@0, @5, @15, @30, @-1], @[@"Every Time", @"Every 5 s", @"Every 15 s", @"Every 30 s", @"Off"],
+                             @[@"The \"ew\" each time a visitor sees a mess, as in 1994", @"At most one \"ew\" every 5 seconds",
+                               @"At most one \"ew\" every 15 seconds", @"At most one \"ew\" every 30 seconds", @"Visitors keep their disgust to themselves"]);
+        _tweaks[1] = setting(@"Ride Music", @"RideMusic", @[@YES, @NO], @[@"On", @"Off"],
+                             @[@"Running rides on screen play their tunes", @"No ride tunes (the game's fanfares still play)"]);
+        _tweaks[2] = setting(@"Ride Tunes", @"RideTunes", @[@""], @[@"The Game's"], @[@"Each ride plays its own tune; → chooses per ride"]);
+        _tweaks[3] = setting(@"Park Music", @"ParkTune", tunes, tuneL, tuneN);
+        _free[0] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
+                           @[@"The game's limit for a park", @"A hundred more than the game allows", @"Close to all the game's people can be (rides and staff share them)"]);
+        _free[1] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
+                           @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
+                             @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
         self.open = -1; self.hover = HIT_NONE; self.focus = -1;
         NSDictionary *env = NSProcessInfo.processInfo.environment;
         if (env[@"TP_LAUNCHER_OPEN"]) {
@@ -159,10 +233,12 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 4 : self.open == 5 ? 2 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
+    if (self.open == 4) return &_tweaks[k];
+    if (self.open == 5) return &_free[k];
     return &_top[k];
 }
 - (NSInteger)valueIndex:(Setting *)s {
@@ -174,6 +250,10 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     return i == NSNotFound ? 0 : (NSInteger)i;
 }
 - (NSString *)valueOf:(Setting *)s {
+    if ([s->key isEqual:@"RideTunes"]) {
+        NSUInteger n = [[NSUserDefaults.standardUserDefaults dictionaryForKey:@"RideTunes"] count];
+        return n ? [NSString stringWithFormat:@"%lu Changed", (unsigned long)n] : @"The Game's";
+    }
     if ([s->key isEqual:@"SoundBank"]) {                 /* a file the player chose, or the built-in synth */
         NSString *b = [NSUserDefaults.standardUserDefaults stringForKey:@"SoundBank"];
         return b.length ? b.lastPathComponent.stringByDeletingPathExtension : @"Built-in";
@@ -181,6 +261,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     return s->labels[[self valueIndex:s]];
 }
 - (NSString *)noteOf:(Setting *)s {
+    if ([s->key isEqual:@"RideTunes"])
+        return [[NSUserDefaults.standardUserDefaults dictionaryForKey:@"RideTunes"] count] ? @"→ changes them; ← puts every ride back" : s->notes[0];
     if ([s->key isEqual:@"SoundBank"]) {
         NSString *b = [NSUserDefaults.standardUserDefaults stringForKey:@"SoundBank"];
         return b.length ? @"Your SoundFont for the music; ← goes back to built-in" : s->notes[0];
@@ -189,6 +271,11 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 - (void)step:(NSInteger)k by:(NSInteger)d {
     Setting *s = [self rowSetting:k];
+    if ([s->key isEqual:@"RideTunes"]) {                 /* → the per-ride window, ← back to the game's */
+        if (d < 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:@"RideTunes"]; else tp_ride_tunes_window(self.window);
+        self.needsDisplay = YES;
+        return;
+    }
     if ([s->key isEqual:@"SoundBank"]) {                 /* → opens a file, ← clears it */
         if (d < 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SoundBank"];
         else {
@@ -217,7 +304,11 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSRect r = [self rowRect:k];
     return NSMakeRect(right ? NSMaxX(r) - 46 : NSMaxX(r) - 326, r.origin.y + 10, 34, 30);
 }
-- (NSRect)groupRect:(NSInteger)g { return NSMakeRect(g % 2 ? WIN_W / 2 + 14 : WIN_W / 2 - 14 - 296, BANNER_H + 240 + (g / 2) * 84, 296, 54); }
+- (NSRect)groupRect:(NSInteger)g {                      /* three across: Display Sound Tweaks / Free Mode Controls Files */
+    static const int slot[6] = {0, 1, 4, 5, 2, 3};
+    int k = slot[g], w = 212, gap = 16, x0 = (WIN_W - 3 * w - 2 * gap) / 2;
+    return NSMakeRect(x0 + (k % 3) * (w + gap), BANNER_H + 240 + (k / 3) * 84, w, 54);
+}
 - (NSRect)quitRect { return NSMakeRect(WIN_W / 2 - 14 - 230, WIN_H - 92, 230, 58); }
 - (NSRect)playRect { return NSMakeRect(WIN_W / 2 + 14, WIN_H - 92, 230, 58); }
 
@@ -228,7 +319,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         if (NSPointInRect(p, NSInsetRect([self arrow:k right:NO], -6, -6))) return 100 + k;
         if (NSPointInRect(p, [self rowRect:k])) return 200 + k;
     }
-    if (self.open < 0) for (NSInteger g = 0; g < 4; g++) if (NSPointInRect(p, [self groupRect:g])) return 300 + g;
+    if (self.open < 0) for (NSInteger g = 0; g < 6; g++) if (NSPointInRect(p, [self groupRect:g])) return 300 + g;
     return HIT_NONE;
 }
 - (void)press:(NSInteger)h {
@@ -258,7 +349,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (void)mouseMoved:(NSEvent *)e { NSInteger h = [self hit:[self convertPoint:e.locationInWindow fromView:nil]]; if (h != self.hover) { self.hover = h; self.needsDisplay = YES; } }
 - (void)mouseDown:(NSEvent *)e { [self press:[self hit:[self convertPoint:e.locationInWindow fromView:nil]]]; }
 - (void)keyDown:(NSEvent *)e {
-    NSInteger rows = self.rowCount, items = rows + (self.open < 0 ? 4 : 0);
+    NSInteger rows = self.rowCount, items = rows + (self.open < 0 ? 6 : 0);
     switch (e.keyCode) {
     case 0x24: case 0x4c:                                  /* return: play, or press the focused group */
         if (self.focus >= rows && self.open < 0) [self press:300 + self.focus - rows]; else [self press:HIT_PLAY]; break;
@@ -350,9 +441,11 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 - (NSString *)summary:(NSInteger)g {
     if (g == 0) return [NSString stringWithFormat:@"%@ · %@ · %@", [self valueOf:&_display[0]], [self valueOf:&_display[1]], [self valueOf:&_display[2]]];
-    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"On · Effects %@ · Music %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[2]]];
-    if (g == 2) return @"Mouse and keyboard, as on a PC";
-    return @"Your saved parks, in the Finder";
+    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[2]]];
+    if (g == 2) return @"Mouse and keyboard";
+    if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]]];
+    if (g == 5) return [NSString stringWithFormat:@"%@ visitors · Bus %@", [self valueOf:&_free[0]], [self valueOf:&_free[1]]];
+    return @"Saved parks, in the Finder";
 }
 - (void)drawRect:(NSRect)dirty {
     [self fillGrass:self.bounds darken:0.64];
@@ -364,7 +457,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         [[rgb(170, 110, 40) colorWithAlphaComponent:0.5] setFill];
         for (NSInteger k = 0; k + 1 < self.rowCount; k++) NSRectFill(NSMakeRect(f.origin.x + 24, NSMaxY([self rowRect:k]), f.size.width - 48, 1));
         for (NSInteger k = 0; k < self.rowCount; k++) [self drawRow:k];
-        for (NSInteger gi = 0; gi < 4; gi++) {
+        for (NSInteger gi = 0; gi < 6; gi++) {
             NSRect r = [self groupRect:gi];
             int st = self.focus == self.rowCount + gi ? 2 : self.hover == 300 + gi ? 1 : 0;
             [self sign:r title:_groups[gi] primary:NO state:st];
@@ -378,10 +471,18 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         [rgb(170, 110, 40) setStroke]; NSBezierPath *o = [NSBezierPath bezierPathWithRect:NSInsetRect(p, 1.5, 1.5)]; o.lineWidth = 3; [o stroke];
         [[rgb(170, 110, 40) colorWithAlphaComponent:0.5] setStroke]; NSBezierPath *in = [NSBezierPath bezierPathWithRect:NSInsetRect(p, 9, 9)]; in.lineWidth = 1; [in stroke];
         bulbs(NSInsetRect(p, 1.5, 1.5), 34, YES);
-        NSString *title = self.open == 0 ? @"DISPLAY" : self.open == 1 ? @"SOUND" : @"CONTROLS";
+        NSString *title = [_groups[self.open] uppercaseString];
         label(title, display(30), gold(), NSMakeRect(p.origin.x, p.origin.y + 26, p.size.width, 38), NSTextAlignmentCenter, 4, YES);
         [[rgb(170, 110, 40) colorWithAlphaComponent:0.7] setFill]; NSRectFill(NSMakeRect(p.origin.x + 50, p.origin.y + 74, p.size.width - 100, 1));
         if (self.open == 2) [self drawControlsIn:p];
+        if (self.open == 5) {
+            NSArray *lines = @[@"For sandbox parks: Sim Level Sandbox when you set up a park.",
+                               @"Other parks play by the game's rules, whatever is set here.",
+                               @"The park itself cannot be bigger: Theme Park's land is a fixed",
+                               @"64 × 64 grid, and every park is already walled to its edges."];
+            for (NSUInteger i = 0; i < lines.count; i++)
+                label(lines[i], plain(15), note_c(), NSMakeRect(p.origin.x + 50, p.origin.y + 80 + 74 * 2 + 40 + 24 * i, p.size.width - 100, 22), NSTextAlignmentLeft, 0.3, NO);
+        }
         for (NSInteger k = 0; k < self.rowCount; k++) {
             [self drawRow:k];
             if (k + 1 < self.rowCount) { [[rgb(170, 110, 40) colorWithAlphaComponent:0.4] setFill]; NSRectFill(NSMakeRect(p.origin.x + 50, NSMaxY([self rowRect:k]) + 2, p.size.width - 100, 1)); }

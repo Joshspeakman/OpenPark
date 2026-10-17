@@ -1047,7 +1047,8 @@ int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_
         while (ran < max_blocks) {
             int n = tp_run(20000); ran += 20000;
             if (n == -2 && G(EIP) == GUEST_RETURN) { result = G(EAX); break; }
-            if (n == -3) { extern int tp_hook_armed; void tp_view_nested_hook(void); tp_view_nested_hook(); tp_hook_armed = 0; continue; }   /* hooks inside host calls: logging only (view.c) */
+            if (n == -3) { extern int tp_hook_armed, tp_hook_which; void tp_view_nested_hook(void), tp_qol_hook(int nested);
+                if (tp_hook_which >= 12) tp_qol_hook(1); else tp_view_nested_hook(); tp_hook_armed = 0; continue; }   /* hooks inside host calls (view.c logging; qol.c) */
             if (n < 0) break;
             if (n) interrupt((uint32_t)n);
         }
@@ -1078,7 +1079,8 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
             if (blocks_limit - blocks < budget) budget = (uint32_t)(blocks_limit - blocks);
         }
         int n = tp_run(budget);
-        if (n == -3) { extern int tp_hook_armed; tp_view_hook(); tp_hook_armed = 0; n = 0; }   /* a point the native view watches (view.c) */
+        if (n == -3) { extern int tp_hook_armed, tp_hook_which; void tp_qol_hook(int nested);
+                      if (tp_hook_which >= 12) tp_qol_hook(0); else tp_view_hook(); tp_hook_armed = 0; n = 0; }   /* view.c's points, or qol.c's */
         if (stopped) { snprintf(status + strlen(status), sizeof status - strlen(status), " (port I/O)"); return -1; }
         if (n < 0 || (n == 0 && !quantum)) {
             snprintf(status, sizeof status, "native %d at %08x: %s", n, G(EIP), n == -2 ? "no compiled block" : tp_error());
