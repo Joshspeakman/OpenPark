@@ -1045,7 +1045,7 @@ int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_
         while (ran < max_blocks) {
             int n = tp_run(20000); ran += 20000;
             if (n == -2 && G(EIP) == GUEST_RETURN) { result = G(EAX); break; }
-            if (n == -3) { extern int tp_hook_armed; tp_hook_armed = 0; continue; }   /* hooks do not apply inside host calls */
+            if (n == -3) { extern int tp_hook_armed; void tp_view_nested_hook(void); tp_view_nested_hook(); tp_hook_armed = 0; continue; }   /* hooks inside host calls: logging only (view.c) */
             if (n < 0) break;
             if (n) interrupt((uint32_t)n);
         }

@@ -181,8 +181,64 @@ static void native_check(int cx, int cy, int rows, const uint8_t *before) {
                                        cx, cy, n, fx, fy, tp_native_blit_flags(M), d);
     if (passes % 200 == 0 || passes == 20) fprintf(stderr, "native landscape: %ld passes, %ld differ (%ld pixels), %ld decorated cells left out\n", passes, bad_passes, bad_px, deco);
 }
+/* Development (TP_NATIVE_THINGS): the game's draw calls in a pass against the native renderer's, per cell. */
+typedef struct { int kind, a, b, c; uint32_t d; int e; } LogE;
+static LogE glog[20000], nlog[20000]; static int glog_n, nlog_n, logging;
+static void addlog(LogE *l, int *n, int kind, int a, int b, int c, uint32_t d, int e) { if (*n < 20000) l[(*n)++] = (LogE){kind, a, b, c, d, e}; }
+void tp_view_nested_hook(void) {
+    if (!logging) return;
+    extern uint32_t tp_get(unsigned); uint32_t pc = tp_get(9), sp = tp_get(4);
+    if (pc == 0x11c22au) addlog(glog, &glog_n, 1, r16(sp + 4), (uint16_t)r16(sp + 8), (uint16_t)r16(sp + 12), 0, 0);
+    else if (pc == 0x11c010u) addlog(glog, &glog_n, 3, 0, 0, 0, 0, 0);
+    else if (pc == 0x15ed21u) {
+        uint32_t ebx = tp_get(3), ecx = tp_get(1), edx = tp_get(2), esi = tp_get(6);
+        addlog(glog, &glog_n, 2, (int)ebx, (int)ecx, (int)(edx & 0xffff), esi, (uint16_t)r16(0x1becbc));
+    }
+}
+static void native_logger(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) { (void)ctx; addlog(nlog, &nlog_n, kind, a, b, c, d, e); }
+void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, void (*lg)(int, int, int, int, uint32_t, int, void *), void *ctx);
+static void things_check(int cx, int cy, int rows) {
+    static long cells, compared, bad, missing_cls[0x200];
+    nlog_n = 0; tp_native_things(M, cx, cy, rows, native_logger, NULL);
+    /* walk both logs cell by cell */
+    int gi = 0, ni = 0;
+    while (gi < glog_n && glog[gi].kind != 1) gi++;           /* the landscape's blits come first */
+    while (gi < glog_n && ni < nlog_n) {
+        if (glog[gi].kind != 1 || nlog[ni].kind != 1) { bad++; break; }
+        int ok_cell = glog[gi].a == nlog[ni].a && glog[gi].b == nlog[ni].b && glog[gi].c == nlog[ni].c;
+        int g1 = ++gi, n1 = ++ni;
+        while (gi < glog_n && glog[gi].kind != 3) gi++;
+        while (ni < nlog_n && nlog[ni].kind != 3) ni++;
+        int miss = ni < nlog_n ? nlog[ni].a : 0;
+        cells++;
+        if (!ok_cell) { bad++; if (bad < 5) fprintf(stderr, "native things: cell order differs (game %d at %d,%d)\n", glog[g1 - 1].a, glog[g1 - 1].b, glog[g1 - 1].c); }
+        else if (miss) missing_cls[miss & 0x1ff]++;
+        else {
+            compared++;
+            int same = gi - g1 == ni - n1;
+            for (int k = 0; same && k < gi - g1; k++) {
+                LogE *a = &glog[g1 + k], *b = &nlog[n1 + k];
+                same = a->a == b->a && a->b == b->b && a->c == b->c && a->d == b->d && (a->e & 0xff) == (b->e & 0xff);
+            }
+            if (!same) { bad++; if (bad < 8) fprintf(stderr, "native things: cell (thing %d) draws differ: game %d calls, native %d\n", glog[g1 - 1].a, gi - g1, ni - n1); }
+        }
+        gi++; ni++;
+    }
+    static long passes; if (++passes % 100 == 0 || passes == 10) {
+        fprintf(stderr, "native things: %ld passes, %ld cells, %ld compared, %ld differ; not native yet:", passes, cells, compared, bad);
+        for (int k = 0; k < 0x200; k++) if (missing_cls[k]) fprintf(stderr, " class %#x x%ld", k, missing_cls[k]);
+        fprintf(stderr, "\n");
+    }
+}
 static int pass(int cx, int cy) {
     int16_t ox = r16(CAM_X), oy = r16(CAM_Y);
+    static int thing_check = -1; if (thing_check < 0) thing_check = getenv("TP_NATIVE_THINGS") != NULL;
+    uint32_t keep_hooks[8]; int logged = 0;
+    if (thing_check) {                                    /* log the game's calls during this pass */
+        memcpy(keep_hooks, tp_hook_pcs, sizeof keep_hooks);
+        tp_hook_pcs[5] = 0x11c22au; tp_hook_pcs[6] = 0x11c010u; tp_hook_pcs[7] = 0x15ed21u; tp_hooks_changed();
+        glog_n = 0; logging = 1; logged = 1;
+    }
     static uint8_t before[MAX_SCREEN]; int checking = getenv("TP_NATIVE_CHECK") != NULL;
     if (checking) memcpy(before, M + r32(LAND_CACHE), (size_t)r32(DISP_PITCH) * SH);
     w16(CAM_X, (int16_t)cx); w16(CAM_Y, (int16_t)cy); w16(LAND_DIRTY, 1);
@@ -190,6 +246,10 @@ static int pass(int cx, int cy) {
     uint32_t args[3] = {(uint32_t)cx, (uint32_t)cy, (uint32_t)(((G.s == 1 ? 400 : 480) + th - 1) / th)};   /* rows, as 0x113b9a */
     int64_t r = tp_host_guest_call(RENDER_PARK, args, 3, 50000000);
     if (checking && r >= 0) native_check(cx, cy, (int)args[2], before);
+    if (logged) {
+        logging = 0; memcpy(tp_hook_pcs, keep_hooks, sizeof keep_hooks); tp_hooks_changed();
+        if (r >= 0) things_check(cx, cy, (int)args[2]);
+    }
     w16(CAM_X, ox); w16(CAM_Y, oy); w16(LAND_DIRTY, 1);
     return r < 0 ? -1 : 0;
 }
@@ -256,7 +316,7 @@ static void state_restore(void) { size_t o = 0; for (int i = 0; i < nsaved; i++)
  * of a large view is refreshed over the next frames (round robin). */
 static void diff_report(const uint8_t *snap) {     /* development: what passes changed (TP_VIEW_DIFF) */
     uint32_t buf = r32(DISP_BUF), cache = r32(LAND_CACHE), bytes = SW * SH, sp = 0;
-    { extern uint32_t tp_get(int); sp = tp_get(4); }
+    { extern uint32_t tp_get(unsigned); sp = tp_get(4); }
     int shown = 0; uint32_t run = 0, start = 0;
     for (uint32_t a = 0x10000; a < (64u << 20); a++) {
         int skip = (a >= buf && a < buf + bytes) || (a >= cache && a < cache + bytes) || a == LAND_DIRTY || a == LAND_DIRTY + 1
