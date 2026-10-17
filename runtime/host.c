@@ -582,6 +582,7 @@ static void dos_time(uint32_t a) {
  * access (io_cb). REP repetitions are about half of a running park's count. */
 extern uint64_t tp_insns;
 static double gov_t0; static uint64_t gov_i0;
+
 void tp_host_set_cycles(double per_ms) { gov_rate = per_ms * 1000.0; gov_t0 = 0; }
 static void govern(void) {
     if (gov_rate <= 0) return;
@@ -953,6 +954,8 @@ static int load_image(const char *path, uint32_t *entry, uint32_t *stack) {
     return 0;
 }
 
+static char cmd_args[128];
+void tp_host_set_args(const char *args) { snprintf(cmd_args, sizeof cmd_args, "%s", args ? args : ""); }
 int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const TpScript *s) {
     mem = tp_memory();
     memset(mem, 0, MEMORY);
@@ -1003,7 +1006,11 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     set_base(8, 0); set_base(16, 0); set_base(24, PSP); set_base(32, ENV);
     descriptor(8, 0, 0x9a); descriptor(16, 0, 0x92); descriptor(24, PSP, 0x92); descriptor(32, ENV, 0x92);
     put16(PSP + 0x2c, 32);
-    mwrite(PSP + 0x80, "\0\r", 2);
+    {   /* the command tail: empty, as the verified runs; tp_host_set_args (e.g. the launcher's language, " -l1") */
+        size_t n = strlen(cmd_args); if (n > 126) n = 126;
+        uint8_t tail[128]; tail[0] = (uint8_t)n; memcpy(tail + 1, cmd_args, n); tail[n + 1] = '\r';
+        mwrite(PSP + 0x80, tail, (uint32_t)n + 2);
+    }
     static const char env[] = "PATH=C:\\GAME\0NO87=1\0\0\x01\x00" "C:\\GAME\\MAIN.EXE";
     mwrite(ENV, env, sizeof env);       /* includes the final NUL */
     for (int r = EAX; r <= EDI; r++) S(r, r == ESP ? stack : 0);
@@ -1050,8 +1057,14 @@ int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_
 uint8_t *tp_host_memory(void) { return mem; }
 int tp_host_is_realtime(void) { return !deterministic; }
 
+static volatile int paused;
+void tp_host_pause(int on) { paused = on; }       /* the app is hidden or minimised: the game waits */
 int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
     if (stopped) return -1;
+    if (paused && !deterministic) {                /* the timer skips the stall on resume (realtime_events) */
+        struct timespec ts = {0, 20000000}; nanosleep(&ts, NULL); gov_t0 = 0;
+        return quit_requested ? (snprintf(status, sizeof status, "quit"), stopped = 1, 1) : 0;
+    }
     double deadline = now_s() + ms / 1000.0;
     int r = setjmp(stop_jb);
     if (r) { stopped = 1; return r == 2 ? 1 : -1; }

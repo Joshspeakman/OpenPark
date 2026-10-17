@@ -6,6 +6,8 @@
  * user's own GOG package by tools/build_app.sh). */
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <ImageIO/ImageIO.h>
 #include <pthread.h>
 #include "host.h"
 int tp_audio_start(void);
@@ -55,13 +57,17 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 @implementation GameView {
     CALayer *_screen;
     uint32_t _pixels[640 * 480];
+    double _lastLW;                      /* the layout width last given to view.c */
+    int _camMoves;                       /* tp_view_camera_moves seen */
     int _sw, _sh, _wh;                   /* the game's screen now: size, park rows (tp_view_geometry) */
     NSTrackingArea *_tracking;
     BOOL _cursorHidden;
     uint32_t _buttons;
-    /* Zoom (runtime/view.c): off at 1x, where the game draws its own view. */
-    BOOL _zoomed;
-    double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when zoom last ended */
+    /* The park view (runtime/view.c): on when zoomed, or when the window is wider
+     * than 4:3 (widescreen: the park fills it, the interface stays in a centred
+     * 4:3 column); off, the game draws its own view. */
+    BOOL _viewOn, _live;
+    double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when the view last ended */
     uint32_t *_big; int _bigW, _bigH;
     NSPoint _mouse; BOOL _mouseIn;
 }
@@ -74,11 +80,13 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         _screen.minificationFilter = kCAFilterLinear;
         _screen.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null]};
         [self.layer addSublayer:_screen];
+        _zoom = 1;
     }
     return self;
 }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
+/* The game's own 4:3 picture (or the whole view, stretched). */
 - (NSRect)screenRect {
     NSRect b = self.bounds;
     CGFloat w = b.size.width, h = b.size.height;
@@ -86,10 +94,20 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     if (w * 3 > h * 4) w = h * 4 / 3; else h = w * 3 / 4;
     return NSMakeRect(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), floor(w), floor(h));
 }
+- (BOOL)wide {
+    NSRect b = self.bounds;
+    return [NSUserDefaults.standardUserDefaults boolForKey:@"Widescreen"] && b.size.height > 0 && b.size.width * 3 > b.size.height * 4 * 1.02;
+}
+/* What the park view occupies, and its width in the game screen's pixels. */
+- (NSRect)viewRect { return [self wide] ? self.bounds : [self screenRect]; }
+- (double)layoutW {
+    NSRect r = [self viewRect];
+    return [self wide] ? _sw * (r.size.width / r.size.height) * 0.75 : _sw;
+}
 - (void)layout {
     [super layout];
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    _screen.frame = [self screenRect];
+    _screen.frame = _live ? [self viewRect] : [self screenRect];
     [CATransaction commit];
 }
 - (void)present {
@@ -97,15 +115,27 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     if (!tp_host_frame_size(&w, &h) || !tp_host_frame_rgba_any(_pixels, 640 * 480)) return;
     int fw = w, fh = h; uint32_t *px = _pixels;
     [self updateGeometry];
-    if (_zoomed) [self edgePan];
-    if (_zoomed && tp_view_live() && fw == _sw) {   /* the zoomed park, the game's interface and its panel */
+    if ((_zoom != 1 || [self wide]) != _viewOn || (_viewOn && fabs([self layoutW] - _lastLW) > 0.5)) [self applyView];
+    if (_viewOn && tp_view_camera_moves() != _camMoves) {   /* the game moved its camera itself: look there */
+        _camMoves = tp_view_camera_moves();
+        tp_view_camera_center(&_cx, &_cy); [self clampCenter];
+        tp_view_set(1, _cx, _cy, _zoom, _lastLW = [self layoutW]);
+    }
+    if (_viewOn) [self edgePan];
+    BOOL live = _viewOn && tp_view_live() && fw == _sw;
+    if (live) {                                      /* the park view, the game's interface and its panel */
+        NSRect vr = [self viewRect];
         CGFloat scale = self.window.backingScaleFactor ?: 2;
         int k = (int)lround([self screenRect].size.width * scale / fw); k = k < 1 ? 1 : k > 6 ? 6 : k;
         if (fw == 320 && k < 2) k = 2;
-        if (!_big || _bigW != fw * k || _bigH != fh * k) { free(_big); _bigW = fw * k; _bigH = fh * k; _big = malloc(sizeof *_big * _bigW * _bigH); }
+        /* square output pixels over the view's shape (the layout maps onto it, 320x200's tall pixels included) */
+        int oh = fh * k, ow = (int)lround(oh * vr.size.width / vr.size.height);
+        if (ow < 16) ow = 16;
+        if (!_big || _bigW != ow || _bigH != oh) { free(_big); _bigW = ow; _bigH = oh; _big = malloc(sizeof *_big * _bigW * _bigH); }
         tp_view_compose(_big, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
         px = _big; w = _bigW; h = _bigH;
     }
+    if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; }
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs,
                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
@@ -131,85 +161,100 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)sendMouse:(NSEvent *)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     _mouse = p; _mouseIn = YES;
-    NSRect r = [self screenRect];
+    NSRect r = _live ? [self viewRect] : [self screenRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
-    /* Zoomed, the view draws the game's cursor at the pointer (view.c), as the game does at 1x. */
+    /* In the park view, the view draws the game's cursor at the pointer (view.c), as the game does. */
     [self setCursorHidden:inside && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
-    tp_view_mouse(fx, fy, _buttons);
+    if (_live) tp_view_mouse(fx, fy, _buttons);      /* mapped into the park */
+    else tp_host_mouse(fx, fy, _buttons);            /* the game's own screen */
 }
 
-/* ---- zoom ---- */
+/* ---- the park view: zoom and widescreen ---- */
 /* The game's screen mode decides the canvas scale; when it changes ([R] in the
- * park), the zoomed view carries over to the new scale. */
+ * park), the view carries over to the new scale. */
 - (void)updateGeometry {
     int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh);
     if (sw == _sw) return;
     double k = _sw ? (double)sw / _sw : 1;
     _sw = sw; _sh = sh; _wh = wh;
-    if (_zoomed) { _cx *= k; _cy *= k; [self clampCenter]; tp_view_set(1, _cx, _cy, _zoom); }
+    if (_viewOn) { _cx *= k; _cy *= k; [self clampCenter]; _lastLW = [self layoutW]; tp_view_set(1, _cx, _cy, _zoom, _lastLW); }
 }
 - (double)minZoom {
     double w, h; tp_view_canvas_size(&w, &h);
-    return fmax(0.1, fmin(_sw / w, _wh / h));
+    return fmax(0.1, fmin([self layoutW] / w, _wh / h));
 }
 - (void)clampCenter {
     double w, h; tp_view_canvas_size(&w, &h);
-    double hw = _sw / 2.0 / _zoom, hh = _wh / 2.0 / _zoom;
+    double hw = [self layoutW] / 2.0 / _zoom, top = _wh / 2.0 / _zoom;
+    double bottom = ([self wide] ? _sh - _wh / 2.0 : _wh / 2.0) / _zoom;   /* wide: the park shows down to the bottom beside the panel */
     _cx = hw * 2 >= w ? w / 2 : fmin(fmax(_cx, hw), w - hw);
-    _cy = hh * 2 >= h ? h / 2 : fmin(fmax(_cy, hh), h - hh);
+    _cy = top + bottom >= h ? (h - bottom + top) / 2 : fmin(fmax(_cy, top), h - bottom);
+}
+/* Turns the park view on or off as zoom and the window's shape ask, and tells view.c where it looks. */
+- (void)applyView {
+    BOOL on = _zoom != 1 || [self wide];
+    if (on && !_viewOn && CACurrentMediaTime() - _offAt > 1.0) tp_view_camera_center(&_cx, &_cy);   /* start where the game looks */
+    if (on) [self clampCenter];
+    if (!on && _viewOn) _offAt = CACurrentMediaTime();
+    _lastLW = [self layoutW];
+    if (!tp_view_set(on, _cx, _cy, _zoom, _lastLW)) { on = NO; _zoom = 1; }   /* not in the park (the intro, say) */
+    _viewOn = on;
 }
 /* Zoom to z keeping the park point under p (view coordinates; NAN: the centre) in place. */
 - (void)zoomTo:(double)z at:(NSPoint)p {
     [self updateGeometry];
-    if (!_zoomed) {
-        if (CACurrentMediaTime() - _offAt > 1.0) tp_view_camera_center(&_cx, &_cy);   /* start where the game's view is */
-        _zoom = 1;
-    }
-    NSRect r = [self screenRect];
+    if (!_viewOn) { if (CACurrentMediaTime() - _offAt > 1.0) tp_view_camera_center(&_cx, &_cy); _zoom = 1; }
+    NSRect r = [self viewRect]; double lw = [self layoutW];
     double fx = isnan(p.x) ? 0.5 : (p.x - r.origin.x) / r.size.width;
     double fy = isnan(p.x) ? _wh / 2.0 / _sh : 1.0 - (p.y - r.origin.y) / r.size.height;
-    double ax = _cx + (fx - 0.5) * _sw / _zoom, ay = _cy + (fy * _sh - _wh / 2.0) / _zoom;
+    double ax = _cx + (fx - 0.5) * lw / _zoom, ay = _cy + (fy * _sh - _wh / 2.0) / _zoom;
     z = fmin(fmax(z, [self minZoom]), 4.0);
     if (fabs(z - 1) < 0.04) z = 1;                   /* a detent at the game's own scale */
     _zoom = z;
-    _cx = ax - (fx - 0.5) * _sw / z; _cy = ay - (fy * _sh - _wh / 2.0) / z;
-    [self clampCenter];
-    BOOL on = z != 1;
-    if (!on && _zoomed) _offAt = CACurrentMediaTime();
-    if (!tp_view_set(on, _cx, _cy, z)) { on = NO; _zoom = 1; }   /* not in the park (the intro, say) */
-    _zoomed = on;
+    _cx = ax - (fx - 0.5) * lw / z; _cy = ay - (fy * _sh - _wh / 2.0) / z;
+    [self applyViewKeepingCenter];
+}
+- (void)applyViewKeepingCenter {
+    BOOL on = _zoom != 1 || [self wide];
+    if (on) [self clampCenter];
+    if (!on) _offAt = CACurrentMediaTime();
+    _lastLW = [self layoutW];
+    if (!tp_view_set(on, _cx, _cy, _zoom, _lastLW)) { on = NO; _zoom = 1; }
+    _viewOn = on;
 }
 - (void)panBy:(double)dx :(double)dy {               /* view points */
-    if (!_zoomed) return;
-    double k = _sw / _zoom / [self screenRect].size.width;
+    if (!_viewOn) return;
+    double k = [self layoutW] / _zoom / [self viewRect].size.width;
     _cx += dx * k; _cy += dy * k;
     [self clampCenter];
-    tp_view_set(1, _cx, _cy, _zoom);
+    tp_view_set(1, _cx, _cy, _zoom, _lastLW = [self layoutW]);
 }
 - (void)edgePan {                                    /* the pointer at the window's edge scrolls, as in the game */
-    if (!_mouseIn || !self.window.isKeyWindow) return;
-    NSRect r = [self screenRect]; NSPoint p = _mouse; double m = 6, v = 9;
-    if (1.0 - (p.y - r.origin.y) / r.size.height > (double)_wh / _sh) return;   /* over the panel */
+    if (!_mouseIn || !self.window.isKeyWindow || !_live) return;
+    NSRect r = [self viewRect]; NSPoint p = _mouse; double m = 6, v = 9;
+    double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
+    double lw = [self layoutW], col = (lw - _sw) / 2 / lw;
+    if (fy > (double)_wh / _sh && fx >= col && fx < 1 - col) return;   /* over the panel */
     double dx = p.x < NSMinX(r) + m ? -v : p.x > NSMaxX(r) - m ? v : 0;
-    double dy = p.y > NSMaxY(r) - m ? -v : 0;
+    double dy = p.y > NSMaxY(r) - m ? -v : p.y < NSMinY(r) + m ? v : 0;
     if (dx || dy) [self panBy:dx :dy];
 }
 - (void)magnifyWithEvent:(NSEvent *)e {
-    [self zoomTo:(_zoomed ? _zoom : 1) * (1 + e.magnification) at:[self convertPoint:e.locationInWindow fromView:nil]];
+    [self zoomTo:_zoom * (1 + e.magnification) at:[self convertPoint:e.locationInWindow fromView:nil]];
 }
 - (void)scrollWheel:(NSEvent *)e {
     double dy = e.scrollingDeltaY, dx = e.scrollingDeltaX;
     if (!e.hasPreciseScrollingDeltas) { dx *= 12; dy *= 12; }
     if (e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))
-        [self zoomTo:(_zoomed ? _zoom : 1) * pow(1.006, dy) at:[self convertPoint:e.locationInWindow fromView:nil]];
+        [self zoomTo:_zoom * pow(1.006, dy) at:[self convertPoint:e.locationInWindow fromView:nil]];
     else [self panBy:-dx :-dy];
 }
-- (void)zoomIn:(id)sender { [self zoomTo:(_zoomed ? _zoom : 1) * 1.25 at:NSMakePoint(NAN, NAN)]; }
-- (void)zoomOut:(id)sender { [self zoomTo:(_zoomed ? _zoom : 1) / 1.25 at:NSMakePoint(NAN, NAN)]; }
-- (void)zoomActual:(id)sender { if (_zoomed) [self zoomTo:1 at:NSMakePoint(NAN, NAN)]; }
+- (void)zoomIn:(id)sender { [self zoomTo:_zoom * 1.25 at:NSMakePoint(NAN, NAN)]; }
+- (void)zoomOut:(id)sender { [self zoomTo:_zoom / 1.25 at:NSMakePoint(NAN, NAN)]; }
+- (void)zoomActual:(id)sender { [self zoomTo:1 at:NSMakePoint(NAN, NAN)]; }
 - (void)mouseMoved:(NSEvent *)e { [self sendMouse:e]; }
 - (void)mouseDragged:(NSEvent *)e { [self sendMouse:e]; }
 - (void)rightMouseDragged:(NSEvent *)e { [self sendMouse:e]; }
@@ -229,7 +274,14 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)keyDown:(NSEvent *)e {
     if (e.modifierFlags & NSEventModifierFlagCommand) { [super keyDown:e]; return; }
     unsigned short kc = e.keyCode;
-    if (_zoomed && kc >= 0x7b && kc <= 0x7e) {          /* zoomed: the arrows pan the view */
+    if (kc == 0x30) {                                   /* Tab, held: fast forward (the game does not use Tab) */
+        if (!e.isARepeat && !getenv("TP_CYCLES")) {
+            tp_host_set_cycles([NSUserDefaults.standardUserDefaults doubleForKey:@"Cycles"] * 4);
+            self.window.subtitle = @"Fast forward";
+        }
+        return;
+    }
+    if (_viewOn && kc >= 0x7b && kc <= 0x7e) {          /* the park view: the arrows move it */
         double step = 40;
         [self panBy:(kc == 0x7b ? -step : kc == 0x7c ? step : 0) :(kc == 0x7e ? -step : kc == 0x7d ? step : 0)];
         return;
@@ -250,6 +302,11 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     else tp_host_key(function_key(scan, e.modifierFlags));
 }
 - (void)keyUp:(NSEvent *)e {
+    if (e.keyCode == 0x30) {
+        if (!getenv("TP_CYCLES")) tp_host_set_cycles([NSUserDefaults.standardUserDefaults doubleForKey:@"Cycles"]);
+        self.window.subtitle = @"";
+        return;
+    }
     if (e.modifierFlags & NSEventModifierFlagCommand) return;
     uint8_t scan = e.keyCode < 128 ? scan_of[e.keyCode] : 0;
     if (scan) tp_host_key_raw(scan, 0);
@@ -284,6 +341,7 @@ static void *game_thread(void *arg) {
     if (d->_intro) {
         setenv("TP_IMAGE", d->_intro.fileSystemRepresentation, 1);
         tp_select_code(intro_dispatch, intro_dispatch_init);
+        tp_host_set_args("");
         if (!tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
             int r; do r = tp_host_run(4000, 0, 50); while (r == 0);
             fprintf(stderr, "intro ended: %s\n", tp_host_status());
@@ -292,8 +350,14 @@ static void *game_thread(void *arg) {
         tp_select_code(tp_dispatch, tp_dispatch_init);
     }
     setenv("TP_IMAGE", d->_image.fileSystemRepresentation, 1);
+    {   /* the launcher's language: the game's own -l option (GOG's THEME.BAT passes -l0) */
+        long lang = [NSUserDefaults.standardUserDefaults integerForKey:@"Language"];
+        char args[16] = ""; if (lang > 0 && lang < 5) snprintf(args, sizeof args, " -l%ld", lang);
+        tp_host_set_args(args);
+    }
     for (;;) {
         tp_view_enable(1);                               /* the zoomable park view knows MAIN.EXE's code */
+        tp_view_request_hires([NSUserDefaults.standardUserDefaults boolForKey:@"StartHiRes"] || getenv("TP_START_HIRES"));
         if (tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
             game_result = -1; break;
         }
@@ -328,7 +392,7 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES}];
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
@@ -352,7 +416,7 @@ static void *game_thread(void *arg) {
         backing:NSBackingStoreBuffered defer:NO];
     _window.title = @"Theme Park";
     _window.delegate = self;
-    _window.contentAspectRatio = NSMakeSize(4, 3);
+    if (![u boolForKey:@"Widescreen"]) _window.contentAspectRatio = NSMakeSize(4, 3);   /* widescreen: any shape, the park fills it */
     _window.contentMinSize = NSMakeSize(320, 240);
     _window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
     _window.backgroundColor = NSColor.blackColor;
@@ -410,6 +474,7 @@ static void *game_thread(void *arg) {
             fprintf(stderr, "shot %s blocks=%llu status=%s\n", hex, (unsigned long long)tp_host_blocks(), tp_host_status());
         }
         else if ([op isEqual:@"zoom"]) [_view zoomTo:[p[2] doubleValue] at:NSMakePoint(NAN, NAN)];
+        else if ([op isEqual:@"size"]) [_window setContentSize:NSMakeSize([p[2] doubleValue], [p[3] doubleValue])];
         else if ([op isEqual:@"vclick"]) {      /* a click through the zoomed view, 640x400 screen space */
             double x = [p[2] doubleValue] / 640.0, y = [p[3] doubleValue] / 400.0;
             tp_view_mouse(x, y, 0); tp_view_mouse(x, y, 1);
@@ -418,14 +483,17 @@ static void *game_thread(void *arg) {
         else if ([op isEqual:@"vshot"]) {       /* what the window shows (zoomed or not), 1280x800 */
             static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
             tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
-            uint32_t *big = malloc(4 * 1280 * 960); int oh = fw == 640 ? 960 : 800;
-            if (tp_view_live()) tp_view_compose(big, 1280, oh, frame, fw, fh, 0);
-            else for (int i = 0; i < 1280 * oh; i++) big[i] = frame[(i / 1280 * fh / oh) * fw + (i % 1280) * fw / 1280];
+            NSRect vb = _view.bounds; int oh = 960, ow = 1280;
+            if (tp_view_live() && vb.size.width * 3 > vb.size.height * 4 * 1.02) ow = (int)lround(oh * vb.size.width / vb.size.height);
+            uint32_t *big = malloc(4 * (size_t)ow * oh);
+            if (tp_view_live()) tp_view_compose(big, ow, oh, frame, fw, fh, 0);
+            else for (int i = 0; i < ow * oh; i++) big[i] = frame[(i / ow * fh / oh) * fw + (i % ow) * fw / ow];
             NSString *path = [[p subarrayWithRange:NSMakeRange(2, p.count - 2)] componentsJoinedByString:@":"];
             int tp_host_png_rgba(const char *, const uint32_t *, int, int);
-            tp_host_png_rgba(path.fileSystemRepresentation, big, 1280, oh); free(big);
+            tp_host_png_rgba(path.fileSystemRepresentation, big, ow, oh); free(big);
             fprintf(stderr, "vshot live=%d\n", tp_view_live());
         }
+        else if ([op isEqual:@"picture"]) [self savePicture:nil];
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
     }
 }
@@ -445,6 +513,17 @@ static void *game_thread(void *arg) {
     }
 }
 
+/* Hidden or minimised, the park waits (and is silent) until it is back. */
+- (void)holdGame:(BOOL)hold {
+    tp_host_pause(hold);
+    NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
+    if (hold) tp_audio_set_volumes(0, 0);
+    else tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
+}
+- (void)applicationDidHide:(NSNotification *)n { [self holdGame:YES]; }
+- (void)applicationDidUnhide:(NSNotification *)n { [self holdGame:NO]; }
+- (void)windowDidMiniaturize:(NSNotification *)n { [self holdGame:YES]; }
+- (void)windowDidDeminiaturize:(NSNotification *)n { [self holdGame:NO]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a { return YES; }
 - (void)applicationWillTerminate:(NSNotification *)n {
     tp_host_quit();
@@ -453,6 +532,30 @@ static void *game_thread(void *arg) {
     fflush(stderr);
 }
 - (void)toggleFull:(id)sender { [_window toggleFullScreen:nil]; }
+/* File > Save Park Picture: the whole park as one PNG (the view renders it on the game's thread). */
+- (void)savePicture:(id)sender {
+    tp_view_request_poster();
+    double t0 = CACurrentMediaTime(); uint32_t *px = NULL; int w = 0, h = 0;
+    while (!tp_view_take_poster(&px, &w, &h) && CACurrentMediaTime() - t0 < 3) [NSThread sleepForTimeInterval:0.02];
+    if (!px) {
+        NSAlert *a = [NSAlert new]; a.messageText = @"No park on screen";
+        a.informativeText = @"Open your park in the game, then save its picture."; [a runModal]; return;
+    }
+    NSString *path = NSProcessInfo.processInfo.environment[@"TP_PICTURE"];     /* self-test */
+    if (!path) {
+        NSSavePanel *sp = [NSSavePanel savePanel];
+        sp.allowedContentTypes = @[UTTypePNG]; sp.nameFieldStringValue = @"Theme Park.png";
+        if ([sp runModal] != NSModalResponseOK) { free(px); return; }
+        path = sp.URL.path;
+    }
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    CGImageDestinationRef d = CGImageDestinationCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL);
+    if (d) { CGImageDestinationAddImage(d, img, NULL); CGImageDestinationFinalize(d); CFRelease(d); }
+    CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
+    fprintf(stderr, "park picture %dx%d -> %s\n", w, h, path.fileSystemRepresentation);
+}
 @end
 
 int main(int argc, const char **argv) {
@@ -467,6 +570,10 @@ int main(int argc, const char **argv) {
         [appMenu addItem:NSMenuItem.separatorItem];
         [appMenu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(terminate:) keyEquivalent:@"q"];
         appItem.submenu = appMenu;
+        NSMenuItem *fileItem = [NSMenuItem new]; [bar addItem:fileItem];
+        NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+        [fileMenu addItemWithTitle:@"Save Park Picture…" action:@selector(savePicture:) keyEquivalent:@"e"];
+        fileItem.submenu = fileMenu;
         NSMenuItem *viewItem = [NSMenuItem new]; [bar addItem:viewItem];
         NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
         NSMenuItem *fs = [viewMenu addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"];

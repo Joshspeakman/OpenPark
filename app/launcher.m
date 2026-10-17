@@ -96,9 +96,9 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 
 @implementation TPLaunchView {
     NSImage *_keyart, *_logo, *_grass;
-    Setting _top[2];
+    Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[4], _sound[3];
+    Setting _display[6], _sound[3];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -117,6 +117,9 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _top[0] = setting(@"Game Speed", @"Cycles", @[@10000, @12500, @15000, @20000, @40000], @[@"Original", @"1.25×", @"1.5×", @"2×", @"4×"],
                           @[@"Exactly as GOG's DOSBox runs it", @"A quarter faster than GOG's DOSBox", @"Half again as fast as GOG's DOSBox",
                             @"Twice GOG's DOSBox", @"Four times: the seasons fly by"]);
+        _top[2] = setting(@"Language", @"Language", @[@0, @1, @2, @3, @4], @[@"English", @"Deutsch", @"Italiano", @"Español", @"Français"],
+                          @[@"The game's text and advisors", @"Texte und Berater des Spiels", @"Testi e consiglieri del gioco",
+                            @"Textos y asesores del juego", @"Textes et conseillers du jeu"]);
         _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
                           @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
         _groups = @[@"Display", @"Sound", @"Controls", @"Files"];
@@ -130,6 +133,10 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                             @[@"Sound Blaster effects and General MIDI music", @"The park is silent"]);
         _sound[1] = setting(@"Effects Volume", @"SoundVolume", vol, volL, volN);
         _sound[2] = setting(@"Music Volume", @"MusicVolume", vol, volL, volN);
+        _display[5] = setting(@"Start In", @"StartHiRes", @[@NO, @YES], @[@"320 × 200", @"640 × 480"],
+                              @[@"The game's usual screen; R in the park switches", @"The game's SVGA mode: more of the park at once"]);
+        _display[4] = setting(@"Wide Windows", @"Widescreen", @[@YES, @NO], @[@"More Park", @"Black Bars"],
+                              @[@"The park fills the window; the panel stays centred", @"The game's 4:3 picture, as on a CRT"]);
         _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
                             @[@"The Mac's pointer hides over the game", @"The Mac's pointer stays visible too"]);
         self.open = -1; self.hover = HIT_NONE; self.focus = -1;
@@ -148,7 +155,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 4 : self.open == 1 ? 3 : self.open < 0 ? 2 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 6 : self.open == 1 ? 3 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -171,17 +178,18 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 
 /* ---- layout ---- */
-- (NSRect)topFrame { return NSMakeRect(56, BANNER_H + 26, WIN_W - 112, 2 * 70 + 16); }
+- (NSRect)topFrame { return NSMakeRect(56, BANNER_H + 22, WIN_W - 112, 3 * 63 + 14); }
 - (NSRect)panel { return NSMakeRect(42, 132, WIN_W - 84, 512); }
 - (NSRect)rowRect:(NSInteger)k {
-    if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 8 + 70 * k, f.size.width - 20, 70); }
-    NSRect p = self.panel; return NSMakeRect(p.origin.x + 26, p.origin.y + 82 + 74 * k, p.size.width - 52, 70);
+    if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 7 + 63 * k, f.size.width - 20, 63); }
+    NSRect p = self.panel; CGFloat pitch = self.rowCount > 5 ? 69 : 74;
+    return NSMakeRect(p.origin.x + 26, p.origin.y + 80 + pitch * k, p.size.width - 52, 70);
 }
 - (NSRect)arrow:(NSInteger)k right:(BOOL)right {
     NSRect r = [self rowRect:k];
     return NSMakeRect(right ? NSMaxX(r) - 46 : NSMaxX(r) - 326, r.origin.y + 10, 34, 30);
 }
-- (NSRect)groupRect:(NSInteger)g { return NSMakeRect(g % 2 ? WIN_W / 2 + 14 : WIN_W / 2 - 14 - 296, BANNER_H + 214 + (g / 2) * 92, 296, 56); }
+- (NSRect)groupRect:(NSInteger)g { return NSMakeRect(g % 2 ? WIN_W / 2 + 14 : WIN_W / 2 - 14 - 296, BANNER_H + 240 + (g / 2) * 84, 296, 54); }
 - (NSRect)quitRect { return NSMakeRect(WIN_W / 2 - 14 - 230, WIN_H - 92, 230, 58); }
 - (NSRect)playRect { return NSMakeRect(WIN_W / 2 + 14, WIN_H - 92, 230, 58); }
 
@@ -326,7 +334,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         rounded(f, 8, [NSColor colorWithWhite:0 alpha:0.45], rgb(170, 110, 40), 2);
         rounded(NSInsetRect(f, 6, 6), 5, nil, [rgb(170, 110, 40) colorWithAlphaComponent:0.45], 1);
         [[rgb(170, 110, 40) colorWithAlphaComponent:0.5] setFill];
-        NSRectFill(NSMakeRect(f.origin.x + 24, NSMaxY([self rowRect:0]), f.size.width - 48, 1));
+        for (NSInteger k = 0; k + 1 < self.rowCount; k++) NSRectFill(NSMakeRect(f.origin.x + 24, NSMaxY([self rowRect:k]), f.size.width - 48, 1));
         for (NSInteger k = 0; k < self.rowCount; k++) [self drawRow:k];
         for (NSInteger gi = 0; gi < 4; gi++) {
             NSRect r = [self groupRect:gi];
