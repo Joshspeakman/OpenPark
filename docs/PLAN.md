@@ -512,6 +512,19 @@ a plausible scale, walking, turning, diorama view and following a visitor work, 
 to the park view (60 frames a second). Not yet checked: riding along, ride videos, footprints of
 large rides, the pointer drop point in the app.
 
+**Planted on the ground (2026-10-18, the player: "make buildings feel planted to the ground
+better")**: in the demo park (walkshots from the south, north, east, the path) rides and shops
+stood where their pictures' bottoms are: rides (class 4/0x0a, placed by bytes 6/8) at their
+footprint's front edge, others at the middle; seen from any other side their own ground showed in
+front of them, as if they floated. A big thing now keeps its footprint (middle, half its depth:
+about the picture's width in cells, rounded, up to 6) and its card stands on the footprint's edge
+nearest the camera (to the square's edge, corners a little short), sorted by that point; the
+walker's blocked cells are the footprint itself (they were centred on the front edge). Contact
+shadows: the floor darkens under each thing (8 samples a cell, smoothed): a big thing's footprint
+with a soft rim, a visitor's feet, a soft blob for others; riders none. TP_WALK_PARTS logs one
+snapshot's sprites and cards (development). The art's own ground under a building still stands up
+with the card (the pictures are one sprite each; nothing marks which pixels are ground).
+
 **Next steps**: (1) run it in a park and look (scale, footprints, flicker, the drop point);
 (2) list GAME/ and THEME.CD/ for any ride animations; (3) the visitor AI with TP_WALK_WATCH and
 TP_PROFILE: the heading/state/target bytes and the function choosing a visitor's next cell, then

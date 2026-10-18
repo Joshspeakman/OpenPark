@@ -102,13 +102,15 @@ static int geom(Geom *g) {
 #define MAXCARDS 4096
 #define POOL (3u << 20)             /* card pixels (16-bit: 0xffff transparent) */
 #define MAXCONT 256
-typedef struct { float x, y; uint16_t w, h, ax, ay; uint32_t off; int16_t idx; uint8_t cls, big; } Card;
+#define SHR 8                       /* shadow samples per cell */
+typedef struct { float x, y, r; uint16_t w, h, ax, ay; uint32_t off; int16_t idx; uint8_t cls, big; } Card;   /* r: half the footprint (big things) */
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
     Card cards[MAXCARDS]; int ncards;
     uint16_t pix[POOL]; uint32_t npix;
     uint8_t blocked[MAPN * MAPN];
+    uint8_t shade[MAPN * SHR * MAPN * SHR];   /* contact shadows on the floor (SHR samples a cell, 0..255 dark) */
     int16_t riding[NTH];            /* rider -> the ride, car or train it is on (0: none) */
     Cont conts[MAXCONT]; int nconts;
     float eye;                      /* a visitor's eye height, cells */
@@ -213,6 +215,14 @@ static void finish(Build *B) {
         if (t && known_place(t, B->cls)) {
             fx = OXS + g->tws * t[6] / 256.0 + g->shear * t[8] / 256.0;
             wx = B->cx + t[6] / 256.0; wy = B->cy + t[8] / 256.0;
+            /* rides and shops placed this way stand at their footprint's front edge (the picture's
+             * bottom); their middle is half a footprint behind (the footprint: about as deep as the
+             * picture is wide) */
+            double depth = w / (g->tws + g->shear);
+            if ((B->cls == 4 || B->cls == 0x0a) && depth >= 1.5) {
+                depth = floor(depth + 0.5); if (depth > 6) depth = 6;
+                wy -= depth / 2; big = 1; c->r = (float)(depth / 2);
+            }
         } else {
             long sum = 0, n = 0;
             for (int y = h - 3 < 0 ? 0 : h - 3; y < h; y++) for (int x = 0; x < w; x++) if (p[y * w + x] != 0xffff) { sum += x; n++; }
@@ -220,10 +230,11 @@ static void finish(Build *B) {
             double v = (y1 + 1 - OYS) / g->ths, u = (fx - OXS - v * g->shear) / g->tws;
             double depth = w / (g->tws + g->shear);          /* a square footprint as wide as the picture */
             if (depth > 6) depth = 6;
-            if (depth >= 1.5) { v -= depth / 2; big = 1; }
+            if (depth >= 1.5) { v -= depth / 2; big = 1; c->r = (float)(depth / 2); }
             wx = B->cx + u; wy = B->cy + v;
         }
         fy = y1 + 1;
+        if (!big) c->r = 0;
         c->x = (float)wx; c->y = (float)wy; c->w = (uint16_t)w; c->h = (uint16_t)h;
         double ax = fx - x0; c->ax = (uint16_t)(ax < 0 ? 0 : ax > w ? w : ax); c->ay = (uint16_t)(fy - y0);
         c->off = s->npix; c->idx = (int16_t)B->idx; c->cls = (uint8_t)(B->idx < 0 ? 0xff : B->cls); c->big = (uint8_t)big;
@@ -240,6 +251,7 @@ static void finish(Build *B) {
     for (int y = B->y0; y < B->y1; y++) { memset(sa + y * SW_ + B->x0, 0, (size_t)(B->x1 - B->x0)); memset(sb + y * SW_ + B->x0, 0xff, (size_t)(B->x1 - B->x0)); }
     B->any = 0;
 }
+static int parts_log;                                    /* development: TP_WALK_PARTS logs one snapshot's sprites */
 static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
     Build *B = ctx; int lo = B->g->lo;
     if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; return; }
@@ -249,6 +261,7 @@ static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx
         tp_native_draw_sprite(&B->a, M + d, c & 0xff, c >> 8, a, b, e, B->colour);
         tp_native_draw_sprite(&B->b, M + d, c & 0xff, c >> 8, a, b, e, B->colour);
         touch(B, x - 2, y - 2, x + w + 3, y + h + 3);
+        if (parts_log) fprintf(stderr, "walk part: thing %d cls %d cell %d,%d sprite %d,%d %dx%d at %06x flags %x\n", B->idx, B->cls, B->cx, B->cy, x - OXS, y - OYS, w, h, d, e);
         B->colour = 0; return;
     }
     if (kind == 4 && tp_native_text) {                     /* the small font: written at its own pitch, then copied */
@@ -343,6 +356,40 @@ static void watch(int idx, const uint8_t *t, int cont) {
     } else pcont = 0;
 }
 
+/* ---- contact shadows ----
+ * The game's art has no shadows on the ground of its own (they are in the pictures, standing up
+ * with the cards), so things looked stood on the floor rather than in it. Each thing darkens the
+ * floor where it stands: a big thing its footprint and a soft edge round it, others a soft blob
+ * as wide as their foot. Riders cast none (they are up on their rides). */
+static void splat(Snap *s, double x, double y, double r, double soft, int dark, int square) {
+    int n = MAPE * SHR, x0 = (int)floor((x - r - soft) * SHR), x1 = (int)ceil((x + r + soft) * SHR);
+    int y0 = (int)floor((y - r - soft) * SHR), y1 = (int)ceil((y + r + soft) * SHR);
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > n) x1 = n; if (y1 > n) y1 = n;
+    for (int yy = y0; yy < y1; yy++) for (int xx = x0; xx < x1; xx++) {
+        double dx = fabs((xx + 0.5) / SHR - x), dy = fabs((yy + 0.5) / SHR - y);
+        double d = square ? fmax(dx, dy) : sqrt(dx * dx + dy * dy);   /* (distance from the middle) */
+        double k = d <= r ? 1 : d >= r + soft ? 0 : 1 - (d - r) / soft;
+        int v = (int)(dark * k * k * (3 - 2 * k) + 0.5);
+        uint8_t *o = &s->shade[(size_t)yy * MAPN * SHR + xx];
+        if (v > *o) *o = (uint8_t)v;
+    }
+}
+static void make_shade(Snap *s, const Geom *g) {
+    memset(s->shade, 0, sizeof s->shade);
+    for (int i = 0; i < s->ncards; i++) {
+        const Card *c = &s->cards[i];
+        if (c->idx > 0 && c->idx < NTH && s->riding[c->idx]) continue;
+        double wc = c->w / (g->tws + g->shear);              /* the picture's width, cells */
+        if (c->big) splat(s, c->x, c->y, c->r * 0.9, 0.75, 115, 1);
+        else if (c->cls == 2) splat(s, c->x, c->y, 0.06, 0.13, 120, 0);   /* a visitor's feet */
+        else splat(s, c->x, c->y, fmin(0.5, wc * 0.22), fmin(0.5, wc * 0.2 + 0.1), 75, 0);
+    }
+    if (getenv("TP_WALK_PARTS")) { static int done; if (!done++) { int nz = 0, nr = 0, nb = 0; for (size_t i = 0; i < sizeof s->shade; i++) nz += s->shade[i] != 0;
+        for (int i = 0; i < s->ncards; i++) { const Card *c = &s->cards[i]; nb += c->big; if (c->idx > 0 && c->idx < NTH && s->riding[c->idx]) nr++; }
+        for (int i = 0; i < s->ncards; i++) { const Card *c = &s->cards[i]; if (c->cls != 2 && c->idx > 0) fprintf(stderr, "walk card: %d cls %d sub %d big %d %dx%d foot %d,%d at %.2f,%.2f r %.2f\n", c->idx, c->cls, M[r32(THINGS) + (uint32_t)c->idx * 0xc8 + 0xc], c->big, c->w, c->h, c->ax, c->ay, c->x, c->y, c->r); }
+        fprintf(stderr, "walk shade: %d samples, %d cards, %d big, %d riding; tws %.2f ths %.2f shear %.2f\n", nz, s->ncards, nb, nr, g->tws, g->ths, g->shear); } }
+}
+
 /* ---- the snapshot (emulation thread) ---- */
 static int cmp_float(const void *a, const void *b) { float x = *(const float *)a, y = *(const float *)b; return x < y ? -1 : x > y; }
 static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
@@ -366,6 +413,7 @@ static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
     NDTarget base = {sa, sizeof sa, 0, SW_, SW_, SH_, SW_ - 1, g->lo, M + r32(GHOST_TAB), 0};
     B.a = base; B.b = base; B.b.buf = sb;
     static int cleared; if (!cleared) { memset(sa, 0, sizeof sa); memset(sb, 0xff, sizeof sb); cleared = 1; }
+    static int parts_done; parts_log = !parts_done && getenv("TP_WALK_PARTS"); if (parts_log) parts_done = 1;
     int keep = tp_native_stable_rng; tp_native_stable_rng = 1;
     for (int cy = 0; cy < MAPE; cy++) for (int cx = 0; cx < MAPE; cx++) {
         double dx = cx + 0.5 - ax, dy = cy + 0.5 - ay;
@@ -374,12 +422,13 @@ static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
         tp_native_cell_things(M, cx, cy, OXS << g->lo, OYS << g->lo, card_log, &B);
         finish(&B);
     }
-    tp_native_stable_rng = keep;
+    tp_native_stable_rng = keep; parts_log = 0;
+    find_riders(s);
+    make_shade(s, g);
     /* a visitor's height: the median of the visitors' pictures */
     static float hs[MAXCARDS]; int nh = 0;
     for (int i = 0; i < s->ncards; i++) if (s->cards[i].cls == 2) hs[nh++] = (float)(s->cards[i].h * g->aspect / g->tws);
     if (nh) { qsort(hs, (size_t)nh, sizeof *hs, cmp_float); s->eye = hs[nh / 2] * 0.92f; } else s->eye = 0.7f;
-    find_riders(s);
     /* the visitor followed */
     s->f_idx = follow; s->f_ok = 0; s->f_cont = 0; s->f_name[0] = 0; s->f_type = -1; s->f_elev = 0;
     if (valid_idx(follow)) {
@@ -603,7 +652,20 @@ static uint32_t mix(uint32_t a, uint32_t b, double f) {
     uint32_t bl = (((a >> 16) & 255) * (256 - k) + ((b >> 16) & 255) * k) >> 8;
     return 0xff000000u | bl << 16 | g << 8 | r;
 }
-typedef struct { float z; int i; } Vis;
+static uint32_t darken(uint32_t c, int k) {            /* k 0..255 */
+    if (k <= 0) return c;
+    uint32_t m = 256 - (uint32_t)k;
+    return 0xff000000u | ((((c >> 16) & 255) * m) >> 8) << 16 | ((((c >> 8) & 255) * m) >> 8) << 8 | ((c & 255) * m) >> 8;
+}
+static int shade_at(const Snap *s, double x, double y) {  /* the contact shadow at a floor point, smoothly */
+    double fx = x * SHR - 0.5, fy = y * SHR - 0.5; int n = MAPE * SHR;
+    int x0 = (int)floor(fx), y0 = (int)floor(fy); double ax = fx - x0, ay = fy - y0;
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= n || y0 + 1 >= n) return 0;
+    const uint8_t *p = s->shade + (size_t)y0 * MAPN * SHR + x0;
+    if (!(p[0] | p[1] | p[MAPN * SHR] | p[MAPN * SHR + 1])) return 0;
+    return (int)((p[0] * (1 - ax) + p[1] * ax) * (1 - ay) + (p[MAPN * SHR] * (1 - ax) + p[MAPN * SHR + 1] * ax) * ay);
+}
+typedef struct { float z; int i; float x, y; } Vis;
 static int cmp_vis(const void *a, const void *b) { float x = ((const Vis *)a)->z, y = ((const Vis *)b)->z; return x > y ? -1 : x < y; }
 #define FOG0 20.0
 #define FOG1 42.0
@@ -655,7 +717,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                     uint32_t c = s->pal[X >= 0 && X < MAPE && Y >= 0 && Y < MAPE ? ft[(size_t)(Y * T + v) * MAPN * T + (size_t)X * T + u] : ot[v * T + u]];
                     r += c & 255; gg += (c >> 8) & 255; bb += (c >> 16) & 255;
                 }
-                uint32_t c = 0xff000000u | (bb / 4) << 16 | (gg / 4) << 8 | r / 4;
+                uint32_t c = darken(0xff000000u | (bb / 4) << 16 | (gg / 4) << 8 | r / 4, shade_at(s, gx, gy));
                 o[x] = fog > 0 ? mix(c, fogc, fog) : c;
             }
             continue;
@@ -664,7 +726,8 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             int X = (int)floor(gx), Y = (int)floor(gy), u = (int)((gx - X) * T), v = (int)((gy - Y) * T);
             if (u >= T) u = T - 1; if (v >= T) v = T - 1;
             uint8_t c = X >= 0 && X < MAPE && Y >= 0 && Y < MAPE ? ft[(size_t)(Y * T + v) * MAPN * T + (size_t)X * T + u] : ot[v * T + u];
-            o[x] = fog > 0 ? mix(s->pal[c], fogc, fog) : s->pal[c];
+            uint32_t col = darken(s->pal[c], shade_at(s, gx, gy));
+            o[x] = fog > 0 ? mix(col, fogc, fog) : col;
         }
     }
     /* cards, far to near */
@@ -673,16 +736,28 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
     for (int i = 0; i < s->ncards; i++) {
         const Card *c = &s->cards[i];
         if (hide && c->idx == hide) continue;
-        double dx = c->x - cx, dy = c->y - cy, dz = -cz;
+        /* A big thing's picture shows its front, from its footprint's front edge up: it stands on the
+         * edge of its footprint nearest the camera (not the middle, where its own ground showed in
+         * front of it, as if it floated), whichever way it is seen from. */
+        double px = c->x, py = c->y;
+        if (c->r > 0) {
+            double ex = cx - px, ey = cy - py, d = sqrt(ex * ex + ey * ey);
+            if (d > 1e-3) {
+                double m = fmax(fabs(ex), fabs(ey)) / d, k = fmin(c->r / m, c->r * 1.2);   /* (to the square's edge, corners a little short) */
+                if (k > d - 0.3) k = d - 0.3 > 0 ? d - 0.3 : 0;
+                px += ex / d * k; py += ey / d * k;
+            }
+        }
+        double dx = px - cx, dy = py - cy, dz = -cz;
         double vz = dx * fx + dy * fy + dz * fz;
         if (vz < 0.12 || vz > FOG1) continue;
-        vis[nv++] = (Vis){(float)vz, i};
+        vis[nv++] = (Vis){(float)vz, i, (float)px, (float)py};
     }
     qsort(vis, (size_t)nv, sizeof *vis, cmp_vis);
     double kx = W.hscale / g->tws, ky = W.hscale * g->aspect / g->tws;   /* cells per art pixel across, up */
     for (int k = 0; k < nv; k++) {
         const Card *c = &s->cards[vis[k].i];
-        double dx = c->x - cx, dy = c->y - cy, dz = -cz;
+        double dx = vis[k].x - cx, dy = vis[k].y - cy, dz = -cz;
         double vz = vis[k].z, vx = dx * rx + dy * ry, vy = dx * ux + dy * uy + dz * uz;
         double px = ow / 2.0 + f * vx / vz, py = oh / 2.0 - f * vy / vz;   /* the foot */
         double pw = f * kx / vz, ph = f * ky / vz;            /* screen pixels per art pixel */
