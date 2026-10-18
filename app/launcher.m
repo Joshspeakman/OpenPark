@@ -225,9 +225,9 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                            @[@"Endless parks reach the hardest in three game years", @"Endless parks reach the hardest in five game years",
                              @"Endless parks reach the hardest in ten game years"]);
         _free[2] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
-                           @[@"The game's limit for a park", @"A hundred more than the game allows", @"Close to all the game's people can be (rides and staff share them)"]);
+                           @[@"The game's limit for a park", @"A hundred more than the game allows", @"Nearly all the people the game can hold"]);
         _free[4] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
-                           @[@"The game's park size", @"Four times the land for new sandbox parks (saved parks keep their size)"]);
+                           @[@"The game's park size", @"Four times the land for new sandbox parks"]);
         _free[3] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
                            @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
                              @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
@@ -311,7 +311,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (NSRect)panel { return NSMakeRect(42, 132, WIN_W - 84, 512); }
 - (NSRect)rowRect:(NSInteger)k {
     if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 7 + 63 * k, f.size.width - 20, 63); }
-    NSRect p = self.panel; CGFloat pitch = self.rowCount > 6 ? 60 : self.rowCount > 5 ? 69 : 74;
+    NSRect p = self.panel; CGFloat pitch = self.rowCount > 6 ? 60 : self.rowCount > 5 ? 69 : self.rowCount > 4 ? 70 : 74;
     return NSMakeRect(p.origin.x + 26, p.origin.y + 80 + pitch * k, p.size.width - 52, 70);
 }
 - (NSRect)arrow:(NSInteger)k right:(BOOL)right {
@@ -490,12 +490,11 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         [[rgb(170, 110, 40) colorWithAlphaComponent:0.7] setFill]; NSRectFill(NSMakeRect(p.origin.x + 50, p.origin.y + 74, p.size.width - 100, 1));
         if (self.open == 2) [self drawControlsIn:p];
         if (self.open == 5) {
-            NSArray *lines = @[@"For sandbox parks: Sim Level Sandbox when you set up a park.",
-                               @"Other parks play by the game's rules, whatever is set here.",
-                               @"A 128 × 128 park is made when you start a new sandbox park;",
-                               @"saved parks always load at the size they were made."];
+            NSArray *lines = @[@"For new sandbox parks (Sim Level Sandbox); other parks play by the game's rules.",
+                               @"Saved parks keep the size and rules they were started with."];
+            CGFloat y0 = NSMaxY([self rowRect:self.rowCount - 1]) + 12;
             for (NSUInteger i = 0; i < lines.count; i++)
-                label(lines[i], plain(15), note_c(), NSMakeRect(p.origin.x + 50, p.origin.y + 80 + 74 * 3 + 30 + 24 * i, p.size.width - 100, 22), NSTextAlignmentLeft, 0.3, NO);
+                label(lines[i], plain(15), note_c(), NSMakeRect(p.origin.x + 50, y0 + 24 * i, p.size.width - 100, 22), NSTextAlignmentLeft, 0.3, NO);
         }
         for (NSInteger k = 0; k < self.rowCount; k++) {
             [self drawRow:k];
