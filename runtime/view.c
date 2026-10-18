@@ -279,9 +279,12 @@ static void pace_frame(void) {
         pol.preemptible = 1;
         kern_return_t kr = thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&pol, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
         fprintf(stderr, "pace: real-time thread policy %s\n", kr == KERN_SUCCESS ? "set" : "refused"); } }
-    if (wait > 0.0008) {                                  /* mach_wait_until: woken on time, unlike nanosleep under load */
-        uint64_t ticks = (uint64_t)((wait - 0.0005) * 1e9 * tb.denom / tb.numer);
-        mach_wait_until(mach_absolute_time() + ticks);
+    {   /* mach_wait_until: woken on time, unlike nanosleep under load; a millisecond at a time, the sound card
+         * going on meanwhile (sb16.c: the HMI driver mixes just ahead of its DMA position) */
+        void sb16_pump(double t); uint64_t ms = (uint64_t)(1e6 * tb.denom / tb.numer);
+        while (target - now() > 0.0015) { mach_wait_until(mach_absolute_time() + ms); sb16_pump(now()); }
+        double left = target - now();
+        if (left > 0.0008) mach_wait_until(mach_absolute_time() + (uint64_t)((left - 0.0005) * 1e9 * tb.denom / tb.numer));
     }
     while (now() < target) ;                              /* (the last half millisecond, exactly) */
     tp_frame_paced_at = now();

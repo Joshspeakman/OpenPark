@@ -40,6 +40,8 @@ void tp_host_set_realtime(void);
 /* Sound: the app attaches an output and pulls PCM; MIDI bytes go to tp_audio_midi (weak). */
 void tp_host_audio_attached(int on);
 void sb16_render(float *out, int frames, double out_rate);
+void sb16_play(float *out, int frames);   /* the audio output: what sb16_pump made in the game's time */
+void sb16_pump(double t);
 void tp_audio_midi(uint8_t byte);   /* switch a deterministic run to real time (tests) */
 /* Emulated CPU speed in thousands of x86 instructions per second (DOSBox "cycles"); 0 = unthrottled. */
 void tp_host_set_cycles(double per_ms);

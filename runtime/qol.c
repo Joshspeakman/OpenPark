@@ -139,6 +139,9 @@ void tp_qol_hook(int nested) {
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
     if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
         if (!nested) { void tp_free_frame(void); tp_free_frame(); }
+        if (!nested && log_sounds) { static double l, worst, lp; double t = now(); if (l && t - l > worst) worst = t - l;   /* (development: the park's tick, slowed?) */
+            if (l && t - l > 0.04) fprintf(stderr, "tick gap %.3f: %.1f ms\n", t, (t - l) * 1e3);
+            if (t - lp > 2) { fprintf(stderr, "ticks: worst gap %.1f ms\n", worst * 1e3); worst = 0; lp = t; } l = t; }
         return;
     }
     if (k == H_BUS_COUNT) {                           /* (0x167cd4 returned: how many get off the bus) */

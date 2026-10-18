@@ -56,7 +56,10 @@ int tp_audio_start(void) {
         ^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount frames, AudioBufferList *out) {
             static float buf[2 * 4096];
             if (frames > 4096) frames = 4096;
-            sb16_render(buf, (int)frames, 44100);
+            sb16_play(buf, (int)frames);   /* (made in the game's time by sb16_pump) */
+            static FILE *rec; static int rec_on = -1;              /* TP_AUDIO_REC=<file> (development): the card's output, 44.1 kHz stereo float */
+            if (rec_on < 0) { const char *p = getenv("TP_AUDIO_REC"); rec = p ? fopen(p, "wb") : NULL; rec_on = rec != NULL; }
+            if (rec_on) { fwrite(buf, sizeof(float), 2 * frames, rec); fflush(rec); }
             float *l = out->mBuffers[0].mData, *r = out->mNumberBuffers > 1 ? out->mBuffers[1].mData : NULL;
             for (AVAudioFrameCount i = 0; i < frames; i++) {
                 l[i] = buf[2 * i] * sfx_volume;
