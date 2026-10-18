@@ -42,6 +42,9 @@ static const Table OFFSETS[] = {
     {0x1b4cca, 23, 6, 1, {0}},                                       /* the park entrance's template */
 };
 #define NTABLES (int)(sizeof OFFSETS / sizeof OFFSETS[0])
+/* The game plays from copies of the ride and shop definitions, made when a park is started (0x119f73:
+ * 0x1b16f8 -> 0x1cced0; 0x119f8c: 0x1b2ff8 -> 0x1d3c62): their offsets too, from the originals. */
+static const struct { int table; uint32_t at; } MIRRORS[] = {{6, 0x1cced0}, {5, 0x1d3c62 + (0x1b301a - 0x1b2ff8)}};
 static int16_t orig[NTABLES][29][26];
 static int saved, alloc_n = 64;           /* the map block: alloc_n square, fixed at start-up */
 
@@ -71,6 +74,11 @@ void tp_bigmap_set(int w, int ext) {
     wr32(m, SAVE_SIZE, (uint32_t)(w * w * 4));           /* (a 64x64 park saves exactly as the game does) */
     for (int t = 0; t < NTABLES; t++) for (int k = 0; k < OFFSETS[t].n; k++) for (int i = 0; i < OFFSETS[t].nf; i++)
         wr16(m, OFFSETS[t].at + (uint32_t)(k * OFFSETS[t].size) + OFFSETS[t].f[i], recode(orig[t][k][i], w));
+    for (int r = 0; r < (int)(sizeof MIRRORS / sizeof MIRRORS[0]); r++) {
+        int t = MIRRORS[r].table;
+        for (int k = 0; k < OFFSETS[t].n; k++) for (int i = 0; i < OFFSETS[t].nf; i++)
+            wr16(m, MIRRORS[r].at + (uint32_t)(k * OFFSETS[t].size) + OFFSETS[t].f[i], recode(orig[t][k][i], w));
+    }
     fprintf(stderr, "bigmap: stride %d, playable %dx%d\n", w, ext, ext);
 }
 
@@ -126,7 +134,8 @@ void tp_bigmap_setup_done(void) { if (setup_open) { tp_bigmap_poll(); setup_open
 void tp_bigmap_init(void) {
     const char *w = getenv("TP_MAP_W"), *e = getenv("TP_MAP_EXT"), *a = getenv("TP_MAP_ALLOC");
     big_maps = getenv("TP_BIG_MAPS") && atoi(getenv("TP_BIG_MAPS")) > 0;
-    alloc_n = a ? atoi(a) : (big_maps || (w && atoi(w) == 128)) ? 128 : 64;
+    int room = getenv("TP_BIG_ROOM") && atoi(getenv("TP_BIG_ROOM")) > 0;   /* (a saved 128x128 park exists: room to load it) */
+    alloc_n = a ? atoi(a) : (big_maps || room || (w && atoi(w) == 128)) ? 128 : 64;
     if (alloc_n != 128) alloc_n = 64;
     wr32(tp_host_memory(), MAP_SIZE, (uint32_t)(alloc_n * alloc_n * 4));
     tp_map_bytes = (uint32_t)(alloc_n * alloc_n * 4);
