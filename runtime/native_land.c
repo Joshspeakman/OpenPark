@@ -620,7 +620,7 @@ static int ride_draw(uint32_t t, int x, int y) {
     if (r16(t + 0x47)) {
         int cap = r16(rec + 0xa6), kind = M[rec + 0xb3];
         if (kind == 9 && !r16(t + 0x32)) kind = 2;
-        if (kind == 0 || kind == 1 || kind == 5 || kind == 7) {
+        if (kind == 0 || kind == 1 || kind == 5 || kind == 7 || kind == 9) {   /* (9, the bouncy castle with word 0x32 set: as 5 and 7, 0x169a6f) */
             if (cap <= 0 || cap > 0x28) return 0x440 | kind;          /* (the game would divide by 0 / overrun its slots) */
             uint32_t r = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
             for (int cnt = 0;; ) {
