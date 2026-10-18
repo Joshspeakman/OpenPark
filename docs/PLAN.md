@@ -655,13 +655,18 @@ Survey (memory diffs on the player-details screen; reads of each byte in the bui
 
 runtime/freemode.c: a new park's rules (or a loaded one's) are settled at its first frame (view.c's
 FRAME_RENDER, held on until then: the setting-up screens come after the park is first built);
-then every park tick (a hook on 0x118b92, only when called from the tick at 0x1139a8):
+then every park tick (a hook on 0x1139ad, the return from the tick's call at 0x1139a8: a block the
+dispatcher enters, where 0x1139a8 itself is reached by a jump inside the block function):
 - Endless: at the start Easy's money and the record's values for difficulty 0; each month
   d = 2 x months / ramp (to 2): the record's values in proportion, the start/opponents bytes
   rounded, and the visitors byte dithered between its neighbours each tick, so visitors arrive on
   average as fussy as d;
 - True Freeplay: every ride's and shop's researched flag (the runtime tables, as the QA unlock) and
   the money topped up to 5,000,000 whenever it falls below 1,000,000.
+The details screen's bytes are the player's for the next game: Endless keeps what they were at its
+start (a loaded Endless park: the screen's defaults, Happy / Medium / Easy) and puts them back when a
+new park is started or another park loaded (checked: ramped to 2/2/2, Park > Restart, back to the
+player's 0/1/0) — the game itself re-initialises only the start level (0x11a0b7).
 A park's rules, months and ramp are kept beside its save (<save>.free, "rules months ramp"; host.c,
 with the 128x128 marker), so a loaded park keeps its own rules whatever the Launcher says.
 

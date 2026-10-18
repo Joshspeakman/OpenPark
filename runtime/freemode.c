@@ -15,7 +15,7 @@
  * arriving are on average as fussy as d.
  * The month: the player record's month (0..11, [0x1d3814] + 0x5ed); Endless counts its changes. A
  * park's rules and months are kept beside its save (<save>.free, host.c), as the 128x128 marker is.
- * Called from qol.c: tp_free_frame on every park tick (its call to 0x118b92 from 0x1139a8). */
+ * Called from qol.c: tp_free_frame on every park tick (0x1139ad, the return from the tick's call at 0x1139a8). */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +40,18 @@ static int rules_new, ramp_new = 60;   /* the Launcher's: for new parks */
 static int rules, months, ramp = 60, last_month = -1, pending;   /* the park being played */
 static char loaded_rules = -1; static int loaded_months, loaded_ramp;
 static uint32_t rng = 0x9e3779b9u;
+/* Endless moves the player-details screen's own bytes; the next game gets back what was there
+ * (a loaded Endless park: the screen's defaults, Happy / Medium / Easy). */
+static uint8_t keep_set[3]; static int kept;
+static void keep_settings(const uint8_t *m, int defaults) {
+    if (defaults) { keep_set[0] = 0; keep_set[1] = 1; keep_set[2] = 0; }
+    else { keep_set[0] = m[SET_VISITORS]; keep_set[1] = m[SET_START]; keep_set[2] = m[SET_OPPS]; }
+    kept = 1;
+}
+static void give_back_settings(void) {
+    if (!kept) return;
+    uint8_t *m = tp_host_memory(); m[SET_VISITORS] = keep_set[0]; m[SET_START] = keep_set[1]; m[SET_OPPS] = keep_set[2]; kept = 0;
+}
 
 static uint32_t r32(const uint8_t *m, uint32_t a) { uint32_t v; memcpy(&v, m + a, 4); return v; }
 static void w32(uint8_t *m, uint32_t a, uint32_t v) { memcpy(m + a, &v, 4); }
@@ -58,7 +70,7 @@ void tp_free_init(void) {
 extern uint32_t tp_hook_pcs[24]; void tp_hooks_changed(void);
 static void want_frame(void) { tp_hook_pcs[0] = 0x113b9au; tp_hooks_changed(); }
 int tp_free_waiting(void) { return pending != 0; }
-void tp_free_new_park(void) { pending = 1; loaded_rules = -1; want_frame(); }
+void tp_free_new_park(void) { give_back_settings(); rules = 0; pending = 1; loaded_rules = -1; want_frame(); }
 /* A saved park being read (host.c, its map): its rules from beside the save. */
 void tp_free_loaded(const char *save) {
     char p[1100]; snprintf(p, sizeof p, "%s.free", save);
@@ -66,6 +78,8 @@ void tp_free_loaded(const char *save) {
     if (f) { if (fscanf(f, "%d %d %d", &r, &mo, &ra) < 2) r = mo = 0; fclose(f); }
     loaded_rules = (char)(r >= 0 && r <= 2 ? r : 0); loaded_months = mo < 0 ? 0 : mo;
     loaded_ramp = ra < 1 ? 1 : ra > 600 ? 600 : ra; pending = 2; want_frame();
+    if (rules == 1) give_back_settings();              /* (leaving an Endless park; the save's own follow) */
+    rules = 0;
 }
 /* A park saved (host.c): its rules beside it (none: the marker goes). */
 void tp_free_saved(const char *save) {
@@ -105,6 +119,7 @@ void tp_free_park_shown(void) {
         if (pending == 2) { rules = sandbox ? loaded_rules : 0; months = loaded_months; ramp = loaded_ramp; }
         else { rules = sandbox ? rules_new : 0; months = 0; ramp = ramp_new; }
         last_month = month;
+        if (rules == 1 && !kept) keep_settings(m, pending == 2);
         if (rules == 1) apply_difficulty(m, pending == 1);
         if (rules && getenv("TP_FREE_LOG")) fprintf(stderr, "free mode: %s park, rules %d, month %d\n", pending == 2 ? "loaded" : "new", rules, months);
         pending = 0;
