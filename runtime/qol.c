@@ -139,8 +139,21 @@ void tp_qol_hook(int nested) {
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
     if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
         if (!nested) { void tp_free_frame(void); tp_free_frame(); }
+        if (!nested && getenv("TP_STALL_PROFILE")) {      /* development: the blocks of the first park tick over 200 ms, 15 s in */
+            extern uint32_t *tp_trace_buf; extern uint32_t tp_trace_cap, tp_trace_n; static double l, t0; static int done; double t = now();
+            if (!t0) t0 = t;
+            if (!tp_trace_buf && !done) { tp_trace_cap = 30000000; tp_trace_buf = malloc(4ul * tp_trace_cap); }
+            if (tp_trace_buf && l && t - l > 0.2 && t - t0 > 15) {
+                FILE *f = fopen(getenv("TP_STALL_PROFILE"), "wb"); if (f) { fwrite(tp_trace_buf, 4, tp_trace_n, f); fclose(f); }
+                fprintf(stderr, "stall profile: %u blocks in %.1f ms\n", tp_trace_n, (t - l) * 1e3); tp_trace_buf = NULL; done = 1;
+            }
+            tp_trace_n = 0; l = t;
+        }
         if (!nested && log_sounds) { static double l, worst, lp; double t = now(); if (l && t - l > worst) worst = t - l;   /* (development: the park's tick, slowed?) */
-            if (l && t - l > 0.04) fprintf(stderr, "tick gap %.3f: %.1f ms\n", t, (t - l) * 1e3);
+            extern double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace, tp_dbg_run, tp_dbg_gov; static double lw0, ps0, pc0, rn0, gv0;
+            if (l && t - l > 0.04) fprintf(stderr, "tick gap %.3f: %.1f ms (game code %.1f, governor %.1f, pacing %.1f, view lock %.1f, passes %.1f)\n", t, (t - l) * 1e3,
+                                           (tp_dbg_run - rn0) * 1e3, (tp_dbg_gov - gv0) * 1e3, (tp_dbg_pace - pc0) * 1e3, (tp_dbg_lockwait - lw0) * 1e3, (tp_dbg_passes - ps0) * 1e3);
+            lw0 = tp_dbg_lockwait; ps0 = tp_dbg_passes; pc0 = tp_dbg_pace; rn0 = tp_dbg_run; gv0 = tp_dbg_gov;
             if (t - lp > 2) { fprintf(stderr, "ticks: worst gap %.1f ms\n", worst * 1e3); worst = 0; lp = t; } l = t; }
         return;
     }

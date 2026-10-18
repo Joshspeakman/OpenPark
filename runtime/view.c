@@ -257,7 +257,13 @@ int tp_view_frame_due(void) {
 }
 void tp_view_set_pacing(int on) { pacing = on; if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); } }
 void tp_view_pacing_init(void) { const char *e = getenv("TP_PACING"); tp_view_set_pacing(!(e && !strcmp(e, "dosbox"))); }   /* (qol.c, at the game's start) */
+int tp_host_timer_behind(void);
 static void pace_frame(void) {
+    /* Timer ticks overdue: not now. The game's timer interrupts (240 a second) are delivered between its
+     * instructions; a loop of short frames (one that waits on its timer counters while an effect starts) got
+     * two or three a frame between the frame waits, and the park froze for up to a second, its timer at half
+     * speed. A frame that finds them overdue runs on; the next is paced. */
+    if (tp_host_timer_behind()) return;
     static double target;
     double fps = 60.0 * tp_host_cycles() / 10000.0; if (fps < 10) fps = 10;
     double period = 1.0 / fps, t = now();
@@ -878,9 +884,10 @@ static void poster_step(void);
 static volatile int hires_wanted, poster_wanted;   /* (below) */
 void tp_walk_frame(void); int tp_walk_active(void);   /* the Visitor View (walk.c) */
 /* Called by the host when the game reaches a hooked address. */
+double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace;                  /* development (qol.c's tick gaps): where the game thread's time went */
 void tp_view_hook(void) {
     M = tp_host_memory();
-    pthread_mutex_lock(&lock);
+    { double t0 = now(); pthread_mutex_lock(&lock); tp_dbg_lockwait += now() - t0; }
     int w = want; double vx = vis_x, vy = vis_y, vw = (vis_lw > 0 ? vis_lw : SW) / vis_z, vh = SH / vis_z;
     pthread_mutex_unlock(&lock);
     static int dbg = -1; if (dbg < 0) dbg = getenv("TP_VIEW_DEBUG_HOOKS") ? 400 : 0;
@@ -906,7 +913,7 @@ void tp_view_hook(void) {
         { void tp_free_park_shown(void); tp_free_park_shown(); }       /* (and its Free Mode rules; freemode.c) */
         tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
         { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
-          if (fresh) { st_game++; st_game_total++; if (pacing) pace_frame(); } }
+          if (fresh) { st_game++; st_game_total++; if (pacing) { double p0 = now(); pace_frame(); tp_dbg_pace += now() - p0; } } }
         if (getenv("TP_VIEW_DEBUG")) { static double l; static long c0; if (now() - l > 1) { fprintf(stderr, "view: %ld game frames/s\n", st_game_total - c0); c0 = st_game_total; l = now(); } }
         hires_step(sc);
         { static int tc = -1; if (tc < 0) tc = getenv("TP_VIEW_TRUST") ? atoi(getenv("TP_VIEW_TRUST")) : 0;
@@ -952,7 +959,7 @@ void tp_view_hook(void) {
         else if (active) {                                /* passes at most 60 times a second (the game draws faster) */
             static double last; double t = now();
             static int old = -1; if (old < 0) old = getenv("TP_VIEW_OLD") != NULL;
-            if (pacing || t - last >= (old ? 1.0 / 30 : 1.0 / 60)) { last = t; render_visible(vx, vy, vw, vh, 0); coherent = 1; }   /* (paced: every frame) */
+            if (pacing || t - last >= (old ? 1.0 / 30 : 1.0 / 60)) { last = t; render_visible(vx, vy, vw, vh, 0); coherent = 1; tp_dbg_passes += now() - t; }   /* (paced: every frame) */
         }
         in_frame = active; frame_park = active;
         break;
