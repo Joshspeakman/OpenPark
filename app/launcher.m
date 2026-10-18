@@ -156,7 +156,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[4], _tweaks[5], _free[2];
+    Setting _display[7], _sound[4], _tweaks[6], _free[2];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -199,6 +199,10 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"The park fills the window; the panel stays centred", @"The game's 4:3 picture, as on a CRT"]);
         _display[6] = setting(@"Zoomed Drawing", @"NativePasses", @[@YES, @NO], @[@"Native", @"The Game's"],
                               @[@"Zoomed-out views drawn by the new engine: faster", @"Zoomed-out views drawn by the game's own code"]);
+        _tweaks[5] = setting(@"Panel Size", @"PanelScale", @[@1.0, @1.25, @1.5, @1.75, @2.0], @[@"The Game's", @"1.25×", @"1.5×", @"1.75×", @"2×"],
+                              @[@"The panel and the advisor as drawn in 1994", @"The panel and the advisor a quarter larger (wide windows)",
+                                @"The panel and the advisor half as large again (wide windows)", @"The panel and the advisor 1.75 times as large (wide windows)",
+                                @"The panel and the advisor twice as large (wide windows)"]);
         _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
                             @[@"The Mac's pointer hides over the game", @"The Mac's pointer stays visible too"]);
         /* Tweaks: the whole game (runtime/qol.c). Free Mode: sandbox parks only. */
@@ -235,7 +239,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 5 : self.open == 5 ? 2 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 6 : self.open == 5 ? 2 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];

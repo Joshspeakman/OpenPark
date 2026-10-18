@@ -518,6 +518,27 @@ TP_PROFILE: the heading/state/target bytes and the function choosing a visitor's
 a hook there to steer the followed visitor (Street View arrows at path junctions), which gives
 real buying and queueing; (4) which cells are paths (for walking on paths only).
 
+## Advisor only while talking; Panel Size (2026-10-18)
+
+- The advisor's face stayed after his bubble went: the gap rule refilled his
+  pixels from last frame's interface. Gaps are now filled only within 2 px of
+  interface the game drew this frame. Checked in the full-screen app: the face
+  goes with the bubble.
+- Game windows were speckled and their insets black (the installed 0fa4694):
+  the two colours a blend over the marker gives are also window colours. Each
+  patch of them is now settled by what it touches: the bubble's white (text,
+  darkened), other interface (kept as is), only park (blended over the park).
+  The ride window now matches the game's own screen pixel for pixel.
+- Panel Size (launcher Tweaks; View > Larger / Smaller Panel, ⌘] / ⌘[;
+  default PanelScale; TP_UI_SCALE in headless runs): the panel and the
+  advisor's band (60 rows above it) drawn 1.25 to 2 times larger, anchored at
+  the bottom middle, never wider than the view; pointer events there map back
+  to the game's screen. While a game window crosses the band (more than 1/8 of
+  its top row is interface), the panel is shown at its own size so the window
+  fits. In a 4:3 window there is no room, so it stays at its own size.
+  Checked: real clicks on the enlarged buttons in the full-screen app, picture
+  verify 0 bad frames at 1 and 1.5, native passes 0 differ.
+
 ## Speech bubble and date corruption (2026-10-18)
 
 Moving the pointer, the advisor's bubble showed visitors through its text and

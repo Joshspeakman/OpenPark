@@ -189,6 +189,11 @@ static Ev evq[256]; static int evn;
 static int restore, restore_cx, restore_cy;       /* camera for the game's own view after zooming */
 static uint8_t pub_canvas[MAX_CANVAS];
 static uint16_t pub_overlay[MAX_SCREEN], prev_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
+/* Panel size: see band_map. */
+static volatile double ui_scale = 1;
+static int pub_straddle;                                /* interface crosses the band's top (a game window): panel at its own size */
+__attribute__((constructor)) static void ui_scale_env(void) { const char *e = getenv("TP_UI_SCALE"); if (e) ui_scale = atof(e); }
+#define BAND_H 60
 static uint32_t pub_pal[256];
 static double pub_time;
 #define CUR 64                                    /* the game's cursor, cut out of its last frame */
@@ -1126,20 +1131,39 @@ void tp_view_hook(void) {
                 else if (src_of[v] >= 0 && r32(0x1ba2f8)) pub_overlay[i] = 0xfffe;     /* (blended: settled below) */
                 else pub_overlay[i] = v;
             }
-            /* Blended interface (the advisor's text darkens what is under it): over the interface beside it (the
-             * bubble's white) when there is some, as it looks in the game; over the park otherwise. */
-            for (int i = SW; i < SW * (WORLD_H - 1); i++) if (pub_overlay[i] == 0xfffe) {
-                int base = -1, best = -1;                  /* the brightest interface pixel near it that is not itself blended */
-                for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
-                    int j = i + dy * SW + dx; if (j < 0 || j >= SW * WORLD_H || pub_overlay[j] >= 0xfffe || src_of[bb[j]] >= 0) continue;
-                    uint32_t c = pub_pal[pub_overlay[j]]; int lum = (int)(c & 255) * 3 + (int)((c >> 8) & 255) * 6 + (int)((c >> 16) & 255);
-                    if (lum > best) { best = lum; base = pub_overlay[j]; } }
-                int under = base >= 0 ? base : world_only[i], res = gt[under * 256 + src_of[bb[i]]], dark = 1 << 30;
-                for (int s2 = 0; s2 < 256; s2++) if (gt[SENTINEL * 256 + s2] == bb[i]) {   /* (several sources give the marker's result:
-                                                                                            * the darkest result, the game's text is dark) */
-                    uint32_t c = pub_pal[gt[under * 256 + s2]]; int lum = (int)(c & 255) * 3 + (int)((c >> 8) & 255) * 6 + (int)((c >> 16) & 255);
-                    if (lum < dark) { dark = lum; res = gt[under * 256 + s2]; } }
-                pub_overlay[i] = (uint16_t)res;
+            /* The two colours a blend over the marker gives (0xfffe above) are also ordinary interface colours: a
+             * game window is full of them. Each patch of them is settled by what it touches: the bubble's white
+             * (the advisor's text: darkened over the white, as in the game), other interface (the game's own
+             * colour: kept), or only park (a blend over the park). */
+            {
+                static uint8_t cls[MAX_SCREEN]; static int bq[MAX_SCREEN]; static uint16_t bbase[MAX_SCREEN];
+                int qh = 0, qt = 0;
+                for (int i = 0; i < SW * WORLD_H; i++) { cls[i] = 0; if (pub_overlay[i] != 0xfffe) continue;
+                    int x = i % SW, y = i / SW, base = -1, best = -1;   /* the brightest plain interface pixel near it */
+                    for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
+                        int xx = x + dx, yy = y + dy; if (xx < 0 || xx >= SW || yy < 0 || yy >= WORLD_H) continue;
+                        int j = yy * SW + xx; if (pub_overlay[j] >= 0xfffe) continue;
+                        uint32_t c = pub_pal[pub_overlay[j]]; int lum = (int)(c & 255) * 3 + (int)((c >> 8) & 255) * 6 + (int)((c >> 16) & 255);
+                        if (lum > best) { best = lum; base = pub_overlay[j]; } }
+                    if (base < 0) continue;
+                    uint32_t c = pub_pal[base]; int white = (c & 255) >= 200 && ((c >> 8) & 255) >= 200 && ((c >> 16) & 255) >= 200;
+                    cls[i] = white ? 1 : 2; bbase[i] = (uint16_t)base; bq[qt++] = i;
+                }
+                while (qh < qt) { int i = bq[qh++], x = i % SW, y = i / SW;          /* (through the patch) */
+                    static const int ddx[4] = {-1, 1, 0, 0}, ddy[4] = {0, 0, -1, 1};
+                    for (int k = 0; k < 4; k++) { int xx = x + ddx[k], yy = y + ddy[k]; if (xx < 0 || xx >= SW || yy < 0 || yy >= WORLD_H) continue;
+                        int j = yy * SW + xx; if (pub_overlay[j] != 0xfffe || cls[j]) continue;
+                        cls[j] = cls[i]; bbase[j] = bbase[i]; bq[qt++] = j; } }
+                for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] == 0xfffe) {
+                    if (cls[i] == 2) { pub_overlay[i] = bb[i]; continue; }
+                    if (cls[i] == 0) { pub_overlay[i] = gt[world_only[i] * 256 + src_of[bb[i]]]; continue; }
+                    int under = bbase[i], res = gt[under * 256 + src_of[bb[i]]], dark = 1 << 30;
+                    for (int s2 = 0; s2 < 256; s2++) if (gt[SENTINEL * 256 + s2] == bb[i]) {   /* (several sources give it:
+                                                                                                * the darkest result, the text is dark) */
+                        uint32_t c = pub_pal[gt[under * 256 + s2]]; int lum = (int)(c & 255) * 3 + (int)((c >> 8) & 255) * 6 + (int)((c >> 16) & 255);
+                        if (lum < dark) { dark = lum; res = gt[under * 256 + s2]; } }
+                    pub_overlay[i] = (uint16_t)res;
+                }
             }
             /* Marker left inside interface: pixels the game did not redraw this frame because they still held its
              * last frame's interface (the advisor's bubble is redrawn only where it changed). What the game had
@@ -1155,10 +1179,17 @@ void tp_view_hook(void) {
                     if (pub_overlay[i] == 0xffff && prev_overlay[i] != 0xffff) { if (c++ < 4 && k < 40) fprintf(stderr, "hole %d,%d: screen %02x world %02x prev %02x canvas %02x\n", x, y, bb[i], world_only[i], prev_overlay[i],
                         canvas[(size_t)(cam_oy(real_cy) + y) * CW + cam_ox(real_cx, real_cy) + x]); } }
                 if (c && k++ < 40) fprintf(stderr, "holes: %d\n", c); }
+            /* (only inside interface the game drew this frame: one it has taken away, the advisor's face when he
+             * stops talking, must not be kept alive by its own leftovers) */
+            static uint8_t fresh_near[MAX_SCREEN];
+            for (int i = 0; i < SW * WORLD_H; i++) fresh_near[i] = 0;
+            for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) if (pub_overlay[y * SW + x] != 0xffff)
+                for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
+                    int yy = y + dy, xx = x + dx; if (yy >= 0 && yy < WORLD_H && xx >= 0 && xx < SW) fresh_near[yy * SW + xx] = 1; }
             for (int pass2 = 0; pass2 < 3; pass2++) {
                 int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
                 for (int y = 1; y < WORLD_H - 1; y++) for (int x = 1; x < SW - 1; x++) {
-                    int i = y * SW + x; if (pub_overlay[i] != 0xffff) continue;
+                    int i = y * SW + x; if (pub_overlay[i] != 0xffff || !fresh_near[i]) continue;
                     int X = bx + x, Y = by + y; if (X < 0 || Y < 0 || X >= CW || Y >= CH) continue;
                     int nb = 0; for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) if ((dx || dy) && pub_overlay[i + dy * SW + dx] != 0xffff) nb++;
                     if (nb < 3) continue;
@@ -1226,6 +1257,9 @@ void tp_view_hook(void) {
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1; st_pub++;
+        {   int bt = SH - BAND_H - (SH == 480 ? 44 : 22), n = 0;
+            for (int x = 0; x < SW; x++) n += pub_overlay[(bt - 1) * SW + x] != 0xffff;
+            pub_straddle = n > SW / 8; }                  /* (a few stray pixels are not a window) */
         pub_frame_t = pacing ? tp_frame_paced_at : pub_time; pub_serial++;
         if (getenv("TP_VIEW_VERIFY")) verify_canvas();
         if (getenv("TP_VIEW_SEAMS")) seam_check();    /* development: the picture against fresh native passes */
@@ -1234,6 +1268,20 @@ void tp_view_hook(void) {
     }
 }
 
+/* Panel size (Launcher: Display > Panel Size): the bottom of the interface, the panel and the advisor's
+ * band above it (BAND_H screen rows), drawn k times larger, anchored at the bottom middle of the view;
+ * pointer events in it are mapped back. */
+void tp_view_set_ui_scale(double k) { ui_scale = k < 1 ? 1 : k > 3 ? 3 : k; }
+/* A layout point in the enlarged band: its point in the screen (sx, sy). 0 if outside it. */
+static int band_map(double lx, double ly, double lw, int sw, int sh, double k, double *sx, double *sy) {
+    if (k <= 1.001) return 0;
+    if (pub_straddle) return 0;                           /* (a game window over the band: the panel at its own size) */
+    double bh = BAND_H + (sh == 480 ? 44 : 22);           /* (the advisor's rows and the panel's) */
+    double x0 = lw / 2 - sw * k / 2, y0 = sh - bh * k;
+    if (lx < x0 || lx >= x0 + sw * k || ly < y0 || ly >= sh) return 0;
+    *sx = (lx - x0) / k; *sy = (sh - bh) + (ly - y0) / k;
+    return 1;
+}
 /* Pointer events, on the emulation thread: park points move the camera so the
  * point is inside the real view (unless it already is), then go to the game
  * at their place in that view; panel points go straight through. */
@@ -1256,14 +1304,18 @@ void tp_view_poll(void) {
         held = q[i].buttons; drag_held = dragging;
         double lx = q[i].fx * lw, ly = q[i].fy * SH;      /* layout point */
         double cxs = lx - col;                            /* ... in the screen column */
-        int incol = cxs >= 0 && cxs < SW, ui = incol && ly >= WORLD_H;   /* the panel, or the game's interface: through */
+        double ly_ui = ly, bsx, bsy, kk = ui_scale; if (kk * SW > lw) kk = lw / SW;
+        int in_band = on && band_map(lx, ly, lw, SW, SH, kk, &bsx, &bsy);
+        if (in_band) { cxs = bsx; ly_ui = bsy; }          /* (the enlarged panel: its point on the screen) */
+        int incol = cxs >= 0 && cxs < SW, ui = incol && ly_ui >= WORLD_H;   /* the panel, or the game's interface: through */
+        if (on && !in_band && kk > 1.001 && !pub_straddle && incol && ly >= SH - (BAND_H + (SH == 480 ? 44 : 22))) incol = 0;   /* (its original place shows park) */
         int menus = menu_open();
         if (on && incol && (ly < TOPBAR_OPEN || (topbar && ly < TOPBAR_H) || (menus && ly < WORLD_H))) {   /* the top bar and its menus: straight to the game, camera held */
             if (!topbar) { topbar = 1; topbar_cx = r16(CAM_X); topbar_cy = r16(CAM_Y); }
             ui = 1;
         } else if (topbar && !menus && !(q[i].buttons & 3)) topbar = 0;
         if (on && incol && !ui) {
-            int ox = (int)cxs, oy = (int)ly;
+            int ox = (int)cxs, oy = (int)ly_ui;
             pthread_mutex_lock(&lock);
             for (int dy = -2; dy <= 2 && !ui; dy++) for (int dx = -2; dx <= 2 && !ui; dx++) {
                 int x = ox + dx, y = oy + dy;
@@ -1273,7 +1325,7 @@ void tp_view_poll(void) {
         }
         if (!on || ui) {
             double fx = incol ? cxs / SW : (cxs < 0 ? 0 : 0.9999);
-            tp_host_mouse(fx, q[i].fy, q[i].buttons);
+            tp_host_mouse(fx, in_band ? ly_ui / SH : q[i].fy, q[i].buttons);
             continue;
         }
         {
@@ -1481,7 +1533,7 @@ void tp_view_debug_hud(uint32_t *out, int ow, int oh) {
     if (tp_view_debug_fps) debug_fps(out, ow, oh, oh >= 700 ? 3 : 2, 0);
 }
 void tp_view_count_game_frames(int on) { fps_game_hook = on; if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); } }
-typedef struct { uint32_t *out; int ow, oh, smooth; Geo g; double z, vx, vy, lw, col, lpx, lpy, sx, sy; int ss; const uint32_t *pal; size_t stride; } ComposeJob;
+typedef struct { uint32_t *out; int ow, oh, smooth; Geo g; double z, vx, vy, lw, col, lpx, lpy, sx, sy; int ss; const uint32_t *pal; size_t stride; double k; } ComposeJob;
 static size_t compose_stride;                           /* pixels per output row (0: the width) */
 void tp_view_compose_stride(size_t px) { compose_stride = px; }
 static void compose_band(void *ctx, size_t band) {
@@ -1496,11 +1548,24 @@ static void compose_band(void *ctx, size_t band) {
         int iy = (int)ly, panel_row = iy >= g.wh;
         for (int x = 0; x < ow; x++) {
             double lx = (x + 0.5) * lpx; int ix = (int)floor(lx - col);
+            double bsx, bsy;
+            if (band_map(lx, ly, j->lw, g.sw, g.sh, j->k, &bsx, &bsy)) {   /* the enlarged panel and advisor */
+                int bx = (int)bsx, by = (int)bsy;
+                if (bx >= 0 && bx < g.sw && by >= 0 && by < g.sh) {
+                    if (by >= g.wh) { o[x] = pal[pub_panel[(size_t)by * g.sw + bx]]; continue; }
+                    uint16_t u = pub_overlay[by * g.sw + bx];
+                    if (u != 0xffff) { o[x] = pal[u]; continue; }
+                }
+                if (iy >= g.wh) { o[x] = 0xff000000u; continue; }   /* (the panel's own rows beside it) */
+                goto park;
+            }
             if (ix >= 0 && ix < g.sw) {                                /* the screen column: panel and interface */
                 if (panel_row) { o[x] = pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
                 uint16_t u = pub_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pal[u]; continue; }
             }
+            if (j->k > 1.001 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - BAND_H - (g.sh == 480 ? 44 : 22)) goto park;   /* (its original place: park) */
+          park:
             /* The weather the game drew (screen space): over the whole view, repeated beside the 4:3 column. */
             if (pub_weather_n) {                                       /* (the panel and interface came first) */
                 int wx = ((ix % g.sw) + g.sw) % g.sw, wy = iy % g.wh, in_col = ix >= 0 && ix < g.sw && iy < g.wh, k = wy * g.sw + wx;
@@ -1535,7 +1600,8 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
     static uint32_t pal_bgra[256]; const uint32_t *pal = pub_pal;
     if (tp_view_out_bgra) { for (int i = 0; i < 256; i++) { uint32_t c = pub_pal[i]; pal_bgra[i] = (c & 0xff00ff00u) | ((c & 0xff) << 16) | ((c >> 16) & 0xff); } pal = pal_bgra; }
     size_t stride = compose_stride ? compose_stride : (size_t)ow;
-    ComposeJob job = {out, ow, oh, smooth, g, z, vx, vy, lw, col, lpx, lpy, sx, sy, ss, pal, stride};
+    double kk = ui_scale; if (kk * g.sw > lw) kk = lw / g.sw;   /* (no wider than the view) */
+    ComposeJob job = {out, ow, oh, smooth, g, z, vx, vy, lw, col, lpx, lpy, sx, sy, ss, pal, stride, kk};
     dbg_stride = stride;
     dispatch_apply_f((size_t)((oh + 31) / 32), DISPATCH_APPLY_AUTO, &job, compose_band);   /* bands of 32 rows across the cores */
     st_comp++; stats_tick();
