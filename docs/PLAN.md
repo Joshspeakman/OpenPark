@@ -518,6 +518,27 @@ TP_PROFILE: the heading/state/target bytes and the function choosing a visitor's
 a hook there to steer the followed visitor (Street View arrows at path junctions), which gives
 real buying and queueing; (4) which cells are paths (for walking on paths only).
 
+## Speech bubble and date corruption (2026-10-18)
+
+Moving the pointer, the advisor's bubble showed visitors through its text and
+the date had park specks. Found in the app (real pointer, screen captures, logs):
+- The bubble text is drawn as a darkening blend over what is under it, not as a
+  colour. Over the marker that gives two colours (0x6c/0x6e) that many sources
+  share; it was redone over the park at that point (a visitor's shirt) instead
+  of over the bubble's white. Now: over the brightest non-blended interface
+  pixel within 2 px, taking the darkest result among the possible sources:
+  black text, as in the game.
+- A gap rule filled missing interface from the game's park picture (visitors);
+  it now uses the last frame's interface only where it was interface.
+- The date: drawn with the park at times, so things could cover it, and only
+  some frames captured it. Its box (from the extras) is kept; every frame its
+  pixels come from the screen, and anything not a date colour from the last
+  clean capture.
+- Frames where the game skips drawing the park (AFTER_SKIP) keep the last park
+  capture instead of taking last frame's picture (interface and all) as park.
+- The marker is no longer lifted around the tool preview and weather (it was
+  not always put back: frames fell back to the old difference method).
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what
