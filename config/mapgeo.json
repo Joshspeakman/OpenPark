@@ -1,5 +1,5 @@
 {
-"note": "Instructions that encode the 64x64 park map (docs/PLAN.md, Larger maps). W = tp_map_w (row stride), E = tp_map_ext (playable size).",
+"note": "Instructions that encode the 64x64 park map (docs/PLAN.md, Larger maps). W = tp_map_w (row stride), E = tp_map_ext (playable size). Also what grows with a 128x128 park: the things pool (tp_things_*) and how long visitors stay (tp_stay_*).",
 "sites": {
 "1107fe": {
 "new": "tp_things_alloc"

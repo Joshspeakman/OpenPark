@@ -670,8 +670,20 @@ Done (bigmap.c, qol.c, config/mapgeo.json):
   1,000), and a return hook at 0x1283dc multiplies each bus's arrivals by 4 (TP_FREE_ARRIVALS),
   up to the room under the cap.
 - Staying: in a 128x128 park the time is 8000 ticks and the tiredness 16000 (twice the walk across;
-  tp_stay_ticks, tp_stay_tired, nine sites). Sites now 634.
+  tp_stay_ticks, tp_stay_tired, nine sites). The 2000-per-attraction rule is the game's (with fewer
+  than eight attractions it comes before the tiredness limit). Sites now 629.
 - walk.c follows the pool (its last record) instead of a fixed 1200.
+- Checked (scratch profile, muted): new 128 park allocates 12,000; the TEST 128 park with an old "128"
+  marker loads with 1200 records and grows to 12,000 (save list 0x249f00); its year-end autosave is
+  2,513,820 bytes with "128 12000" and reloads; HORZA (64) in the same kind of session: 1200, 0x3a980.
+  HORZA with TP_THINGS=12000 and TP_FREE_ARRIVALS=60 / 100: one bus brought 2,580 / 4,300; the game
+  ran with 2,600 / 4,477 visitors (records past 2,600 / 4,500) at ~90 ticks a second either way
+  (as with 180), CPU 61-91%, no faults. Check suite and walk tests pass.
+- Not checked: a real 128 sandbox park with rides (how near 10,000 it gets with x4 arrivals; the
+  bus count park +0x47 / player +0x5ee still shows the game's number), visitors actually reaching
+  the far side with the doubled limits, and 10,000 at once. The cap compares the game's in-park count
+  (+0x1f: visitors through the gate), so it is approximate; the pool (12,000 - 480 spare) is the
+  hard ceiling. The herd tests swung in and out together (one bus of thousands); not seen at x4.
 - TP_THINGS=n (development) gives every park n records; a 64x64 park's saves still hold 1200, cut short
   (the year-end autosave overwrote the HORZA test copy once: restored from a backup), so scratch copies only.
 
