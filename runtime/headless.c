@@ -221,12 +221,29 @@ int main(int argc, char **argv) {
             }
         }
     } else {
+        if (getenv("TP_WATCH")) {    /* development: TP_WATCH=addr:step:limit, the first block at which a byte changes */
+            uint8_t *tp_host_memory(void); uint32_t wa = 0, ws = 1000, wl = limit; sscanf(getenv("TP_WATCH"), "%x:%u:%u", &wa, &ws, &wl);
+            uint8_t last = tp_host_memory()[wa]; r = 0;
+            for (uint32_t at = ws; at <= wl && !r; at += ws) {
+                r = tp_host_run(quantum, at, 0);
+                uint8_t v = tp_host_memory()[wa];
+                if (v != last) { fprintf(stderr, "watch %x: %02x -> %02x by block %u\n", wa, last, v, at); last = v; }
+            }
+            fprintf(stderr, "watch %x: %02x at the end; map at %x; r=%d blocks=%llu\n", wa, tp_host_memory()[wa], *(uint32_t *)(tp_host_memory() + 0x1d3b08), r, (unsigned long long)tp_host_blocks());
+        } else
         if (shots) {                 /* deterministic: a frame every `shots` million blocks */
             uint32_t step = (uint32_t)(shots * 1e6), at = step; int n = 0;
+            extern uint32_t *tp_trace_buf; extern uint32_t tp_trace_cap, tp_trace_n;
+            uint32_t tr_from = getenv("TP_DET_TRACE") ? (uint32_t)atoi(getenv("TP_DET_TRACE")) : 0;
             do {
+                if (tr_from && at > tr_from && at - step <= tr_from) { tp_trace_cap = 20000000; tp_trace_buf = malloc(4ul * tp_trace_cap); tp_trace_n = 0; }
                 r = tp_host_run(quantum, at < limit ? at : limit, 0);
+                if (tp_trace_buf && tr_from) {   /* development: the blocks of one shot interval (out/trace.bin) */
+                    char tp[1024]; snprintf(tp, sizeof tp, "%s/trace.bin", out); FILE *tf = fopen(tp, "wb");
+                    if (tf) { fwrite(tp_trace_buf, 4, tp_trace_n, tf); fclose(tf); } free(tp_trace_buf); tp_trace_buf = NULL; tr_from = 0; }
                 char p[1024], h[65]; snprintf(p, sizeof p, "%s/d-%03d.png", out, n++);
-                tp_host_png(p, h); fprintf(stderr, "shot %s blocks=%u %s\n", p, at, h);
+                { extern uint64_t tp_insns, tp_rep; tp_host_png(p, h); fprintf(stderr, "shot %s blocks=%u %s rep=%llu insns=%llu\n", p, at, h, (unsigned long long)tp_rep, (unsigned long long)tp_insns); }
+                if (getenv("TP_DET_CKPT")) { snprintf(p, sizeof p, "%s/d-%03d.ckpt", out, n - 1); tp_host_checkpoint(p); }   /* (development: memory at each shot) */
                 at += step;
             } while (!r && at <= limit);
         } else r = tp_host_run(quantum, limit, 0);

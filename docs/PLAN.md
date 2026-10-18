@@ -518,6 +518,54 @@ TP_PROFILE: the heading/state/target bytes and the function choosing a visitor's
 a hook there to steer the followed visitor (Street View arrows at path junctions), which gives
 real buying and queueing; (4) which cells are paths (for walking on paths only).
 
+## Larger maps (sandbox parks) — in progress, 2026-10-18
+
+Goal: 128x128 parks in the non-campaign mode (campaign stays 64x64).
+
+Facts (survey of MAIN.EXE):
+- The park is a grid of 4-byte cells at [0x1d3b08], addressed by a cell index
+  x + y * 64 (words; 128x128 = 16384 still fits). Things keep positions as 8.8
+  words at +6/+8 (cell bytes +7/+9): 128 cells fit, 256 would not.
+- The map is the *MAP memory block (size at 0x1b127c) and is saved through the
+  save list ((pointer, size) pairs from 0x1b1515; the map's size at 0x1b1521).
+- Geometry lives in ~570 instructions: x/y splits (idiv 0x40, the cdq/shl/sbb/
+  sar 6 signed division), y << 6 + x, neighbours +-0x40 and +-0x100 bytes,
+  bounds 0x3e..0x40, edge rows near the bottom (the bus road, the entrance at
+  (32, row 64) - 4 rows), absolute cells off the map base, three "linear walks"
+  that step a pointer 4 bytes a cell assuming rows back to back, a memset of
+  0x4000, and a random cell (rand % 0x1000).
+- And in data: neighbour lists (0x1b4920, 0x1b4b2a, 0x1b8c3e, 0x1b8fbe), steps
+  (0x1b8f44), footprints of the 17 shops (0x6b records at 0x1b301a) and 29 rides
+  (0xc8 records at 0x1b16f8), and the entrance template (0x1b4cca).
+
+Machinery:
+- config/mapgeo.json: the instructions, found by idiom scripts over the survey
+  listing and reviewed by hand (the rejected look-alikes are listed too: money,
+  sound, cell byte-3 direction bits, screen pixels). tools/build_game.py rewrites
+  each in the generated C to read tp_map_w (row stride), tp_map_shift, tp_map_ext
+  (playable size) or tp_map_bytes: immediates, shift counts, displacements (rows
+  near the bottom edge, column 63, absolute cells kept near their edge or the
+  middle column), and appended statements (the random cell; the row skip of the
+  linear walks).
+- runtime/bigmap.c sets the variables and re-encodes the data tables
+  (TP_MAP_W, TP_MAP_EXT; TP_MAP_ALLOC for tests).
+
+Verification so far:
+- No-op (64): the patched build reproduces the original exactly (deterministic
+  fuzz scenario, 60 hashed shots) and the check suite's golden first park.
+- Test layout (stride 128, playable 64, same allocation): identical to the
+  64-stride run over 60M blocks of seeded clicks (park set-up, building, walls,
+  trees, the bus, the renderer), REP counts included. Tools: TP_DET_CKPT
+  (checkpoints at each shot), TP_DET_TRACE (block trace of one interval),
+  work-only write-watch build (work/dbg). The fuzz does not open the park, so
+  visitors are not covered by it; they are tested in a big park by play.
+- Note: a 0x10000 *MAP block at stride 64 departs from the original after 22M
+  blocks (less free memory for the game's caches); campaign parks keep 0x4000.
+
+Next: extent 128 (park creation edges, entrance in the middle of the bottom
+edge, camera limits, minimap, our native renderer and walk view), the launcher
+choice (Free Mode: Map Size) only for sandbox parks, versioned saves.
+
 ## Advisor only while talking; Panel Size (2026-10-18)
 
 - The advisor's face stayed after his bubble went: the gap rule refilled his

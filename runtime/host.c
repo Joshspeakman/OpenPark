@@ -763,6 +763,8 @@ static void interrupt(uint32_t number) {
             if ((uint64_t)at + c > MEMORY) stop("DOS read outside memory");
             ssize_t got = 0, r;
             while ((uint32_t)got < c && (r = read(handles_fd[b], mem + at + got, c - got)) > 0) got += r;
+            if (getenv("TP_DEBUG_READ")) { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);   /* (development: reads into the map) */
+                if (mp && at < mp + 0x10000 && at + c > mp) fprintf(stderr, "read into the map: handle %u, +%#x, %u bytes (got %zd)\n", b, at - mp, c, got); }
             S(EAX, (uint32_t)got); carry(0); return;
         }
         if (ah == 0x42) {

@@ -150,8 +150,8 @@ int tp_run(uint32_t budget) {
             fprintf(stderr, "hit %08x\n", state.tc);
         if (state.tc == tp_break_pc && tp_break_hits < 20) {
             tp_break_hits++;
-            fprintf(stderr, "break %08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x [esp]=%08x\n", state.tc,
-                    state.eax, state.ebx, state.ecx, state.edx, state.esi, state.edi, state.esp, *(uint32_t *)(G_MEM + state.esp));
+            fprintf(stderr, "break %08x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x [esp]=%08x [esp+4]=%08x\n", state.tc,
+                    state.eax, state.ebx, state.ecx, state.edx, state.esi, state.edi, state.esp, *(uint32_t *)(G_MEM + state.esp), *(uint32_t *)(G_MEM + state.esp + 4));
             const char *m = getenv("TP_BREAK_MEM");
             if (m) { uint32_t a = (uint32_t)strtoul(m, NULL, 16); fprintf(stderr, "  [%08x]:", a);
                      for (int k = 0; k < 32; k++) fprintf(stderr, " %02x", G_MEM[a + k]); fprintf(stderr, "\n"); }
