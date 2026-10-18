@@ -246,6 +246,59 @@ def main():
                 lines = [l.replace(old, 'b = ' + var, 1) if tag in l else l for l in lines]
                 src = '\n'.join(lines); applied[var] = value
         sources[i] = (a, src, name, data)
+    # Map geometry (runtime/bigmap.c, docs/PLAN.md "Larger maps"): the instructions that encode the 64x64
+    # park map (config/mapgeo.json) read variables instead: tp_map_w (row stride), tp_map_shift (its log2)
+    # and tp_map_ext (the playable size). Each site is an immediate, a shift count or an appended statement.
+    geo_path = Path(__file__).resolve().parent.parent / 'config' / 'mapgeo.json'
+    if not args.prefix and geo_path.exists():
+        geo = {int(a, 16): v for a, v in json.loads(geo_path.read_text())['sites'].items()}
+        tag_re = re.compile(r'^\s*/\* ([0-9a-f]{8}): ')
+        done, failed = set(), set()
+        for i, (a, src, name, data) in enumerate(sources):
+            if '/* 00' not in src:
+                continue
+            lines = src.split('\n'); changed = False
+            for j, line in enumerate(lines):
+                m = tag_re.match(line)
+                if not m or int(m.group(1), 16) not in geo:
+                    continue
+                at = int(m.group(1), 16); site = geo[at]; new_line = line
+                if 'append' in site:
+                    new_line = line + site['append']
+                elif 'disp' in site:            # a memory displacement: rows of 64 cells of 4 bytes
+                    asm = line.split('*/')[0].split(': ', 1)[1]
+                    d = int(re.search(r'\+ 0x([0-9a-f]+)\]', asm).group(1), 16)
+                    if site['disp'] == 'abs':   # a cell off the map base: kept near its edge or the middle column
+                        x, y, b = (d >> 2) % 64, (d >> 2) // 64, d & 3
+                        ex = '%du' % x if x < 16 else '(tp_map_ext-%du)' % (64 - x) if x >= 48 else '(tp_map_ext/2u+%d)' % (x - 32)
+                        ey = '%du' % y if y < 32 else '(tp_map_ext-%du)' % (64 - y)
+                        expr = '((%s+%s*tp_map_w)*4u+%du)' % (ex, ey, b)
+                    elif site['disp'] == 'col':  # x = 63 of a row
+                        expr = '((tp_map_ext-1u)*4u+%du)' % (d - 0xfc)
+                    elif d < 0x100:              # the next row, x - 1
+                        expr = '(tp_map_w*4u-%du)' % (0x100 - d)
+                    else:                        # a row near the bottom edge, from a row's start
+                        expr = '((tp_map_ext-%du)*tp_map_w*4u+%du)' % (64 - (d >> 8), d & 0xff)
+                    new_line = line.replace('+ 0x%xu' % d, '+ ' + expr, 1)
+                elif site.get('old') == 'n = 6u':
+                    new_line = line.replace('uint32_t n = 6u', 'uint32_t n = tp_map_shift', 1)
+                else:
+                    asm = line.split('*/')[0].split(': ', 1)[1]
+                    hexv = site['old'][:-1] if 'old' in site else re.findall(r'0x[0-9a-f]+', asm)[-1]
+                    for form in ('b = %su', '(uint32_t)(%su)', ', %su)', '(int32_t)%su', 'v = %su'):
+                        if form % hexv in line:
+                            new_line = line.replace(form % hexv, (form % hexv).replace(hexv + 'u', site['new']), 1); break
+                if new_line != line:
+                    lines[j] = new_line; done.add(at); changed = True
+                else:
+                    failed.add(at)
+            if changed:
+                sources[i] = (a, '\n'.join(lines), name, data)
+        for v, val in (('tp_map_w', 64), ('tp_map_shift', 6), ('tp_map_ext', 64), ('tp_map_bytes', 0x4000)):
+            applied[v] = val
+        print('map geometry: %d of %d sites applied, %d not matched %s, %d not in the build' % (
+            len(done), len(geo), len(failed - done), ' '.join('%x' % x for x in sorted(failed - done))[:300],
+            len(set(geo) - done - failed)), file=sys.stderr)
     tunable_decls = ''.join('extern uint32_t %s;\n' % v for v in applied)
     header = '#include "rt.h"\nextern uint32_t tp_seg[6], tp_base[8192];\nextern uint64_t tp_insns, tp_rep;\n' + tunable_decls + \
              'void tp_set_segment(unsigned n, unsigned selector);\n' \

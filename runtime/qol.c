@@ -98,6 +98,7 @@ void tp_qol_init(void) {
     if (free_bus > 255) free_bus = 255;
     if (free_bus < 0) free_bus = 0;
     tp_tune_max_people = 0x320;
+    { void tp_bigmap_init(void); tp_bigmap_init(); }   /* larger maps (bigmap.c) */
     if (park_tune < 0 || park_tune > NTUNES) park_tune = 0;
     memset(type_tune, -1, sizeof type_tune);
     for (e = getenv("TP_RIDE_TUNES"); e && *e; ) {
