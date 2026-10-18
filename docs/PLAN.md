@@ -586,8 +586,27 @@ Stage 2 (extent 128, 2026-10-18):
   Checked in the app: a new sandbox park at 128 (log, picture), its autosave
   (0xC000 bytes more, marker) loads back at 128; the 64x64 demo park loads at
   64 with the setting on.
-- Not yet checked: visitors walking far from the entrance, the overview map,
-  every ride and shop on the big map (the final QA), performance zoomed out.
+- Visual QA in the full-screen app (2026-10-18 night): a new 128x128 sandbox
+  park with everything researched (test command "unlockall": the runtime
+  tables' flags, rides +0xc5, shops +0x44) and money ("poke32 money": the
+  player's money is the *COMPUTER block +0x0a, not the park record): all 29
+  rides and 17 shops chosen by list position and placed over the whole map;
+  every one that the game accepted draws correctly (roller coasters and the
+  monorail need track: the game says so), zoomed out the whole park and its
+  east border show. Fixed on the way: the game plays from copies of the ride
+  and shop definitions (0x1cced0, 0x1d3c62), whose footprints were 64-wide.
+- A 128x128 save can always be loaded: the app gives the map room for it when
+  any save has its marker (TP_BIG_ROOM), whatever the setting.
+- Menus and hotkeys (zoomed view, the demo park): Park, Options and Display
+  open and draw cleanly; F5 / F6 / F7 lists, M world map, O park open, Shift Z
+  money work. Not confirmed: D (research) and Shift S (stock screen) did
+  nothing from the test script (the game's frame shows no screen opening).
+- View fixes: under a top menu the marker is not used (the menu's edge and
+  shadow darken through another table: over the marker they came out
+  magenta; the camera is held meanwhile, so the frame difference is exact);
+  blend patches touching the park or one or two pixels thin are shadows over
+  the park, not window colours; the date box keeps only the pixels the date
+  drew (stale pixels a frame 23 -> 2 in the picture verify).
 
 ## Advisor only while talking; Panel Size (2026-10-18)
 

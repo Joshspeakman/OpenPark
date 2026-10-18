@@ -678,6 +678,11 @@ static void *game_thread(void *arg) {
             QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
             QOL_ENV("TP_FREE_BUS", [u integerForKey:@"FreeBus"]);
             QOL_ENV("TP_BIG_MAPS", [u integerForKey:@"FreeMapSize"] == 128);   /* (bigmap.c: room for 128x128 sandbox parks) */
+            {   /* a saved 128x128 park (its marker, <save>.big): room to load it whatever the setting */
+                BOOL big = NO;
+                for (NSString *f in [NSFileManager.defaultManager enumeratorAtPath:d->_saves]) if ([f hasSuffix:@".big"]) { big = YES; break; }
+                QOL_ENV("TP_BIG_ROOM", big);
+            }
             if (![u boolForKey:@"SteadyPacing"] && !getenv("TP_PACING")) setenv("TP_PACING", "dosbox", 1);
             #undef QOL_ENV
             NSDictionary *tunes = [u dictionaryForKey:@"RideTunes"];
@@ -966,6 +971,20 @@ static uint32_t key_of_char(unichar c) {
         }
         else if ([op isEqual:@"full"]) [self toggleFull:nil];
         else if ([op isEqual:@"fps"]) [self toggleFPS:nil];
+        else if ([op isEqual:@"poke16"] && p.count > 2) {  /* (tests: a guest word, e.g. the camera 0x1d667a / 0x1d6666) */
+            uint8_t *tp_host_memory(void); uint16_t v = (uint16_t)strtoul([p[2] UTF8String], NULL, 0);
+            memcpy(tp_host_memory() + (uint32_t)strtoul([p[1] UTF8String], NULL, 0), &v, 2);
+        }
+        else if ([op isEqual:@"unlockall"]) {           /* (tests: every ride and shop researched: the runtime tables' flags) */
+            uint8_t *tp_host_memory(void); uint8_t *m = tp_host_memory();
+            for (int k = 0; k < 29; k++) m[0x1cced0 + k * 0xc8 + 0xc5] = 1;
+            for (int k = 0; k < 17; k++) m[0x1d3c62 + 0x22 + k * 0x6b + 0x44] = 1;
+        }
+        else if ([op isEqual:@"poke32"] && p.count > 2) {   /* (tests: a guest dword, e.g. the player's money with "money") */
+            uint8_t *tp_host_memory(void); uint8_t *m = tp_host_memory(); uint32_t a = (uint32_t)strtoul([p[1] UTF8String], NULL, 0), v = (uint32_t)strtoul([p[2] UTF8String], NULL, 0);
+            if ([p[1] isEqual:@"money"]) { uint32_t pl; memcpy(&pl, m + 0x1d3b00, 4); a = pl + 0x0a; }   /* (the player's money: *COMPUTER block +0x0a) */
+            memcpy(m + a, &v, 4);
+        }
         else if ([op isEqual:@"panel"]) tp_view_set_ui_scale(a1);
         else if ([op isEqual:@"grid"]) [self toggleGrid:nil];
         else if ([op isEqual:@"walk"]) {                 /* walk X Y: the Visitor View at map point X,Y (X < 0: the middle of the game's view) */
