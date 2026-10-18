@@ -1,3 +1,4 @@
+#include <pthread.h>
 /* Headless native runner: the deterministic scripted scenario through the C
  * host, for comparison with config/milestones.json. Bounded and muted. */
 #include "host.h"
@@ -93,7 +94,9 @@ int main(int argc, char **argv) {
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));
     if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);    /* (as the app's game thread) */
     if (!intro) { void tp_qol_init(void); tp_qol_init(); }            /* quality-of-life hooks (qol.c) */
+    if (!intro && getenv("TP_COUNT_FRAMES")) { void tp_view_count_game_frames(int); tp_view_count_game_frames(1); }   /* (development: frames counted with the view off) */
     if (getenv("TP_START_HIRES")) tp_view_request_hires(1);          /* as the app's Start In 640x480 */
     int r;
     if (realtime) {
@@ -143,12 +146,13 @@ int main(int argc, char **argv) {
                 k = *e ? e + 1 : e;
             }
             {   /* development: TP_DUMP="t:path:addr:len" writes guest memory once at t seconds */
-                static int dumped; const char *d = getenv("TP_DUMP");
-                if (d && !dumped && strtod(d, NULL) <= el) {
+                static int dumped; static const char *d; if (!d) d = getenv("TP_DUMP");   /* (several: "t:path:addr:len;t:...") */
+                if (d && *d && !dumped && strtod(d, NULL) <= el) {
                     char path[512]; const char *a = strchr(d, ':') + 1, *b = strchr(a, ':'); snprintf(path, sizeof path, "%.*s", (int)(b - a), a);
                     char *e; unsigned at = strtoul(b + 1, &e, 16); unsigned len = strtoul(e + 1, NULL, 16);
                     uint8_t *tp_host_memory(void); FILE *f = fopen(path, "wb"); if (f) { fwrite(tp_host_memory() + at, 1, len, f); fclose(f); }
-                    fprintf(stderr, "dump %s %#x+%#x\n", path, at, len); dumped = 1;
+                    fprintf(stderr, "dump %s %#x+%#x\n", path, at, len);
+                    const char *nx = strchr(d, ';'); if (nx) d = nx + 1; else dumped = 1;
                 }
             }
             static double next_fz; static int held;

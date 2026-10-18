@@ -237,10 +237,30 @@ static int floating_port(unsigned port) {     /* ISA I/O with no device behind i
     return 0;
 }
 
+/* The emulated clock: time as the game experiences it, from the instructions it executed at the governed
+ * rate (as DOSBox's PIC time follows its cycles). The retrace, the timer interrupt and the DOS time follow
+ * it, not the wall clock: so work the host does between the game's instructions (the park view's drawing)
+ * does not shorten the game's waits, and the game paces itself the same whatever is drawn. The governor
+ * keeps it in step with real time. */
+extern uint64_t tp_insns;
+static double gov_rate;
+static double emu_t; static uint64_t emu_last; static int emu_on = -1;
+volatile double tp_frame_paced_at;                       /* steady pacing: when a park frame was last released (view.c) */
+static int frame_paced(void) { return tp_frame_paced_at && now_s() - tp_frame_paced_at < 0.1; }
+static double emu_now(void) {
+    if (emu_on < 0) emu_on = !getenv("TP_WALL_CLOCK");
+    if (frame_paced()) { emu_t = now_s(); emu_last = tp_insns; return emu_t; }   /* (frames are paced: time is real time) */
+    if (!emu_on || gov_rate <= 0) return now_s();
+    if (!emu_t) { emu_t = now_s(); emu_last = tp_insns; }
+    uint64_t i = tp_insns; if (i > emu_last) emu_t += (double)(i - emu_last) / gov_rate;
+    emu_last = i;
+    return emu_t;
+}
+
 /* ---- ports ---- */
 static int vretrace(void) {
     if (deterministic) { ticks++; return ticks & 1 ? 8 : 0; }
-    double t = now_s() * 70.086;               /* VGA mode 13h refresh */
+    double t = emu_now() * 70.086;             /* VGA mode 13h refresh */
     return (t - (double)(uint64_t)t) > 0.9 ? 8 : 0;
 }
 static int port_in(unsigned port, unsigned size) {
@@ -379,7 +399,7 @@ static void realtime_events(void) {
     tp_view_poll();
     if (in_callback && tp_watch_hit) in_callback = 0;
     if (!(G(EFLAGS) & 0x200)) return;
-    double t = now_s();
+    double t = now_s(), te = emu_now();
     double period = pit_divisor / 1193182.0;
     if (!audio_attached) {                               /* headless: advance sound at wall-clock rate, muted */
         if (!audio_pumped || t - audio_pumped > 0.5) audio_pumped = t;
@@ -391,8 +411,8 @@ static void realtime_events(void) {
             audio_pumped += frames / 44100.0;
         }
     }
-    if (t >= timer_next && timer_installed()) {
-        if (t - timer_next > 0.25) timer_next = t;        /* do not replay a long stall */
+    if (te >= timer_next && timer_installed()) {
+        if (te - timer_next > 0.25) timer_next = te;      /* do not replay a long stall */
         timer_next += period;
         timer_irq();
     } else if (sb_irq()) { sb_irqs_delivered++; return; }
@@ -586,11 +606,15 @@ extern uint64_t tp_insns;
 static double gov_t0; static uint64_t gov_i0;
 
 void tp_host_set_cycles(double per_ms) { gov_rate = per_ms * 1000.0; gov_t0 = 0; }
+double tp_host_cycles(void) { return gov_rate / 1000.0; }
 static void govern(void) {
     if (gov_rate <= 0) return;
+    if (frame_paced()) { gov_t0 = 0; return; }           /* park frames are released at a steady rate instead (view.c) */
     double t = now_s();
     if (!gov_t0) { gov_t0 = t; gov_i0 = tp_insns; return; }
     double ahead = (double)(tp_insns - gov_i0) / gov_rate - (t - gov_t0);
+    if (getenv("TP_GOV_DEBUG")) { static double l; static uint64_t li; static int resets; if (ahead < -0.1) resets++;
+        if (t - l >= 1) { if (l) fprintf(stderr, "gov: %.2f M insns/s (target %.2f), ahead %.1f ms, resets %d\n", (tp_insns - li) / (t - l) / 1e6, gov_rate / 1e6, ahead * 1e3, resets); l = t; li = tp_insns; resets = 0; } }
     if (ahead < -0.1) { gov_t0 = t; gov_i0 = tp_insns; return; }   /* never burst to catch up */
     if (ahead > 0.001) {
         struct timespec ts = {0, (long)(ahead * 1e9)};
@@ -1025,7 +1049,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
       for (char *e; b && *b && tp_break_n < 32; b = *e ? e + 1 : e) tp_break_list[tp_break_n++] = (uint32_t)strtoul(b, &e, 16); }
     if (!gov_rate) { const char *e = getenv("TP_CYCLES"); tp_host_set_cycles(e ? atof(e) : 10000); }
     gov_t0 = 0;
-    rt_start = now_s(); timer_next = rt_start;
+    rt_start = now_s(); timer_next = emu_now();
     snprintf(status, sizeof status, "running");
     return 0;
 }
@@ -1228,7 +1252,7 @@ void tp_host_mouse_delta(double dx, double dy, uint32_t buttons) {
 }
 void tp_host_mouse_pos(int *x, int *y) { *x = mouse.x; *y = mouse.y; }   /* the driver's 640x400 space */
 void tp_host_quit(void) { quit_requested = 1; }
-void tp_host_set_realtime(void) { deterministic = 0; timer_next = rt_start = now_s(); gov_t0 = 0; }
+void tp_host_set_realtime(void) { deterministic = 0; rt_start = now_s(); timer_next = emu_now(); gov_t0 = 0; }
 
 static void list_dir(const char *dir, const char *rel, void (*fn)(const char *, const char *, void *), void *ctx) {
     DIR *d = opendir(dir); if (!d) return;
