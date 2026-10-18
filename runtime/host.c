@@ -251,6 +251,7 @@ extern uint64_t tp_insns;
 static double gov_rate;
 static double emu_t; static uint64_t emu_last; static int emu_on = -1;
 volatile double tp_frame_paced_at;                       /* steady pacing: when a park frame was last released (view.c) */
+double tp_dbg_run, tp_dbg_gov;                           /* (development: qol.c's tick gaps) */
 static int frame_paced(void) { return tp_frame_paced_at && now_s() - tp_frame_paced_at < 0.1; }
 static double emu_now(void) {
     if (emu_on < 0) emu_on = !getenv("TP_WALL_CLOCK");
@@ -398,6 +399,11 @@ static void debug_stats(void) {
             t - rt_start, irq_count - lirq, poll_count - lpoll, (blocks - lblocks) / 1e6, pit_divisor,
             vec_sel[8], vec_pc[8], video_mode, G(EIP), nkeys, in_callback);
     last = t; lirq = irq_count; lpoll = poll_count; lblocks = blocks;
+}
+/* The timer interrupt is more than a period overdue (view.c's pacing: a frame should not sleep then). */
+int tp_host_timer_behind(void) {
+    if (deterministic || !timer_installed()) return 0;
+    return emu_now() - timer_next > pit_divisor / 1193182.0;
 }
 static void realtime_events(void) {
     debug_stats();
@@ -614,7 +620,7 @@ static void govern(void) {
     if (ahead < -0.1) { gov_t0 = t; gov_i0 = tp_insns; return; }   /* never burst to catch up */
     if (ahead > 0.001) {
         struct timespec ts = {0, (long)(ahead * 1e9)};
-        nanosleep(&ts, NULL);
+        double g0 = now_s(); nanosleep(&ts, NULL); tp_dbg_gov += now_s() - g0;
     }
 }
 
@@ -1127,7 +1133,7 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
             if (blocks >= blocks_limit) return 0;
             if (blocks_limit - blocks < budget) budget = (uint32_t)(blocks_limit - blocks);
         }
-        int n = tp_run(budget);
+        double tr0 = now_s(); int n = tp_run(budget); tp_dbg_run += now_s() - tr0;
         if (n == -3) { extern int tp_hook_armed, tp_hook_which; void tp_qol_hook(int nested);
                       if (tp_hook_which >= 12) tp_qol_hook(0); else tp_view_hook(); tp_hook_armed = 0; n = 0; }   /* view.c's points, or qol.c's */
         if (stopped) { snprintf(status + strlen(status), sizeof status - strlen(status), " (port I/O)"); return -1; }

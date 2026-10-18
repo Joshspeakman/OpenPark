@@ -648,8 +648,17 @@ moment when some effects (the "ew") play.
   driver's mix-ahead. If crackles remain, look there first.
 - Checked (the player's save, sound and music on at their request): no output underruns in 60 s, park
   ticks steady (worst gap ~28 ms), check suite and view tests pass. TP_AUDIO_REC=<file> records the card's
-  output (44.1 kHz stereo float). The slowdown was not reproduced in a scripted run (no tick or frame gap
-  over 40 ms around effects); it may have been the driver waiting on the card.
+  output (44.1 kHz stereo float).
+- The slowdown: reproduced with GrossOutGap 0 (the player's 30 s gap skipped most "ew"s): park ticks
+  stopped for 0.4-1.1 s after some "ew"s. Measured per tick gap (TP_SOUND_LOG: game code, governor,
+  pacing, view lock, passes): ~97% was the frame-pacing wait, with the timer interrupt at 100-150 a second
+  instead of 240. Then the game runs short frames (one that waits on its timer counters while the effect
+  starts; the HMI driver mixes on every tick), and the timer interrupts, delivered between instructions,
+  got two or three a frame between the 16.7 ms frame waits. Now a frame that finds the timer more than a
+  period overdue is not paced (tp_host_timer_behind). Checked twice, 19 "ew"s each: no park tick gap
+  over 60 ms after loading, timer 240 a second, 60 paced frames a second. (Not the governor, not the view
+  lock, not the passes: each measured; a short-slice run loop did not help.) TP_STALL_PROFILE=<file>
+  writes the blocks of the first tick gap over 200 ms.
 
 ## Up to 10,000 visitors in 128x128 parks, 2026-10-18
 
