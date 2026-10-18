@@ -632,6 +632,49 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Up to 10,000 visitors in 128x128 parks, 2026-10-18
+
+The player: "i would like the guest limit on the bigger maps to be closer to 10,000 and we will
+need to adjust a few things just in case the guests are not staying long enough to reach the
+entire park in the new sizes".
+
+Survey (MAIN.EXE):
+- Visitors, rides, staff and cars share the things pool (*THING, descriptor 0x1b1323: 0xc8-byte
+  records at [0x1d3b10]). The game's size is 1200. It is allocated at 0x1107fe (and again at 0x110842
+  after freeing something), starting at 1200 records and trying ten fewer each time the heap is short.
+  The size then appears only in [0x1d3b78] (-> the last record, set at 0x112a34, add 0x3a8b8), which every
+  loop over things runs to (~40 compares), in the new park's clearing (0x119f38, push 0x3a980), and in
+  the visitor allocator (0x12845a): it searches up to the last record - 0x4e20, keeping the last 100
+  for rides and the like. The save list saves the block whole (its entry's size is 0x1b1529).
+  No other descriptor and no other static table is sized by it. Indices are words (some read signed),
+  so up to 32767. 0x190ed6 (idiv 0x4b0) is unrelated fixed-point arithmetic.
+- Arrivals: 0x167cd4 returns how many get off a bus (at most the bus size, a byte: <= 255), from the
+  park's appeal; the caller (0x1283a6) creates them. HORZA with bus 255 and no cap held ~180.
+- Staying: a visitor is ready to go home once (any of) 4000 ticks have gone since its clock (+0x75,
+  reset with its tiredness by sub-kind 4 at 0x167343), or its tiredness (+0x82, rising as it walks,
+  weather makes it worse) is over 8000 or at least 2000 x the park record's +0x82 (byte), or the park is
+  closed (+0x18). The predicate is inlined five times (0x12287c, 0x12308d, 0x1231bd, 0x12386b, 0x1240a4
+  for the time; 0x1231a4, 0x12408b for tiredness; 0x1279eb and 0x167c3c give the tired thought). When
+  ready, a visitor turns for the gate as it next passes one (0x1e/0x40, then 0x22: 0x12698e walks to the
+  bus, 0x126a91 counts it out). Visitor sub-kinds dispatch through the key table 0x121723 (0x25 keys).
+
+Done (bigmap.c, qol.c, config/mapgeo.json):
+- Five map-geometry sites: tp_things_alloc (1107fe, 110842), tp_things_n (112a34: (n-1)*0xc8),
+  tp_things_bytes (119f38), tp_things_spare (128473). With the Map Size setting on, the pool is
+  allocated for 12,000 records at start-up. A 128x128 park uses all of them, keeps n/25 records spare
+  instead of 100, and saves them all (0x1b1529); its marker is now "128 n" (an old "128" marker
+  means 1200). After the read, the rest of the pool is cleared and comes into play, so a park saved
+  before this change gets the full pool too. Every other park uses 1200 records and saves exactly as
+  the game does.
+- Visitors: in a 128x128 park the cap is 10,000 (the Visitors setting stays for 64x64 parks, up to
+  1,000), and a return hook at 0x1283dc multiplies each bus's arrivals by 4 (TP_FREE_ARRIVALS),
+  up to the room under the cap.
+- Staying: in a 128x128 park the time is 8000 ticks and the tiredness 16000 (twice the walk across;
+  tp_stay_ticks, tp_stay_tired, nine sites). Sites now 634.
+- walk.c follows the pool (its last record) instead of a fixed 1200.
+- TP_THINGS=n (development) gives every park n records; a 64x64 park's saves still hold 1200, cut short
+  (the year-end autosave overwrote the HORZA test copy once: restored from a backup), so scratch copies only.
+
 ## Endless and True Freeplay (sandbox parks), 2026-10-18
 
 Decision (2026-10-18): the player asked for an endless mode for sandbox parks that "start[s] out at

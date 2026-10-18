@@ -141,8 +141,10 @@ static uint32_t free_selectors[4096]; static int nfree_selectors;
 static uint32_t vec_sel[256], vec_pc[256]; static uint8_t vec_set[256];
 static int handles_fd[20] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}; static int handles_writable[20];
 /* Larger maps (bigmap.c): a save holding a 128x128 park has a marker beside it (<save>.big). */
-static char handles_path[20][1024]; static int handles_big[20];
+static char handles_path[20][1024]; static int handles_big[20], things_grow;
 int tp_bigmap_alloc(void); void tp_bigmap_set(int w, int ext); extern uint32_t tp_map_w;
+int tp_bigmap_things(int n); int tp_bigmap_things_room(void); extern uint32_t tp_things_n;   /* (its things pool: "128 n" in the marker; the save list's entry
+                                                                                                   * gives the read its size) */
 static uint64_t ticks;
 static uint32_t video_mode;
 static uint8_t port_val[65536]; static uint8_t port_known[65536];
@@ -763,7 +765,7 @@ static void interrupt(uint32_t number) {
             close(handles_fd[b]); handles_fd[b] = -1;
             if (handles_big[b] >= 0) {                    /* a park's map was written: mark (or unmark) a 128x128 one */
                 char mk[1040]; snprintf(mk, sizeof mk, "%s.big", handles_path[b]);
-                if (handles_big[b]) { FILE *f = fopen(mk, "w"); if (f) { fputs("128\n", f); fclose(f); } } else unlink(mk);
+                if (handles_big[b]) { FILE *f = fopen(mk, "w"); if (f) { fprintf(f, "128 %u\n", tp_things_n); fclose(f); } } else unlink(mk);
                 { void tp_free_saved(const char *); tp_free_saved(handles_path[b]); }   /* (and its Free Mode rules: freemode.c) */
             }
             carry(0); return;
@@ -779,9 +781,18 @@ static void interrupt(uint32_t number) {
                   if (big && tp_bigmap_alloc() < 128) { fprintf(stderr, "bigmap: %s holds a 128x128 park (turn on the larger map setting)\n", handles_path[b]); carry(5); return; }
                   { void tp_bigmap_loaded(void); tp_bigmap_loaded(); void tp_free_loaded(const char *); tp_free_loaded(handles_path[b]); }
                   if ((int)c != want || (int)tp_map_w != (big ? 128 : 64)) { tp_bigmap_set(big ? 128 : 64, big ? 128 : 64); c = (uint32_t)want; }
+                  if (big) {                              /* its things: as many as were saved (1200 before the pool grew) */
+                      int w = 0, n = 1200; FILE *f = fopen(mk, "r"); if (f) { if (fscanf(f, "%d %d", &w, &n) < 2) n = 1200; fclose(f); }
+                      if (n > tp_bigmap_things_room()) { fprintf(stderr, "bigmap: %s holds %d things, room for %d\n", handles_path[b], n, tp_bigmap_things_room()); carry(5); return; }
+                      tp_bigmap_things(n); things_grow = 1;
+                  }
               } }
             ssize_t got = 0, r;
             while ((uint32_t)got < c && (r = read(handles_fd[b], mem + at + got, c - got)) > 0) got += r;
+            if (things_grow) { uint32_t tp; memcpy(&tp, mem + 0x1d3b10, 4);   /* a 128x128 park's things read: the rest of the pool, empty, in play */
+                if (tp && at == tp) { uint32_t room = (uint32_t)tp_bigmap_things_room() * 0xc8u;
+                    if ((uint32_t)got < room) memset(mem + at + got, 0, room - (uint32_t)got);
+                    tp_bigmap_things(tp_bigmap_things_room()); things_grow = 0; } }
             if (getenv("TP_DEBUG_READ")) { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);   /* (development: reads into the map) */
                 if (mp && at < mp + 0x10000 && at + c > mp) fprintf(stderr, "read into the map: handle %u, +%#x, %u bytes (got %zd)\n", b, at - mp, c, got); }
             S(EAX, (uint32_t)got); carry(0); return;

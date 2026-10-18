@@ -1,6 +1,15 @@
 {
 "note": "Instructions that encode the 64x64 park map (docs/PLAN.md, Larger maps). W = tp_map_w (row stride), E = tp_map_ext (playable size).",
 "sites": {
+"1107fe": {
+"new": "tp_things_alloc"
+},
+"110842": {
+"new": "tp_things_alloc"
+},
+"112a34": {
+"new": "((tp_things_n-1u)*0xc8u)"
+},
 "1139b0": {
 "new": "(tp_map_ext*tp_map_ext)"
 },
@@ -400,6 +409,9 @@
 "119f23": {
 "new": "tp_map_bytes"
 },
+"119f38": {
+"new": "tp_things_bytes"
+},
 "11a14b": {
 "new": "(tp_map_ext/2u+tp_map_ext*tp_map_w)"
 },
@@ -495,6 +507,9 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"12287c": {
+"new": "tp_stay_ticks"
+},
 "1228a4": {
 "asm": "mov ebx, 0x40",
 "old": "0x40u",
@@ -543,6 +558,9 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"12308d": {
+"new": "tp_stay_ticks"
+},
 "1230b5": {
 "asm": "mov ebx, 0x40",
 "old": "0x40u",
@@ -558,15 +576,30 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"1231a4": {
+"new": "tp_stay_tired"
+},
+"1231bd": {
+"new": "tp_stay_ticks"
+},
 "1235e4": {
 "asm": "shl eax, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"12386b": {
+"new": "tp_stay_ticks"
+},
 "123dc2": {
 "asm": "shl eax, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
+},
+"12408b": {
+"new": "tp_stay_tired"
+},
+"1240a4": {
+"new": "tp_stay_ticks"
 },
 "124426": {
 "asm": "shl eax, 6",
@@ -689,11 +722,17 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"1279eb": {
+"new": "tp_stay_tired"
+},
 "1283e5": {
 "new": "((tp_map_ext-1u)+(tp_map_ext-3u)*tp_map_w)"
 },
 "12840d": {
 "new": "((tp_map_ext-1u)+(tp_map_ext-3u)*tp_map_w)"
+},
+"128473": {
+"new": "tp_things_spare"
 },
 "1284bc": {
 "asm": "mov ebx, 0x40",
@@ -2709,6 +2748,9 @@
 "asm": "shl eax, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
+},
+"167c3c": {
+"new": "tp_stay_tired"
 },
 "185311": {
 "asm": "shl ebx, 6",
