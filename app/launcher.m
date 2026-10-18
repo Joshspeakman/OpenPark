@@ -225,7 +225,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                            @[@"Endless parks reach the hardest in three game years", @"Endless parks reach the hardest in five game years",
                              @"Endless parks reach the hardest in ten game years"]);
         _free[2] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
-                           @[@"The game's limit for a park", @"A hundred more than the game allows", @"Nearly all the people the game can hold"]);
+                           @[@"The game's limit; 128 × 128 parks hold up to 10,000", @"A hundred more; 128 × 128 parks hold up to 10,000",
+                             @"Nearly all a 64 × 64 park can hold; 128 × 128 parks hold up to 10,000"]);
         _free[4] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
                            @[@"The game's park size", @"Four times the land for new sandbox parks"]);
         _free[3] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],

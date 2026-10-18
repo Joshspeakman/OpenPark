@@ -16,6 +16,18 @@
  * (tp_bigmap_poll, from qol.c's hooks). The first park frame (view.c) or a load ends the setting up.
  * Other parks stay 64x64 and save exactly as the game does. A saved 128x128 park leaves a marker file beside
  * its save (<save>.big, host.c), and loading switches to the layout of the park being read.
+ * The things pool (*THING: visitors, rides, staff, cars; 0xc8-byte records at [0x1d3b10]) grows with the map:
+ * the game takes its size from four places (config/mapgeo.json): the allocation (0x1107fe, 0x110842: 1200
+ * records, ten fewer at a time until the heap has room), the last record ([0x1d3b78], set at 0x112a34; every
+ * loop over things runs to it), the new park's clearing (0x119f38) and the room kept free of visitors
+ * (0x128473: the last 100 records, for rides and the like). Those read tp_things_alloc, tp_things_n,
+ * tp_things_bytes and tp_things_spare. A 128x128 park uses BIG_THINGS records (saved whole: the save
+ * list's entry at 0x1b1529, the count in the marker); other parks 1200, exactly as the game.
+ * How long visitors stay grows with it too (twice the walk across): a visitor is ready to go home (and turns
+ * for the gate when it next passes one) once 4000 ticks have gone since its clock was set (+0x75; 0x12287c,
+ * 0x12308d, 0x1231bd, 0x12386b, 0x1240a4), or its tiredness (+0x82, rising as it walks) passes 8000
+ * (0x1231a4, 0x12408b; its "tired" thought 0x1279eb, 0x167c3c) or 2000 per attraction of the park; or when
+ * the park closes. A 128x128 park doubles the time and the tiredness (tp_stay_ticks, tp_stay_tired).
  * Test mode (TP_MAP_W=128 TP_MAP_EXT=64): the 64-wide park laid out with a 128 stride must play exactly
  * as the original; a missed or wrong site shows as a difference (docs/PLAN.md). */
 #include <stdint.h>
@@ -25,6 +37,8 @@
 
 uint8_t *tp_host_memory(void);
 extern uint32_t tp_map_w, tp_map_shift, tp_map_ext, tp_map_bytes;   /* (dispatch.c, generated: 64, 6, 64, 0x4000) */
+extern uint32_t tp_things_alloc, tp_things_n, tp_things_bytes, tp_things_spare;   /* (1200, 1200, 0x3a980, 0x4e20) */
+extern uint32_t tp_stay_ticks, tp_stay_tired;   /* (4000, 8000) */
 
 #define MAP_SIZE    0x1b127cu   /* *MAP block: bytes */
 #define SAVE_SIZE   0x1b1521u   /* save list: the map's bytes */
@@ -46,8 +60,15 @@ static const Table OFFSETS[] = {
  * 0x1b16f8 -> 0x1cced0; 0x119f8c: 0x1b2ff8 -> 0x1d3c62): their offsets too, from the originals. */
 static const struct { int table; uint32_t at; } MIRRORS[] = {{6, 0x1cced0}, {5, 0x1d3c62 + (0x1b301a - 0x1b2ff8)}};
 static int16_t orig[NTABLES][29][26];
+static int forced_things;                 /* TP_THINGS=n (development): every park n things (a 64x64 park's saves keep 1200, cut short: scratch copies only) */
 static int saved, alloc_n = 64;           /* the map block: alloc_n square, fixed at start-up */
 
+#define THING_BLOCK 0x1b1369u  /* *THING block: bytes (as allocated) */
+#define THING_SAVE  0x1b1529u  /* save list: the things' bytes */
+#define THING_PTR   0x1d3b10u
+#define THING_LAST  0x1d3b78u  /* -> the last record */
+#define GAME_THINGS 1200
+#define BIG_THINGS  12000      /* (indices are words, some read signed) */
 static int16_t rd16(const uint8_t *m, uint32_t a) { int16_t v; memcpy(&v, m + a, 2); return v; }
 static void wr16(uint8_t *m, uint32_t a, int16_t v) { memcpy(m + a, &v, 2); }
 static void wr32(uint8_t *m, uint32_t a, uint32_t v) { memcpy(m + a, &v, 4); }
@@ -58,6 +79,7 @@ static int16_t recode(int v, int w) {
     int dy = (v + 32 + 64 * 64) / 64 - 64, dx = v - dy * 64;
     return (int16_t)(dx + dy * w);
 }
+int tp_bigmap_things(int n);
 void tp_bigmap_set(int w, int ext) {
     uint8_t *m = tp_host_memory();
     if (w != 128) w = 64;
@@ -79,10 +101,32 @@ void tp_bigmap_set(int w, int ext) {
         for (int k = 0; k < OFFSETS[t].n; k++) for (int i = 0; i < OFFSETS[t].nf; i++)
             wr16(m, MIRRORS[r].at + (uint32_t)(k * OFFSETS[t].size) + OFFSETS[t].f[i], recode(orig[t][k][i], w));
     }
-    fprintf(stderr, "bigmap: stride %d, playable %dx%d\n", w, ext, ext);
+    int nt = tp_bigmap_things(forced_things ? forced_things : w == 128 && ext == 128 ? BIG_THINGS : GAME_THINGS);
+    fprintf(stderr, "bigmap: stride %d, playable %dx%d, %d things\n", w, ext, ext, nt);
 }
 
 int tp_bigmap_alloc(void) { return alloc_n; }
+
+/* The things in play: n records (GAME_THINGS, or up to what the block holds). */
+static uint32_t rd32(const uint8_t *m, uint32_t a) { uint32_t v; memcpy(&v, m + a, 4); return v; }
+int tp_bigmap_things_room(void) {
+    uint8_t *m = tp_host_memory();
+    return rd32(m, THING_PTR) ? (int)(rd32(m, THING_BLOCK) / 0xc8) : (int)tp_things_alloc;
+}
+int tp_bigmap_things(int n) {
+    uint8_t *m = tp_host_memory(); int room = tp_bigmap_things_room();
+    if (forced_things) n = forced_things;
+    if (n < GAME_THINGS) n = GAME_THINGS;
+    if (n > room) n = room;
+    tp_things_n = (uint32_t)n;
+    tp_things_bytes = (uint32_t)room * 0xc8;                  /* (the block, cleared whole for a new park) */
+    tp_things_spare = (uint32_t)(n > GAME_THINGS ? n / 25 : 100) * 0xc8;
+    tp_stay_ticks = n > GAME_THINGS ? 8000 : 4000; tp_stay_tired = n > GAME_THINGS ? 16000 : 8000;
+    wr32(m, THING_SAVE, (uint32_t)n * 0xc8);
+    uint32_t things = rd32(m, THING_PTR);
+    if (things) wr32(m, THING_LAST, things + (uint32_t)(n - 1) * 0xc8);
+    return n;
+}
 static int big_maps, setup_open, armed;   /* armed: the game has set its default level (0x112b13: 2) */
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 #define ENTRANCE_FN 0x118bc0u   /* (cell): remove the entrance (0: only that), build the border, place it */
@@ -102,7 +146,7 @@ static void rebuild(int n) {
     tp_bigmap_set(n, n);
     uint32_t entr = (uint32_t)(n / 2 + n * n); tp_host_guest_call(ENTRANCE_FN, &entr, 1, 4000000);
     uint32_t new_entr = (uint32_t)(n / 2 + (n - 4) * n);
-    for (int k = 1; k < 1200; k++) {
+    for (int k = 1; k < tp_bigmap_things_room(); k++) {
         uint8_t *t = m + things + (uint32_t)k * 0xc8;
         if (!t[4] || t[4] == 20) continue;                     /* (empty; the gate's parts are the game's again) */
         int16_t x, y; memcpy(&x, t + 6, 2); memcpy(&y, t + 8, 2);
@@ -138,6 +182,11 @@ void tp_bigmap_init(void) {
     alloc_n = a ? atoi(a) : (big_maps || room || (w && atoi(w) == 128)) ? 128 : 64;
     if (alloc_n != 128) alloc_n = 64;
     wr32(tp_host_memory(), MAP_SIZE, (uint32_t)(alloc_n * alloc_n * 4));
+    forced_things = getenv("TP_THINGS") ? atoi(getenv("TP_THINGS")) : 0;
+    if (forced_things && (forced_things < GAME_THINGS || forced_things > 16000)) forced_things = 0;
+    tp_things_alloc = forced_things ? forced_things : alloc_n == 128 ? BIG_THINGS : GAME_THINGS;   /* (the game takes ten fewer at a time if the heap is short) */
+    tp_things_bytes = tp_things_alloc * 0xc8;
+    if (forced_things) tp_things_n = (uint32_t)forced_things;
     tp_map_bytes = (uint32_t)(alloc_n * alloc_n * 4);
     if (w || e) tp_bigmap_set(w ? atoi(w) : 64, e ? atoi(e) : (w ? atoi(w) : 64));
     else if (big_maps) fprintf(stderr, "bigmap: room for 128x128 sandbox parks\n");

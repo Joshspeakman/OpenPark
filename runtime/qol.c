@@ -13,7 +13,9 @@
  *                       at most n visitors in the park (the game's 800; the
  *                       things pool, 1200 records shared with rides, staff
  *                       and cars, takes visitors to about 1,100, so at most
- *                       1000 here)
+ *                       1000). A 128x128 park has 12,000 records (bigmap.c)
+ *                       and holds up to 10,000 whatever n is, a bus there
+ *                       bringing four times as many (TP_FREE_ARRIVALS)
  *   TP_FREE_BUS=n       free mode: a bus brings up to n visitors (1..255; the
  *                       game's 20..150 by park level, table at 0x1b78cc)
  *   TP_SOUND_LOG=1      development: every sound effect the game asks for
@@ -59,8 +61,10 @@ extern int tp_hook_which;
 void tp_hooks_changed(void);
 
 #define QOL0 12
-enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, NHOOK };
-static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad};   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
+enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, NHOOK };
+static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc};   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
+#define BIG_VISITORS 10000                /* a 128x128 park's most (its 12,000 things, bigmap.c) */
+extern uint32_t tp_things_n;              /* the things pool (bigmap.c): 1200, more in a 128x128 park */
 extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 800) */
 #define SIM_LEVEL    0x1d66f1u            /* 0 sandbox, 1 sim, 2 full */
 #define PLAYER_PARK  0x1d3818u            /* -> the player's park record (0x250 bytes): +0x1f visitors, +0x48 bus size, +0x49 level */
@@ -76,7 +80,7 @@ extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 
 #define NTYPES       29
 #define NTUNES       22
 
-static int log_sounds, ride_music = 1, park_tune, free_visitors, free_bus;
+static int log_sounds, ride_music = 1, park_tune, free_visitors, free_bus, arrive_x = 4;
 static double ew_gap, ew_last = -1e9;
 static int8_t type_tune[NTYPES];          /* -1: the game's */
 
@@ -94,6 +98,8 @@ void tp_qol_init(void) {
     free_visitors = (e = getenv("TP_FREE_VISITORS")) ? atoi(e) : 0;
     if (free_visitors > 1000) free_visitors = 1000;
     if (free_visitors < 0) free_visitors = 0;
+    arrive_x = (e = getenv("TP_FREE_ARRIVALS")) ? atoi(e) : 4;   /* (development: other multiples) */
+    if (arrive_x < 1) arrive_x = 1; if (arrive_x > 100) arrive_x = 100;
     free_bus = (e = getenv("TP_FREE_BUS")) ? atoi(e) : 0;
     if (free_bus > 255) free_bus = 255;
     if (free_bus < 0) free_bus = 0;
@@ -133,6 +139,16 @@ void tp_qol_hook(int nested) {
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
     if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
         if (!nested) { void tp_free_frame(void); tp_free_frame(); }
+        return;
+    }
+    if (k == H_BUS_COUNT) {                           /* (0x167cd4 returned: how many get off the bus) */
+        uint32_t park = r32(m, PLAYER_PARK);
+        if (!nested && m[SIM_LEVEL] == 0 && tp_things_n > 1200 && park) {   /* a 128x128 park: four times the visitors a bus brings */
+            int n = (int16_t)tp_get(0), in = (int16_t)r16(m, park + 0x1f), room = (int)tp_tune_max_people - in, more = n * arrive_x;
+            if (more > room) more = room;
+            if (more > n) tp_set(0, (tp_get(0) & 0xffff0000u) | (uint16_t)more);
+            if (log_sounds) { static int c; if (c++ < 10) fprintf(stderr, "free: bus brings %d, now %d (in park %d)\n", n, more > n ? more : n, in); }
+        }
         return;
     }
     uint32_t ret = r32(m, sp), a1 = r32(m, sp + 4), a2 = r32(m, sp + 8);
@@ -175,7 +191,8 @@ void tp_qol_hook(int nested) {
         return;
     case H_BUS_ARRIVES: {                             /* free mode, sandbox parks only */
         int sandbox = m[SIM_LEVEL] == 0;
-        tp_tune_max_people = sandbox && free_visitors > 0x320 ? (uint32_t)free_visitors : 0x320;
+        int cap = tp_things_n > 1200 ? BIG_VISITORS : free_visitors;
+        tp_tune_max_people = sandbox && cap > 0x320 ? (uint32_t)cap : 0x320;
         uint32_t park = r32(m, PLAYER_PARK);
         if (sandbox && free_bus && park) {
             if (m[park + 0x48] < free_bus) m[park + 0x48] = (uint8_t)free_bus;   /* (the game's size by level, BUS_SIZES, if larger) */

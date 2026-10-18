@@ -72,7 +72,8 @@ extern uint32_t tp_map_w, tp_map_ext;
 #define RIDE_TYPES  0x1cced0u      /* 29 records of 0xc8: the name first */
 #define GHOST_TAB   0x1ba2f8u
 #define FRAME_RENDER 0x113b9au
-#define NTH         1200           /* the things pool */
+#define NTH         16384          /* room for the largest things pool (bigmap.c) */
+#define THING_LAST  0x1d3b78u      /* -> the pool's last record (1200 records, more in a 128x128 park) */
 #define GAME_CX0 4
 #define GAME_CX1 51
 #define GAME_CY1 51
@@ -279,11 +280,15 @@ static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx
 }
 
 /* ---- riders ---- */
-static int valid_idx(int i) { return i > 0 && i < NTH; }
+static int nth(void) {
+    uint32_t t = r32(THINGS), l = r32(THING_LAST); int n = t && l > t ? (int)((l - t) / 0xc8) + 1 : 1200;
+    return n < NTH ? n : NTH;
+}
+static int valid_idx(int i) { return i > 0 && i < nth(); }
 static void find_riders(Snap *s) {
     memset(s->riding, 0, sizeof s->riding); s->nconts = 0;
     uint32_t things = r32(THINGS);
-    for (int i = 1; i < NTH; i++) {
+    for (int i = 1, n = nth(); i < n; i++) {
         const uint8_t *t = M + things + (uint32_t)i * 0xc8; int cls = t[4], first = 0;
         if (cls == 4 || cls == 0x0e) {
             int r = r16(things + (uint32_t)i * 0xc8 + 0x47);
