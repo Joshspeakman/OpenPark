@@ -632,6 +632,16 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Ride music: no more tunes stepping on each other (2026-10-18)
+
+The player: ride music steps on each other. The game plays the tune of a music ride in its own view
+(play_tune 0x180a20, which returns at once for the tune already playing; stop 0x180990 when no music
+ride is seen). In the wide view the game's camera follows the pointer, so moving it over the park
+stopped, restarted and swapped tunes many times a second (TP_SOUND_LOG "music: now playing": 18 changes
+in 20 s of pointer sweeps). Now a playing ride tune stays until its ride has been out of the game's view
+for 3 s (qol.c, TP_MUSIC_HOLD; both the stop and a request for another tune wait): the same sweeps, 1
+change (the tune starting). Ambient ATMOS2.RAW (bank 0 sample 21, every ~0.5 s) is the game's.
+
 ## Bouncy castle riders (2026-10-18)
 
 The player: no one bouncing on the bouncy castle (other rides perhaps too). The ride renderer 0x169840

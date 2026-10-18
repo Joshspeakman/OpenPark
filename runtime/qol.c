@@ -82,6 +82,9 @@ extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 
 
 static int log_sounds, ride_music = 1, park_tune, free_visitors, free_bus, arrive_x = 4;
 static double ew_gap, ew_last = -1e9;
+static double music_hold = 3.0;             /* seconds a ride tune outlasts its ride leaving the game's view (TP_MUSIC_HOLD) */
+#define MUSIC_HOLD music_hold
+static double tune_seen[64];               /* when each tune's ride was last in the game's view */
 static int8_t type_tune[NTYPES];          /* -1: the game's */
 
 static uint32_t r32(const uint8_t *m, uint32_t a) { uint32_t v; memcpy(&v, m + a, 4); return v; }
@@ -93,6 +96,7 @@ void tp_qol_init(void) {
     const char *e;
     log_sounds = getenv("TP_SOUND_LOG") != NULL;
     ew_gap = (e = getenv("TP_EW_GAP")) ? atof(e) : 0;
+    if ((e = getenv("TP_MUSIC_HOLD"))) music_hold = atof(e);
     ride_music = !((e = getenv("TP_RIDE_MUSIC")) && atoi(e) == 0);
     park_tune = (e = getenv("TP_PARK_TUNE")) ? atoi(e) : 0;
     free_visitors = (e = getenv("TP_FREE_VISITORS")) ? atoi(e) : 0;
@@ -149,6 +153,7 @@ void tp_qol_hook(int nested) {
             }
             tp_trace_n = 0; l = t;
         }
+        if (!nested && log_sounds) { static int lc = -1; int c = (int16_t)r16(m, CUR_TUNE); if (c != lc) { fprintf(stderr, "music: now playing %d (%.3f)\n", c, now()); lc = c; } }
         if (!nested && log_sounds) { static double l, worst, lp; double t = now(); if (l && t - l > worst) worst = t - l;   /* (development: the park's tick, slowed?) */
             extern double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace, tp_dbg_run, tp_dbg_gov; static double lw0, ps0, pc0, rn0, gv0;
             if (l && t - l > 0.04) fprintf(stderr, "tick gap %.3f: %.1f ms (game code %.1f, governor %.1f, pacing %.1f, view lock %.1f, passes %.1f)\n", t, (t - l) * 1e3,
@@ -189,6 +194,16 @@ void tp_qol_hook(int nested) {
             if (!ride_music) tune = 0;
             if (!tune && park_tune) tune = park_tune;
             if (log_sounds) { static int last = -99; if (tune != last) fprintf(stderr, "music: ride type %d tune %d -> %d\n", type, (int16_t)a1, tune); last = tune; }
+            /* The game plays the tune of a music ride in its view; in the wide view that view follows the pointer, so
+             * moving it over the park stopped, restarted and swapped tunes many times a second (tunes stepping on each
+             * other). A playing ride tune now stays until its ride has been out of the game's view for MUSIC_HOLD. */
+            {   double t = now(); int cur = (int16_t)r16(m, CUR_TUNE);
+                if (tune > 0 && tune < 64) tune_seen[tune] = t;
+                if (tune && cur > 0 && cur < 64 && cur != tune && cur != park_tune && t - tune_seen[cur] < MUSIC_HOLD) {
+                    if (log_sounds) { static double l; if (t - l > 2) { l = t; fprintf(stderr, "music: keeping tune %d (asked for %d)\n", cur, tune); } }
+                    skip_call(); return;
+                }
+            }
             if (!tune) {                                /* none: stop what plays (stop returns where play would) */
                 if (r16(m, CUR_TUNE)) tp_set(9, STOP_MUSIC); else skip_call();
                 return;
@@ -199,6 +214,8 @@ void tp_qol_hook(int nested) {
     case H_STOP_MUSIC:
         if (ret != 0x11c183u && ret != 0x11c193u) return;   /* the renderer: no music ride on screen */
         if (nested) { skip_call(); return; }
+        {   int cur = (int16_t)r16(m, CUR_TUNE);              /* (its ride was in view moments ago: keep it, MUSIC_HOLD) */
+            if (cur > 0 && cur < 64 && cur != park_tune && now() - tune_seen[cur] < MUSIC_HOLD) { skip_call(); return; } }
         if (park_tune) { play((uint32_t)park_tune); skip_call(); }
         if (log_sounds) { static double l; if (now() - l > 2) { l = now(); fprintf(stderr, "music: no ride on screen, %s\n", park_tune ? "park tune" : "stop"); } }
         return;
