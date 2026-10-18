@@ -107,6 +107,9 @@ void tp_qol_init(void) {
         e = *p == ',' ? p + 1 : p; if (*p != ',') break;
     }
     for (int i = 0; i < NHOOK; i++) tp_hook_pcs[QOL0 + i] = hook_pc[i];
+    { void tp_view_pacing_init(void); tp_view_pacing_init(); }   /* steady pacing of park frames (view.c) */
+    if ((e = getenv("TP_BARPROBE"))) for (int k = 0; k < 3 && *e; k++) {   /* development: sentinel at the first, checks at the others */
+        char *q; tp_hook_pcs[21 + k] = (uint32_t)strtoul(e, &q, 16); e = *q ? q + 1 : q; }
     tp_hooks_changed();
     if (ew_gap || !ride_music || park_tune || getenv("TP_RIDE_TUNES") || free_visitors || free_bus)
         fprintf(stderr, "qol: ew gap %g, ride music %d, park tune %d, tunes %s, free mode visitors %d bus %d\n", ew_gap, ride_music, park_tune,
@@ -125,6 +128,13 @@ static void play(uint32_t tune) {
 void tp_qol_hook(int nested) {
     uint8_t *m = tp_host_memory();
     uint32_t pc = tp_get(9), sp = tp_get(4);
+    if (tp_hook_which >= 21 && getenv("TP_BARPROBE") && !nested) {
+        uint8_t *bb = m + r32(m, 0x1de5bc); static int cnt;
+        if (tp_hook_which == 21) memset(bb, 0xee, 640 * 4);
+        else { int left = 0; for (int i = 0; i < 640 * 4; i++) left += bb[i] == 0xee;
+               if (cnt++ < 40) fprintf(stderr, "barprobe at %06x: %d sentinel left, px %02x %02x\n", pc, left, bb[50], bb[200]); }
+        return;
+    }
     int k = tp_hook_which - QOL0;
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
     uint32_t ret = r32(m, sp), a1 = r32(m, sp + 4), a2 = r32(m, sp + 8);

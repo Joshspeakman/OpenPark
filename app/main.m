@@ -6,6 +6,7 @@
  * user's own GOG package by tools/build_app.sh). */
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
+#import <IOSurface/IOSurface.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <ImageIO/ImageIO.h>
 #import <GameController/GameController.h>
@@ -20,7 +21,12 @@ void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
 void tp_qol_init(void);
 uint8_t *tp_host_memory(void);
-extern int tp_view_hw_cursor;
+extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out_bgra;
+void tp_view_compose_stride(size_t px);
+void tp_view_debug_hud(uint32_t *out, int ow, int oh);
+void tp_view_count_game_frames(int on);
+int tp_view_frame_due(void);
+void tp_view_vsync_now(double period, double ago);
 int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy);
 int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 
@@ -79,7 +85,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     /* The park view (runtime/view.c): on when zoomed, or when the window is wider
      * than 4:3 (widescreen: the park fills it, the interface stays in a centred
      * 4:3 column); off, the game draws its own view. */
-    BOOL _viewOn, _live;
+    BOOL _viewOn, _live, _viewMoved;
+    IOSurfaceRef _surf[2]; int _surfIdx;  /* the park view's pictures, shown in turn */    /* _viewMoved: pan or zoom since the last picture (compose now) */
     double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when the view last ended */
     uint32_t *_big; int _bigW, _bigH;
     NSPoint _mouse; BOOL _mouseIn;
@@ -142,6 +149,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     }
     if (_viewOn) [self edgePan];
     BOOL live = _viewOn && tp_view_live() && fw == _sw;
+    if (live && _live && _surf[_surfIdx] && !_viewMoved && !tp_view_frame_due()) return;   /* steady pacing: the last picture stays up */
+    _viewMoved = NO;
     if (live) {                                      /* the park view, the game's interface and its panel */
         NSRect vr = [self viewRect];
         CGFloat scale = self.window.backingScaleFactor ?: 2;
@@ -150,9 +159,38 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         /* square output pixels over the view's shape (the layout maps onto it, 320x200's tall pixels included) */
         int oh = fh * k, ow = (int)lround(oh * vr.size.width / vr.size.height);
         if (ow < 16) ow = 16;
+        /* Into one of two IOSurfaces (BGRA, shared with the GPU: no copy when the layer shows it), in turn. */
+        _surfIdx ^= 1;
+        IOSurfaceRef sf = _surf[_surfIdx];
+        if (!sf || (int)IOSurfaceGetWidth(sf) != ow || (int)IOSurfaceGetHeight(sf) != oh) {
+            if (sf) CFRelease(sf);
+            NSDictionary *props = @{(id)kIOSurfaceWidth: @(ow), (id)kIOSurfaceHeight: @(oh), (id)kIOSurfaceBytesPerElement: @4,
+                                    (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA')};
+            sf = _surf[_surfIdx] = IOSurfaceCreate((__bridge CFDictionaryRef)props);
+        }
+        double tc0 = CACurrentMediaTime();
+        IOSurfaceLock(sf, 0, NULL);
+        tp_view_out_bgra = 1; tp_view_compose_stride(IOSurfaceGetBytesPerRow(sf) / 4);
+        tp_view_compose((uint32_t *)IOSurfaceGetBaseAddress(sf), ow, oh, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
+        tp_view_out_bgra = 0; tp_view_compose_stride(0);
+        IOSurfaceUnlock(sf, 0, NULL);
+        _bigW = ow; _bigH = oh;
+        if (getenv("TP_PACE_DEBUG")) { static double l, worst, sum; static int n; double d = CACurrentMediaTime() - tc0; sum += d; n++; if (d > worst) worst = d;
+            if (tc0 - l > 1) { fprintf(stderr, "compose %dx%d: avg %.2f ms, worst %.2f ms\n", _bigW, _bigH, sum / n * 1e3, worst * 1e3); l = tc0; worst = sum = 0; n = 0; } }
+        if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; [self setCursorHidden:NO]; }
+        [self updateGameCursor];
+        [self updateScanlines:fh];
+        [CATransaction begin]; [CATransaction setDisableActions:YES];
+        _screen.contents = (__bridge id)sf;
+        [CATransaction commit];
+        return;
+    }
+    if (!live && tp_view_debug_fps) {                /* the frame-rate line over the game's own picture: drawn at 3x */
+        int ow = fw * 3, oh = fh * 3;
         if (!_big || _bigW != ow || _bigH != oh) { free(_big); _bigW = ow; _bigH = oh; _big = malloc(sizeof *_big * _bigW * _bigH); }
-        tp_view_compose(_big, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
-        px = _big; w = _bigW; h = _bigH;
+        for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) _big[(size_t)y * ow + x] = _pixels[(y / 3) * fw + x / 3];
+        tp_view_debug_hud(_big, ow, oh);
+        px = _big; w = ow; h = oh;
     }
     if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; if (live) [self setCursorHidden:NO]; }
     [self updateGameCursor];
@@ -160,11 +198,13 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs,
                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    double ti0 = CACurrentMediaTime();
     CGImageRef img = CGBitmapContextCreateImage(ctx);
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     _screen.contents = (__bridge id)img;
     [CATransaction commit];
     CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs);
+    if (getenv("TP_PACE_DEBUG")) { static double l, worst; double d = CACurrentMediaTime() - ti0; if (d > worst) worst = d; if (ti0 - l > 1) { fprintf(stderr, "image upload worst %.2f ms\n", worst * 1e3); l = ti0; worst = 0; } }
 }
 /* CRT: a dark line under every row of the game's screen, over the picture (smooth pixels). */
 - (void)updateScanlines:(int)rows {
@@ -177,7 +217,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         for (int y = 0; y < h; y++) px[y] = (y % 4 == 3) ? 0x70000000u : (y % 4 == 2 ? 0x30000000u : 0);
         CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
         CGContextRef ctx = CGBitmapContextCreate(px, 1, h, 8, 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-        CGImageRef img = CGBitmapContextCreateImage(ctx);
+        double ti0 = CACurrentMediaTime();
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
         _scan.contents = (__bridge id)img;
         CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
     }
@@ -295,7 +336,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     double ax = _cx + (fx - 0.5) * lw / _zoom, ay = _cy + (fy * _sh - _wh / 2.0) / _zoom;
     z = fmin(fmax(z, [self minZoom]), 4.0);
     if (fabs(z - 1) < 0.04) z = 1;                   /* a detent at the game's own scale */
-    _zoom = z;
+    _zoom = z; _viewMoved = YES;
     _cx = ax - (fx - 0.5) * lw / z; _cy = ay - (fy * _sh - _wh / 2.0) / z;
     [self applyViewKeepingCenter];
 }
@@ -309,6 +350,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 - (void)panBy:(double)dx :(double)dy {               /* view points */
     if (!_viewOn) return;
+    _viewMoved = YES;
     double k = [self layoutW] / _zoom / [self viewRect].size.width;
     _cx += dx * k; _cy += dy * k;
     [self clampCenter];
@@ -326,7 +368,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     double lw = [self layoutW], col = (lw - _sw) / 2 / lw;
     if (fy > (double)_wh / _sh && fx >= col && fx < 1 - col) return;   /* over the panel */
     double dx = p.x < NSMinX(r) + m ? -v : p.x > NSMaxX(r) - m ? v : 0;
-    double dy = p.y < NSMinY(r) + m ? v : 0;        /* (not at the top: in full screen the pointer goes there for the menu bar) */
+    double dy = p.y > NSMaxY(r) - m ? -v : p.y < NSMinY(r) + m ? v : 0;   /* (corners: both, diagonally) */
     if (dx || dy) [self panBy:dx :dy];
 }
 - (void)magnifyWithEvent:(NSEvent *)e {
@@ -419,13 +461,25 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 @end
 
+/* A window that can be key without a title bar (the borderless full screen). */
+@interface GameWindow : NSWindow
+@end
+@implementation GameWindow
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return YES; }
+@end
+
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
 
 @implementation AppDelegate {
     NSWindow *_window;
     GameView *_view;
+    NSView *_container;                  /* black, holds the view (full screen: below the notch) */
+    BOOL _full; NSRect _windowedFrame;   /* the borderless full screen, and the window's frame before it */
     NSTimer *_timer;
+    id _link;                            /* CADisplayLink (macOS 14+) */
+    double _lastDisplayTick;
     NSString *_game, *_saves, *_image, *_intro;
     FILE *_log;
 }
@@ -469,6 +523,7 @@ static void *game_thread(void *arg) {
             QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
             QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
             QOL_ENV("TP_FREE_BUS", [u integerForKey:@"FreeBus"]);
+            if (![u boolForKey:@"SteadyPacing"] && !getenv("TP_PACING")) setenv("TP_PACING", "dosbox", 1);
             #undef QOL_ENV
             NSDictionary *tunes = [u dictionaryForKey:@"RideTunes"];
             if (tunes.count && !getenv("TP_RIDE_TUNES")) {
@@ -478,6 +533,7 @@ static void *game_thread(void *arg) {
             }
         }
         tp_qol_init();                                   /* quality-of-life hooks (qol.c), MAIN.EXE's code */
+        if (tp_view_debug_fps) tp_view_count_game_frames(1);
         int r;
         do r = tp_host_run(4000, 0, 50); while (r == 0);
         game_result = r;
@@ -510,7 +566,7 @@ static void *game_thread(void *arg) {
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0}];
+                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"SteadyPacing": @YES}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
@@ -530,7 +586,7 @@ static void *game_thread(void *arg) {
     fprintf(stderr, "--- Theme Park started %s\n", NSDate.date.description.UTF8String);
 
     NSRect frame = NSMakeRect(0, 0, 960, 720);
-    _window = [[NSWindow alloc] initWithContentRect:frame
+    _window = [[GameWindow alloc] initWithContentRect:frame
         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
     _window.title = @"Theme Park";
@@ -540,13 +596,18 @@ static void *game_thread(void *arg) {
     _window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
     _window.backgroundColor = NSColor.blackColor;
     _view = [[GameView alloc] initWithFrame:frame];
-    _window.contentView = _view;
+    _container = [[NSView alloc] initWithFrame:frame];
+    _container.wantsLayer = YES; _container.layer.backgroundColor = NSColor.blackColor.CGColor;
+    _view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [_container addSubview:_view];
+    _window.contentView = _container;
     [_window center];
     [_window setFrameAutosaveName:@"ThemeParkWindow"];
     if (!selfTest) [_window makeKeyAndOrderFront:nil];     /* self-tests stay in the background */
     [_window makeFirstResponder:_view];
     _window.acceptsMouseMovedEvents = YES;
-    if ([NSUserDefaults.standardUserDefaults boolForKey:@"StartFullScreen"]) [_window toggleFullScreen:nil];
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"StartFullScreen"]) [self toggleFull:nil];
+    tp_view_debug_fps = [u boolForKey:@"DebugFPS"]; tp_view_debug_grid = [u boolForKey:@"DebugGrid"];
 
     {
         if ([u boolForKey:@"Sound"] && tp_audio_start() == 0)
@@ -557,7 +618,13 @@ static void *game_thread(void *arg) {
     pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
     pthread_attr_setstacksize(&attr, 8 << 20);
     pthread_create(&t, &attr, game_thread, (__bridge void *)self);
-    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60 target:self selector:@selector(tick) userInfo:nil repeats:YES];
+    /* The display's refresh drives presentation (and tells the game thread its timing, for steady pacing). */
+    if (@available(macOS 14.0, *)) {
+        _link = [_view displayLinkWithTarget:self selector:@selector(displayTick:)];
+        [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    }
+    /* (and a timer for when the display link does not fire: the window hidden, offscreen, or macOS 13) */
+    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60 target:self selector:@selector(timerTick) userInfo:nil repeats:YES];
     [NSRunLoop.mainRunLoop addTimer:_timer forMode:NSRunLoopCommonModes];
     if (!selfTest) [NSApp activateIgnoringOtherApps:YES];
 }
@@ -729,19 +796,29 @@ static uint32_t key_of_char(unichar c) {
             uint8_t *m = tp_host_memory(); uint32_t a = (uint32_t)strtoul([p[1] UTF8String], NULL, 16); int len = p.count > 2 ? [p[2] intValue] : 4;
             fprintf(stderr, "peek %06x:", a); for (int i = 0; i < len && i < 64; i++) fprintf(stderr, " %02x", m[a + i]); fprintf(stderr, "\n");
         }
+        else if ([op isEqual:@"full"]) [self toggleFull:nil];
+        else if ([op isEqual:@"fps"]) [self toggleFPS:nil];
+        else if ([op isEqual:@"grid"]) [self toggleGrid:nil];
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
         else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
     }
 }
 
+- (void)displayTick:(id)link API_AVAILABLE(macos(14.0)) {
+    CADisplayLink *l = link; double period = l.targetTimestamp - l.timestamp;
+    if (period > 0.002 && period < 0.05) tp_view_vsync_now(period, CACurrentMediaTime() - l.timestamp);   /* (the refresh's own time, not the callback's) */
+    _lastDisplayTick = CACurrentMediaTime();
+    [self tick];
+}
+- (void)timerTick { if (CACurrentMediaTime() - _lastDisplayTick > 0.05) [self tick]; }
 - (void)tick {
     [self runControl];
     [self runTestScript];
     [self pollController];
     [_view present];
     if (game_done) {
-        [_timer invalidate];
+        [_timer invalidate]; if (@available(macOS 14.0, *)) [(CADisplayLink *)_link invalidate];
         _timer = nil;
         fprintf(stderr, "game ended: %s\n", tp_host_status());
         fflush(stderr);
@@ -775,7 +852,48 @@ static uint32_t key_of_char(unichar c) {
     for (int i = 0; i < 100 && !game_done; i++) usleep(10000);
     fflush(stderr);
 }
-- (void)toggleFull:(id)sender { [_window toggleFullScreen:nil]; }
+/* Full screen: the window borderless over the whole display, the Dock and menu bar hidden (not macOS's full-
+ * screen space, whose menu bar and title bar slide down when the pointer reaches the top: the game opens its
+ * own top bar there). The picture stays below a camera notch. ⌃⌘F switches back. */
+- (void)toggleFull:(id)sender {
+    NSScreen *sc = _window.screen ?: NSScreen.mainScreen;
+    if (!_full) {
+        _windowedFrame = _window.frame;
+        [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
+        _window.styleMask = NSWindowStyleMaskBorderless;
+        _window.contentAspectRatio = NSZeroSize; _window.resizeIncrements = NSMakeSize(1, 1);
+        [_window setFrame:sc.frame display:YES];
+        CGFloat top = 0;
+        if (@available(macOS 12.0, *)) top = sc.safeAreaInsets.top;
+        _view.frame = NSMakeRect(0, 0, _container.bounds.size.width, _container.bounds.size.height - top);
+        _full = YES;
+    } else {
+        [NSApp setPresentationOptions:NSApplicationPresentationDefault];
+        _window.styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+        _window.title = @"Theme Park";
+        if (![NSUserDefaults.standardUserDefaults boolForKey:@"Widescreen"]) _window.contentAspectRatio = NSMakeSize(4, 3);
+        [_window setFrame:_windowedFrame display:YES];
+        _view.frame = _container.bounds;
+        _full = NO;
+    }
+    [_window makeKeyAndOrderFront:nil]; [_window makeFirstResponder:_view];
+    fprintf(stderr, "full screen %d (%.0fx%.0f)\n", _full, _view.frame.size.width, _view.frame.size.height);
+}
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+    if (item.action == @selector(toggleFull:)) item.title = _full ? @"Exit Full Screen" : @"Enter Full Screen";
+    if (item.action == @selector(toggleFPS:)) item.state = tp_view_debug_fps ? NSControlStateValueOn : NSControlStateValueOff;
+    if (item.action == @selector(toggleGrid:)) item.state = tp_view_debug_grid ? NSControlStateValueOn : NSControlStateValueOff;
+    return YES;
+}
+/* Debug overlays (View menu, remembered): frame rates, and the grid of the sections the park view draws. */
+- (void)toggleFPS:(id)sender {
+    tp_view_debug_fps = !tp_view_debug_fps; tp_view_count_game_frames(tp_view_debug_fps);
+    [NSUserDefaults.standardUserDefaults setBool:tp_view_debug_fps forKey:@"DebugFPS"];
+}
+- (void)toggleGrid:(id)sender {
+    tp_view_debug_grid = !tp_view_debug_grid;
+    [NSUserDefaults.standardUserDefaults setBool:tp_view_debug_grid forKey:@"DebugGrid"];
+}
 /* File > Save Park Picture: the whole park as one PNG (the view renders it on the game's thread). */
 - (void)savePicture:(id)sender {
     tp_view_request_poster();
@@ -794,6 +912,7 @@ static uint32_t key_of_char(unichar c) {
     }
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    double ti0 = CACurrentMediaTime();
     CGImageRef img = CGBitmapContextCreateImage(ctx);
     CGImageDestinationRef d = CGImageDestinationCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL);
     if (d) { CGImageDestinationAddImage(d, img, NULL); CGImageDestinationFinalize(d); CFRelease(d); }
@@ -820,12 +939,17 @@ int main(int argc, const char **argv) {
         fileItem.submenu = fileMenu;
         NSMenuItem *viewItem = [NSMenuItem new]; [bar addItem:viewItem];
         NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
-        NSMenuItem *fs = [viewMenu addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"];
+        NSMenuItem *fs = [viewMenu addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFull:) keyEquivalent:@"f"];
         fs.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
         [viewMenu addItem:NSMenuItem.separatorItem];
         [viewMenu addItemWithTitle:@"Zoom In" action:@selector(zoomIn:) keyEquivalent:@"="];
         [viewMenu addItemWithTitle:@"Zoom Out" action:@selector(zoomOut:) keyEquivalent:@"-"];
         [viewMenu addItemWithTitle:@"Actual Size" action:@selector(zoomActual:) keyEquivalent:@"0"];
+        [viewMenu addItem:NSMenuItem.separatorItem];
+        NSMenuItem *dbg = [viewMenu addItemWithTitle:@"Show Frame Rate" action:@selector(toggleFPS:) keyEquivalent:@"f"];
+        dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+        dbg = [viewMenu addItemWithTitle:@"Show Section Grid" action:@selector(toggleGrid:) keyEquivalent:@"g"];
+        dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
         viewItem.submenu = viewMenu;
         a.mainMenu = bar;
         AppDelegate *d = [AppDelegate new];

@@ -40,7 +40,7 @@ mkdir -p "$APP.new/Contents/MacOS" "$APP.new/Contents/Resources"
 INC="$REF/recomp/runtime"
 clang -arch arm64 -O2 -fobjc-arc -Wall -Wno-unused-function -I "$INC" -I runtime \
   app/main.m app/audio.m app/launcher.m runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c work/app-release/game.a work/app-release-intro/game.a \
-  -framework Cocoa -framework QuartzCore -framework AVFoundation -framework AudioToolbox -framework UniformTypeIdentifiers -framework ImageIO -framework GameController -lz \
+  -framework Cocoa -framework QuartzCore -framework AVFoundation -framework AudioToolbox -framework UniformTypeIdentifiers -framework ImageIO -framework GameController -framework IOSurface -lz \
   -o "$APP.new/Contents/MacOS/ThemePark"
 "$PYTHON" tools/export_image.py "$EXE" "$APP.new/Contents/Resources/MAIN.TPIMG" >/dev/null
 "$PYTHON" tools/export_image.py "$INTRO" "$APP.new/Contents/Resources/INTRO.TPIMG" >/dev/null

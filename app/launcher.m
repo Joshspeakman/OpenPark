@@ -156,7 +156,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[4], _tweaks[4], _free[2];
+    Setting _display[7], _sound[4], _tweaks[5], _free[2];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -212,6 +212,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                              @[@"Running rides on screen play their tunes", @"No ride tunes (the game's fanfares still play)"]);
         _tweaks[2] = setting(@"Ride Tunes", @"RideTunes", @[@""], @[@"The Game's"], @[@"Each ride plays its own tune; → chooses per ride"]);
         _tweaks[3] = setting(@"Park Music", @"ParkTune", tunes, tuneL, tuneN);
+        _tweaks[4] = setting(@"Frame Pacing", @"SteadyPacing", @[@YES, @NO], @[@"Steady", @"Like DOSBox"],
+                             @[@"Every frame the same length, in step with the display", @"The game's speed follows how busy the screen is, as in 1994"]);
         _free[0] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
                            @[@"The game's limit for a park", @"A hundred more than the game allows", @"Close to all the game's people can be (rides and staff share them)"]);
         _free[1] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
@@ -233,7 +235,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 4 : self.open == 5 ? 2 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 5 : self.open == 5 ? 2 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];

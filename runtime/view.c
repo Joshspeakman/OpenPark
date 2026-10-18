@@ -40,6 +40,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <mach/mach_time.h>
+#include <dispatch/dispatch.h>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -147,6 +151,8 @@ static Geo geo(int s) {
  * below; the game's scrolling is undone while it is there (tp_view_poll, FRAME_RENDER). */
 #define TOPBAR_H 8                  /* its height (rows, with its dark edge) */
 #define TOPBAR_OPEN 2               /* the pointer this near the layout's top (in the screen column) opens it */
+#define MENU_OPEN   0x1b14d2u       /* 4 bytes, one per top menu: 0xff closed (a drop-down open otherwise) */
+static int menu_open(void);
 static volatile int topbar;                       /* the pointer is on the top bar */
 static int16_t topbar_cx, topbar_cy;              /* the camera to hold meanwhile */
 static int hud_rect(int k, int *r) {               /* the furniture's rectangles in this mode */
@@ -158,6 +164,7 @@ static int hud_rect(int k, int *r) {               /* the furniture's rectangles
 static uint8_t *M;
 static int16_t r16(uint32_t a) { int16_t v; memcpy(&v, M + a, 2); return v; }
 static uint32_t r32(uint32_t a) { uint32_t v; memcpy(&v, M + a, 4); return v; }
+static int menu_open(void) { for (int k = 0; k < 4; k++) if (M[MENU_OPEN + k] != 0xff) return 1; return 0; }
 static void w16(uint32_t a, int16_t v) { memcpy(M + a, &v, 2); }
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 /* The game's screen mode as a scale: 1 (320x200), 2 (640x480) or 0 (neither, not drawable here). */
@@ -193,13 +200,91 @@ static int pub_cx, pub_cy, pub_s;                  /* the published picture's sc
 
 /* ---- emulation thread ---- */
 static uint8_t canvas[MAX_CANVAS], world_only[MAX_SCREEN];
-static uint8_t pre_cursor[MAX_SCREEN]; static int pre_ok, pre_hx, pre_hy;   /* back buffer before the cursor */
+static int pre_ok;
 static uint8_t pre_extras[MAX_SCREEN]; static int have_pre_extras;
 static uint8_t pre_tool[MAX_SCREEN];             /* the back buffer as the tool preview starts */
 static uint8_t pre_weather[MAX_SCREEN], weather[MAX_SCREEN], weather_rep[MAX_SCREEN]; static int weather_n;   /* what the weather drew (0: nothing) */
-static uint8_t pub_weather[MAX_SCREEN], pub_weather_rep[MAX_SCREEN]; static int pub_weather_n;
-static volatile int tool_shown;                   /* the last frame had a tool preview */
-static int16_t fr_cx, fr_cy;                     /* the camera as the frame began */
+static uint8_t pub_weather[MAX_SCREEN], pub_weather_rep[MAX_SCREEN]; static int pub_weather_n; static int weather_resentinel;
+static volatile int tool_shown; static int tool_resentinel;                   /* the last frame had a tool preview */
+static int16_t fr_cx, fr_cy;
+/* Debug overlays (View menu): frame rates and the sections (passes) grid, drawn into the composed picture. */
+int tp_view_debug_fps, tp_view_debug_grid;
+static int fps_game_hook;                               /* (the game's frames counted with the view off too) */
+/* Steady pacing (the default; Launcher: Pacing): park frames are released at a fixed rate, 60 a second at the
+ * game's Original speed and in proportion for the faster ones, on the display's refresh when the app reports
+ * it: every frame lasts the same, and the game, which advances once per frame, runs at an
+ * even speed whatever is drawn. Elsewhere (menus without the park) the instruction governor paces as before. */
+static int pacing;
+static double pub_frame_t; static long pub_serial, shown_serial;   /* the published frame's start (paced), and which the app has shown */
+static volatile double vs_t, vs_period;                 /* the display's last refresh and its period */
+extern volatile double tp_frame_paced_at;
+double tp_host_cycles(void);
+void tp_view_vsync(double t, double period) { vs_t = t; vs_period = period; }
+void tp_view_vsync_now(double period, double ago) { vs_t = now() - ago; vs_period = period; }   /* (the app's display refresh, `ago` seconds ago) */
+/* Steady pacing for the app: a new frame is shown 0.7 of a game frame after it began, so every frame stays on the
+ * display for the same number of refreshes however long its drawing took. 1: compose now; 0: keep showing
+ * the last picture. Without steady pacing, every refresh. */
+int tp_view_frame_due(void) {
+    pthread_mutex_lock(&lock);
+    int due = 1;
+    if (pacing && pub_serial) {
+        double period = 1.0 / (60.0 * tp_host_cycles() / 10000.0);
+        double thr = pub_frame_t + period * 0.7;          /* (after any frame's drawing, before the next frame's) */
+        double vp = vs_period, vt = vs_t;
+        if (vp > 0.002 && vp < 0.05 && now() - vt < 1) {  /* its refresh: due from half a refresh before it, so callback jitter cannot move it */
+            double r = vt + ceil((thr - vt) / vp) * vp; thr = r - vp * 0.5;
+        }
+        due = pub_serial != shown_serial && now() >= thr;
+        if (due) { shown_serial = pub_serial;
+            if (getenv("TP_PACE_DEBUG")) { static double last, lo = 1, hi, l2; double t = now(), d = t - last; last = t;
+                if (d < 0.5) { if (d < lo) lo = d; if (d > hi) hi = d; }
+                if (t - l2 > 1) { fprintf(stderr, "shown intervals: %.2f .. %.2f ms\n", lo * 1e3, hi * 1e3); lo = 1; hi = 0; l2 = t; } } }
+    }
+    pthread_mutex_unlock(&lock);
+    return due;
+}
+void tp_view_set_pacing(int on) { pacing = on; if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); } }
+void tp_view_pacing_init(void) { const char *e = getenv("TP_PACING"); tp_view_set_pacing(!(e && !strcmp(e, "dosbox"))); }   /* (qol.c, at the game's start) */
+static void pace_frame(void) {
+    static double target;
+    double fps = 60.0 * tp_host_cycles() / 10000.0; if (fps < 10) fps = 10;
+    double period = 1.0 / fps, t = now();
+    static double ideal;                                  /* the exact schedule; target: it on the refresh grid */
+    if (!ideal || t - ideal > 4 * period) ideal = t;     /* (starting, or after a stall: no burst to catch up) */
+    ideal += period; target = ideal;
+    /* (not snapped to the display's refreshes per frame: the refresh times the app reports wobble, and a frame
+     * schedule of exact periods already falls on the same refresh phase every frame; the app shows each frame
+     * on a refresh, tp_view_frame_due) */
+    double wait = target - now();
+    if (getenv("TP_PACE_DEBUG")) { static double l3, late; if (-wait > late) late = -wait; if (t - l3 > 1) { fprintf(stderr, "pace late max %.2f ms\n", late * 1e3); late = 0; l3 = t; } }
+    if (getenv("TP_PACE_DEBUG")) { static double l; static int n, sl; n++; if (wait > 0) sl++; if (t - l > 1) { fprintf(stderr, "pace: %d frames, %d waited, fps %.0f, last wait %.2f ms\n", n, sl, fps, wait * 1e3); n = sl = 0; l = t; } }
+    static mach_timebase_info_data_t tb; if (!tb.denom) mach_timebase_info(&tb);
+    { static int rt; if (!rt) {                           /* the game thread as a real-time thread: timers not coalesced, woken on time */
+        rt = 1; thread_time_constraint_policy_data_t pol;
+        pol.period = (uint32_t)(period * 1e9 * tb.denom / tb.numer);
+        pol.computation = (uint32_t)(0.004 * 1e9 * tb.denom / tb.numer);
+        pol.constraint = (uint32_t)(period * 0.9 * 1e9 * tb.denom / tb.numer);
+        pol.preemptible = 1;
+        kern_return_t kr = thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&pol, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+        fprintf(stderr, "pace: real-time thread policy %s\n", kr == KERN_SUCCESS ? "set" : "refused"); } }
+    if (wait > 0.0008) {                                  /* mach_wait_until: woken on time, unlike nanosleep under load */
+        uint64_t ticks = (uint64_t)((wait - 0.0005) * 1e9 * tb.denom / tb.numer);
+        mach_wait_until(mach_absolute_time() + ticks);
+    }
+    while (now() < target) ;                              /* (the last half millisecond, exactly) */
+    tp_frame_paced_at = now();
+    if (getenv("TP_PACE_TRACE")) { static int n; static double lt, la; if (n++ < 400 && n > 300) fprintf(stderr, "pt target+%.2f actual+%.2f wait %.2f over %.3f\n", (target - lt) * 1e3, (tp_frame_paced_at - la) * 1e3, wait * 1e3, (tp_frame_paced_at - target) * 1e3); lt = target; la = tp_frame_paced_at; }
+    if (getenv("TP_PACE_DEBUG")) { static double last, lo = 1, hi, l2; double d = tp_frame_paced_at - last; last = tp_frame_paced_at;
+        if (d < 0.5) { if (d < lo) lo = d; if (d > hi) hi = d; }
+        if (tp_frame_paced_at - l2 > 1) { fprintf(stderr, "pace intervals: %.2f .. %.2f ms (refresh %.2f ms)\n", lo * 1e3, hi * 1e3, vs_period * 1e3); lo = 1; hi = 0; l2 = tp_frame_paced_at; } }
+}
+static int st_game, st_pub, st_comp; static long st_game_total; static double st_pass, st_t0;      /* counts this second */
+static double sh_game, sh_pub, sh_comp, sh_pass;                        /* last second's */
+static void stats_tick(void) {
+    double t = now(); if (!st_t0) st_t0 = t;
+    if (t - st_t0 >= 1) { double k = 1 / (t - st_t0); sh_game = st_game * k; sh_pub = st_pub * k; sh_comp = st_comp * k; sh_pass = st_pass * 1e3 * k;
+        st_game = st_pub = st_comp = 0; st_pass = 0; st_t0 = t; }
+}                     /* the camera as the frame began */
 static long skipped_moved;                        /* frames left out: the camera moved while drawn */
 static int active, have_world, in_frame, coherent;
 static int frame_park, park_gap; static volatile int pub_park;   /* this frame drew the park; presents since one did; the game shows its park */   /* coherent: this frame had passes */
@@ -618,7 +703,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         for (int k = 0; k < ngrid; k++) { Pass *p = &grid[k]; if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue; vis++; }
         done = rr_done; fr++; vis_total += vis; done_total += done; if (done < vis) partial++;
         if (now() - l > 1) { l = now(); fprintf(stderr, "view: %ld frames, %ld partial (visible passes %.1f, refreshed %.1f a frame)\n", fr, partial, (double)vis_total / fr, (double)done_total / fr); fr = partial = vis_total = done_total = 0; } }
-    tp_insns = insns; tp_rep = reps; edge_fresh = 1;
+    tp_insns = insns; tp_rep = reps; edge_fresh = 1; st_pass += now() - t0;
     if (state_saved) state_restore();                         /* (the dirty flag is among the globals) */
     lazy_save = 0;
     memcpy(M + cache, cache_keep, cache_n);
@@ -735,6 +820,24 @@ static void seam_check(void) {
     frames++; px += worst; if (worst > 0) bad++;
     if (frames % 120 == 0) fprintf(stderr, "view seams: %ld frames, %ld with a difference, %.1f px a frame\n", frames, bad, (double)px / frames);
 }
+/* Interface, exactly: once the park is captured (AFTER_RENDER), its pixels in the back buffer are set to a
+ * colour the interface never uses (SENTINEL); what the game draws over them is interface, whatever its
+ * colours (a portrait's edges, text over a road). At PRESENT the park is put back for the screen. Park
+ * drawn later (tool previews, weather) is drawn over the real park and then marked again. */
+#define SENTINEL 0xcc      /* unused by the interface, and its row of the blend table ([0x1ba2f8], dst * 256 + src) gives
+                            * only colours the interface never uses either: a translucent pixel drawn over it is known */
+static int sentinel_on;
+static void sentinel_apply(void) {
+    uint8_t *bb = M + r32(DISP_BUF);
+    for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] == world_only[i]) bb[i] = SENTINEL;
+    sentinel_on = 1;
+}
+static void sentinel_lift(void) {                       /* the park back where nothing was drawn over it */
+    if (!sentinel_on) return;
+    uint8_t *bb = M + r32(DISP_BUF);
+    for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] == SENTINEL) bb[i] = world_only[i];
+    sentinel_on = 0;
+}
 static void hooks(int on) {
     tp_hook_pcs[0] = FRAME_RENDER;
     tp_hook_pcs[1] = on ? AFTER_RENDER : 0xffffffffu;
@@ -772,9 +875,17 @@ void tp_view_hook(void) {
         if (active) { active = 0; hooks(0); }
         return;
     }
+    if (getenv("TP_VIEW_BARPROBE") && active) {          /* development: where the game draws its top bar */
+        uint8_t *bb = M + r32(DISP_BUF); static int n;
+        if (tp_hook_which == 0) memset(bb, 0xee, (size_t)SW * 6);
+        else if (tp_hook_which == 4 || tp_hook_which == 1 || tp_hook_which == 2) { int k = 0; for (int i = 0; i < SW * 6; i++) k += bb[i] == 0xee;
+            if (n++ < 60) fprintf(stderr, "barprobe hook %d: %d of %d sentinel left, row0 px %02x\n", tp_hook_which, k, SW * 6, bb[100]); }
+    }
     switch (tp_hook_which) {
     case 0:                                               /* FRAME_RENDER */
-        if (getenv("TP_VIEW_DEBUG")) { static double l; static int c; c++; if (now() - l > 1) { fprintf(stderr, "view: %d game frames/s\n", c); c = 0; l = now(); } }
+        { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
+          if (fresh) { st_game++; st_game_total++; if (pacing) pace_frame(); } }
+        if (getenv("TP_VIEW_DEBUG")) { static double l; static long c0; if (now() - l > 1) { fprintf(stderr, "view: %ld game frames/s\n", st_game_total - c0); c0 = st_game_total; l = now(); } }
         hires_step(sc);
         { static int tc = -1; if (tc < 0) tc = getenv("TP_VIEW_TRUST") ? atoi(getenv("TP_VIEW_TRUST")) : 0;
           static int nf; if (tc && active && ++nf == tc) trust_check(); }
@@ -813,12 +924,12 @@ void tp_view_hook(void) {
         if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); coherent = 1; }
         else if (!w) {                                    /* the view is off: no hooks at all until it is wanted */
             active = 0; hooks(0);
-            if (!hires_wanted && !poster_wanted) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
+            if (!hires_wanted && !poster_wanted && !fps_game_hook && !pacing) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
         }
         else if (active) {                                /* passes at most 60 times a second (the game draws faster) */
             static double last; double t = now();
             static int old = -1; if (old < 0) old = getenv("TP_VIEW_OLD") != NULL;
-            if (t - last >= (old ? 1.0 / 30 : 1.0 / 60)) { last = t; render_visible(vx, vy, vw, vh, 0); coherent = 1; }
+            if (pacing || t - last >= (old ? 1.0 / 30 : 1.0 / 60)) { last = t; render_visible(vx, vy, vw, vh, 0); coherent = 1; }   /* (paced: every frame) */
         }
         in_frame = active; frame_park = active;
         break;
@@ -851,6 +962,7 @@ void tp_view_hook(void) {
             blit_real(real_cx, real_cy);
             memcpy(bb, keep, n);                          /* the game's frame goes on as it drew it */
             have_world = 1; have_pre_extras = 0;
+            if (!getenv("TP_VIEW_NOSENTINEL")) sentinel_apply();
             break;
         }
         { static int dumped; if (getenv("TP_VIEW_DUMP") && ++dumped == 30) {   /* development: the back buffer at capture */
@@ -863,6 +975,7 @@ void tp_view_hook(void) {
         if (edge_check()) edge_compare(real_cx, real_cy);
         blit_real(real_cx, real_cy);
         have_world = 1;
+        if (!getenv("TP_VIEW_NOSENTINEL")) sentinel_apply();
         break;
     case 4:                                               /* BEFORE_EXTRAS */
         if (active && in_frame) { memcpy(pre_extras, M + r32(DISP_BUF), (size_t)SW * WORLD_H); have_pre_extras = 1; }
@@ -871,6 +984,7 @@ void tp_view_hook(void) {
         if (tp_hook_pcs[5] != TOOL_PREVIEW) goto probe;
         if (active && have_world) {
             extern uint32_t tp_get(unsigned);
+            tool_resentinel = sentinel_on; sentinel_lift();   /* (it may blend with the park under it) */
             memcpy(pre_tool, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
             tp_hook_pcs[6] = r32(tp_get(4)); tp_hooks_changed();   /* its return address */
         }
@@ -890,12 +1004,14 @@ void tp_view_hook(void) {
                 int X = bx + x, Y = by + y; if (X >= 0 && Y >= 0 && X < CW && Y < CH) canvas[(size_t)Y * CW + X] = bb[i];
             }
             tool_shown = n > 0;
+            if (tool_resentinel) sentinel_apply();
         }
         break;
     case 8: case 10:                                      /* WEATHER, WEATHER2: entered */
         if (tp_hook_pcs[tp_hook_which] != (tp_hook_which == 8 ? WEATHER : WEATHER2)) break;
         if (active) {
             extern uint32_t tp_get(unsigned);
+            weather_resentinel = sentinel_on; sentinel_lift();
             memcpy(pre_weather, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
             tp_hook_pcs[tp_hook_which + 1] = r32(tp_get(4)); tp_hooks_changed();
         }
@@ -910,6 +1026,7 @@ void tp_view_hook(void) {
                     weather[i] = bb[i]; weather_rep[i] = !rain_only || (bb[i] & 0xf8) == RAIN_COLOUR; n++; world_only[i] = bb[i];
                 }
             /* (into world_only too: the weather is not interface; the compositor lays its own layer over the view) */
+            if (weather_resentinel) sentinel_apply();
             weather_n = n;
             if (getenv("TP_VIEW_DEBUG")) { static int k; if (k++ < 6) { int h[256] = {0}, tot = 0;
                 for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] != pre_weather[i]) { h[bb[i]]++; tot++; }
@@ -930,7 +1047,7 @@ void tp_view_hook(void) {
         }
         break;
     case 2:                                               /* PRESENT: interface overlay, publish */
-        if (!active) break;
+        if (!active) { sentinel_lift(); break; }
         /* Frames presented without the park (a full-screen menu or window): the view is not live once that has
          * lasted 150 ms (not 0.5 s), so the game's screen shows and clicks go straight to it. */
         /* (by time: the game also presents a few frames without the park in play, after a camera move) */
@@ -956,10 +1073,37 @@ void tp_view_hook(void) {
         }
         /* Publish only frames whose park picture is coherent: the passes and the real frame drawn
          * from the same game moment (have_world, set when this frame had passes). */
-        if (!have_world) { pthread_mutex_unlock(&lock); break; }
+        if (!have_world) { sentinel_lift(); pthread_mutex_unlock(&lock); break; }
         have_world = 0;
-        for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
+        if (sentinel_on) {
+            /* translucent interface over the marker: redo its blend over the park (a source giving that result) */
+            const uint8_t *gt = M + r32(0x1ba2f8); int16_t src_of[256]; for (int v = 0; v < 256; v++) src_of[v] = -1;
+            if (r32(0x1ba2f8)) for (int s2 = 255; s2 >= 0; s2--) src_of[gt[SENTINEL * 256 + s2]] = (int16_t)s2;
+            for (int i = 0; i < SW * WORLD_H; i++) {
+                uint8_t v = bb[i];
+                if (v == SENTINEL) pub_overlay[i] = 0xffff;
+                else if (src_of[v] >= 0 && r32(0x1ba2f8)) pub_overlay[i] = gt[world_only[i] * 256 + src_of[v]];
+                else pub_overlay[i] = v;
+            }
+            sentinel_lift();
+            { uint8_t *wb = M + r32(DISP_BUF); for (int i = 0; i < SW * WORLD_H; i++) if (src_of[wb[i]] >= 0 && r32(0x1ba2f8)) wb[i] = (uint8_t)pub_overlay[i]; }   /* (the screen too) */
+        }
+        else for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
+        if (getenv("TP_VIEW_HIST")) { static long h[256]; static int fr; for (int i = 0; i < SW * SH; i++) if (i >= SW * WORLD_H || pub_overlay[i] != 0xffff) h[bb[i]]++;
+            if (++fr % 300 == 0) { fprintf(stderr, "view hist: unused:"); for (int c = 0; c < 256; c++) if (!h[c]) fprintf(stderr, " %02x", c); fprintf(stderr, "\n"); } }
         if (topbar) for (int i = 0; i < SW * TOPBAR_H; i++) pub_overlay[i] = bb[i];   /* the top bar is drawn with the park: all interface */
+        if (menu_open()) {                                /* the open drop-down's rectangle (0x1b571a: x0, y0, x1, y1, mouse units) */
+            int k = G.s == 1 ? 2 : 1, x0 = r16(0x1b571a) / k, y0 = r16(0x1b571c) / k, x1 = r16(0x1b571e) / k + 1, y1 = r16(0x1b5720) / k + 1;
+            if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > SW) x1 = SW; if (y1 > WORLD_H) y1 = WORLD_H;
+            for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) pub_overlay[y * SW + x] = bb[y * SW + x];
+        }
+        if (menu_open()) {                                /* (and its submenus): what differs from the park as the passes drew it */
+            int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
+            for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) {
+                int X = bx + x, Y = by + y, i = y * SW + x;
+                if (pub_overlay[i] == 0xffff && X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X]) pub_overlay[i] = bb[i];
+            }
+        }
         {   /* The date is usually drawn by the extras (so world_only lacks it: interface), but at times with the
              * park: then nothing differs there. Only in that case, the date's rectangle is what differs from
              * the passes' park (not the whole time: the game's frame lacks rides anchored above its top). */
@@ -973,26 +1117,7 @@ void tp_view_hook(void) {
                 }
             }
         }
-        /* Interface pixels that happen to be the colour of the park under them do not differ from it:
-         * holes (text over a road, a speech bubble's white over a white flower) that would show the
-         * zoomed park. A pixel with interface within GAP pixels on both sides (across or down) is
-         * interface too. */
-        { enum { GAP = 4 }; static uint8_t near_l[MAX_SCREEN], near_u[MAX_SCREEN], hole[MAX_SCREEN];
-          for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) {      /* distance to interface left, up */
-              int i = y * SW + x, ui = pub_overlay[i] != 0xffff;
-              near_l[i] = ui ? 0 : x && near_l[i - 1] < GAP + 1 ? near_l[i - 1] + 1 : GAP + 1;
-              near_u[i] = ui ? 0 : y && near_u[i - SW] < GAP + 1 ? near_u[i - SW] + 1 : GAP + 1;
-          }
-          for (int y = WORLD_H - 1; y >= 0; y--) for (int x = SW - 1; x >= 0; x--) {   /* ... and right, down */
-              int i = y * SW + x; hole[i] = 0;
-              if (pub_overlay[i] != 0xffff) continue;
-              int r = GAP + 1, d = GAP + 1;
-              for (int k = 1; k <= GAP && x + k < SW; k++) if (pub_overlay[i + k] != 0xffff) { r = k; break; }
-              if (near_l[i] <= GAP && r <= GAP) { hole[i] = 1; continue; }
-              for (int k = 1; k <= GAP && y + k < WORLD_H; k++) if (pub_overlay[i + k * SW] != 0xffff) { d = k; break; }
-              if (near_u[i] <= GAP && d <= GAP) hole[i] = 1;
-          }
-          for (int i = 0; i < SW * WORLD_H; i++) if (hole[i]) pub_overlay[i] = bb[i]; }
+        /* (no gap filling: with the sentinel, interface pixels equal to the park under them are found as well) */
         if (getenv("TP_VIEW_OVERLAY")) { static int k, dumped; k++;
             int n = 0; for (int i = 16 * SW; i < SW * (WORLD_H - 50); i++) n += pub_overlay[i] != 0xffff;   /* (below the date, above the advisor) */
             if (n > atoi(getenv("TP_VIEW_OVERLAY_MIN") ?: "800") && dumped < 6 && k % 7 == 0) {       /* development: frames with much "interface" over the park */
@@ -1009,7 +1134,8 @@ void tp_view_hook(void) {
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
-        pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1;
+        pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1; st_pub++;
+        pub_frame_t = pacing ? tp_frame_paced_at : pub_time; pub_serial++;
         if (getenv("TP_VIEW_VERIFY")) verify_canvas();
         if (getenv("TP_VIEW_SEAMS")) seam_check();    /* development: the picture against fresh native passes */
         pthread_mutex_unlock(&lock);
@@ -1040,10 +1166,11 @@ void tp_view_poll(void) {
         double lx = q[i].fx * lw, ly = q[i].fy * SH;      /* layout point */
         double cxs = lx - col;                            /* ... in the screen column */
         int incol = cxs >= 0 && cxs < SW, ui = incol && ly >= WORLD_H;   /* the panel, or the game's interface: through */
-        if (on && incol && (ly < TOPBAR_OPEN || (topbar && ly < TOPBAR_H))) {   /* the top bar: straight to the game, camera held */
+        int menus = menu_open();
+        if (on && incol && (ly < TOPBAR_OPEN || (topbar && ly < TOPBAR_H) || (menus && ly < WORLD_H))) {   /* the top bar and its menus: straight to the game, camera held */
             if (!topbar) { topbar = 1; topbar_cx = r16(CAM_X); topbar_cy = r16(CAM_Y); }
             ui = 1;
-        } else if (topbar && !(q[i].buttons & 3)) topbar = 0;
+        } else if (topbar && !menus && !(q[i].buttons & 3)) topbar = 0;
         if (on && incol && !ui) {
             int ox = (int)cxs, oy = (int)ly;
             pthread_mutex_lock(&lock);
@@ -1205,33 +1332,68 @@ void tp_view_mouse(double fx, double fy, uint32_t buttons) {
 /* The picture at ow x oh (the game screen's layout at any size): the visible
  * canvas in the park area with the interface overlay on top, and the panel from
  * the game's own frame (frame: fw x fh RGBA, tp_host_frame_rgba_any). */
-void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int fw, int fh, int smooth) {
-    pthread_mutex_lock(&lock);
-    Geo g = geo(pub_s);
-    double z = vis_z, vx = vis_x, vy = vis_y, lw = vis_lw > g.sw ? vis_lw : g.sw, col = (lw - g.sw) / 2;
-    double lpx = lw / ow, lpy = (double)g.sh / oh;                     /* layout pixels per output pixel */
-    double sx = lpx / z, sy = lpy / z;                                 /* canvas pixels per output pixel */
-    int ss = sx > 1.4 ? 2 : 1;                                         /* minifying: average 2x2 */
-    for (int y = 0; y < oh; y++) {
-        uint32_t *o = out + (size_t)y * ow;
+/* A 3x5 font for the debug overlays: digits, a few letters and signs. */
+static const char *font_chars = "0123456789ACDEFGKMNPRSTWXY/:,.- ";
+static const uint16_t font_bits[] = {0x7b6f, 0x2c97, 0x73e7, 0x73cf, 0x5bc9, 0x79cf, 0x79ef, 0x7292, 0x7bef, 0x7bcf, 0x2bed, 0x7927, 0x6b6e, 0x79a7, 0x79a4, 0x796f, 0x5bad, 0x5fed, 0x7b6d, 0x7be4, 0x6bad, 0x79cf, 0x7492, 0x5bfd, 0x5aad, 0x5a92, 0x12a4, 0x0410, 0x0014, 0x0002, 0x01c0, 0x0000};
+int tp_view_out_bgra;                                   /* compose BGRA (an IOSurface for the screen) rather than RGBA */
+static size_t dbg_stride;                               /* the output's row stride for the overlays and cursor */
+static uint32_t dbg_col(uint32_t c) { return tp_view_out_bgra ? (c & 0xff00ff00u) | ((c & 0xff) << 16) | ((c >> 16) & 0xff) : c; }
+static void put_text(uint32_t *out, int ow, int oh, int x, int y, int k, const char *t, uint32_t col) {
+    for (; *t; t++, x += 4 * k) {
+        const char *f = strchr(font_chars, *t); if (!f) continue;
+        uint16_t b = font_bits[f - font_chars];
+        for (int r = 0; r < 5; r++) for (int c = 0; c < 3; c++) if (b & (1 << (14 - r * 3 - c)))
+            for (int yy = 0; yy < k; yy++) for (int xx = 0; xx < k; xx++) {
+                int X = x + c * k + xx, Y = y + r * k + yy; if (X >= 0 && Y >= 0 && X < ow && Y < oh) out[(size_t)Y * dbg_stride + X] = dbg_col(col);
+            }
+    }
+}
+static void put_box(uint32_t *out, int ow, int oh, int x0, int y0, int x1, int y1, uint32_t col) {
+    for (int y = y0 < 0 ? 0 : y0; y < y1 && y < oh; y++) for (int x = x0 < 0 ? 0 : x0; x < x1 && x < ow; x++) out[(size_t)y * dbg_stride + x] = dbg_col(col);
+}
+static void debug_fps(uint32_t *out, int ow, int oh, int k, int live) {
+    char lab[96];
+    if (live) snprintf(lab, sizeof lab, "SCREEN %.0f  PARK %.0f  GAME %.0f FPS  DRAW %.1f MS/S", sh_comp, sh_pub, sh_game, sh_pass);
+    else snprintf(lab, sizeof lab, "SCREEN %.0f  GAME %.0f FPS", sh_comp, sh_game);
+    put_box(out, ow, oh, ow - 8 - 4 * k * (int)strlen(lab), 2, ow - 2, 4 + 6 * k, 0xc0000000u);
+    put_text(out, ow, oh, ow - 6 - 4 * k * (int)strlen(lab), 4, k, lab, 0xff40ff40u);
+}
+/* The frame-rate line over the game's own picture (the park view off: 1x in a 4:3 window). */
+void tp_view_debug_hud(uint32_t *out, int ow, int oh) {
+    dbg_stride = (size_t)ow;
+    st_comp++; stats_tick();
+    if (tp_view_debug_fps) debug_fps(out, ow, oh, oh >= 700 ? 3 : 2, 0);
+}
+void tp_view_count_game_frames(int on) { fps_game_hook = on; if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); } }
+typedef struct { uint32_t *out; int ow, oh, smooth; Geo g; double z, vx, vy, lw, col, lpx, lpy, sx, sy; int ss; const uint32_t *pal; size_t stride; } ComposeJob;
+static size_t compose_stride;                           /* pixels per output row (0: the width) */
+void tp_view_compose_stride(size_t px) { compose_stride = px; }
+static void compose_band(void *ctx, size_t band) {
+    const ComposeJob *j = ctx;
+    uint32_t *out = j->out; int ow = j->ow, oh = j->oh, smooth = j->smooth, ss = j->ss; Geo g = j->g;
+    double z = j->z, vx = j->vx, vy = j->vy, col = j->col, lpx = j->lpx, lpy = j->lpy, sx = j->sx, sy = j->sy;
+    const uint32_t *pal = j->pal; size_t stride = j->stride;
+    int y0 = (int)band * 32, y1 = y0 + 32 < oh ? y0 + 32 : oh;
+    for (int y = y0; y < y1; y++) {
+        uint32_t *o = out + (size_t)y * stride;
         double ly = (y + 0.5) * lpy, py = vy + ly / z;
         int iy = (int)ly, panel_row = iy >= g.wh;
         for (int x = 0; x < ow; x++) {
             double lx = (x + 0.5) * lpx; int ix = (int)floor(lx - col);
             if (ix >= 0 && ix < g.sw) {                                /* the screen column: panel and interface */
-                if (panel_row) { o[x] = pub_pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
+                if (panel_row) { o[x] = pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
                 uint16_t u = pub_overlay[iy * g.sw + ix];
-                if (u != 0xffff) { o[x] = pub_pal[u]; continue; }
+                if (u != 0xffff) { o[x] = pal[u]; continue; }
             }
             /* The weather the game drew (screen space): over the whole view, repeated beside the 4:3 column. */
             if (pub_weather_n) {                                       /* (the panel and interface came first) */
                 int wx = ((ix % g.sw) + g.sw) % g.sw, wy = iy % g.wh, in_col = ix >= 0 && ix < g.sw && iy < g.wh, k = wy * g.sw + wx;
-                if (pub_weather[k] && (in_col || pub_weather_rep[k])) { o[x] = pub_pal[pub_weather[k]]; continue; }
+                if (pub_weather[k] && (in_col || pub_weather_rep[k])) { o[x] = pal[pub_weather[k]]; continue; }
             }
             double px = vx + lx / z;
             if (ss == 1 && !smooth) {
                 int cx = (int)floor(px), cy = (int)floor(py);
-                o[x] = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pub_pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
+                o[x] = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
                 continue;
             }
             /* 2x2 samples: an average when minifying, bilinear-ish when smooth */
@@ -1240,11 +1402,50 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
                 double qx = ss == 2 ? px + ((k & 1) - 0.5) * sx * 0.5 : px - 0.5 + (k & 1);
                 double qy = ss == 2 ? py + ((k >> 1) - 0.5) * sy * 0.5 : py - 0.5 + (k >> 1);
                 int cx = (int)floor(qx), cy = (int)floor(qy);
-                uint32_t c = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pub_pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
+                uint32_t c = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
                 r += c & 255; gg += (c >> 8) & 255; b += (c >> 16) & 255;
             }
             o[x] = 0xff000000u | ((b / 4) << 16) | ((gg / 4) << 8) | (r / 4);
         }
+    }
+}
+void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int fw, int fh, int smooth) {
+    pthread_mutex_lock(&lock);
+    Geo g = geo(pub_s);
+    double z = vis_z, vx = vis_x, vy = vis_y, lw = vis_lw > g.sw ? vis_lw : g.sw, col = (lw - g.sw) / 2;
+    double lpx = lw / ow, lpy = (double)g.sh / oh;                     /* layout pixels per output pixel */
+    double sx = lpx / z, sy = lpy / z;                                 /* canvas pixels per output pixel */
+    int ss = sx > 1.4 ? 2 : 1;                                         /* minifying: average 2x2 */
+    static uint32_t pal_bgra[256]; const uint32_t *pal = pub_pal;
+    if (tp_view_out_bgra) { for (int i = 0; i < 256; i++) { uint32_t c = pub_pal[i]; pal_bgra[i] = (c & 0xff00ff00u) | ((c & 0xff) << 16) | ((c >> 16) & 0xff); } pal = pal_bgra; }
+    size_t stride = compose_stride ? compose_stride : (size_t)ow;
+    ComposeJob job = {out, ow, oh, smooth, g, z, vx, vy, lw, col, lpx, lpy, sx, sy, ss, pal, stride};
+    dbg_stride = stride;
+    dispatch_apply_f((size_t)((oh + 31) / 32), DISPATCH_APPLY_AUTO, &job, compose_band);   /* bands of 32 rows across the cores */
+    st_comp++; stats_tick();
+    if (getenv("TP_VIEW_FPS")) tp_view_debug_fps = 1;
+    if (getenv("TP_VIEW_GRID")) tp_view_debug_grid = 1;
+    if (tp_view_debug_grid || tp_view_debug_fps) {
+        int k = oh >= 700 ? 3 : 2;                                     /* font scale */
+        if (tp_view_debug_grid) {                                      /* every pass's complete part: the sections the park is drawn in */
+            for (int i = 0; i < ngrid; i++) {
+                Pass *p = &grid[i];
+                double x0 = (p->x0 - vx) * z / lpx, x1 = (p->x1 - vx) * z / lpx, y0 = (p->y0 - vy) * z / lpy, y1 = (p->y1 - vy) * z / lpy;
+                if (x1 < 0 || y1 < 0 || x0 >= ow || y0 >= g.wh / lpy) continue;
+                uint32_t col = 0xffff40ffu;
+                put_box(out, ow, oh, (int)x0, (int)y0, (int)x1, (int)y0 + 1, col); put_box(out, ow, oh, (int)x0, (int)y0, (int)x0 + 1, (int)y1, col);
+                char lab[24]; snprintf(lab, sizeof lab, "%d,%d", p->cx, p->cy);
+                put_box(out, ow, oh, (int)x0 + 2, (int)y0 + 2, (int)x0 + 4 + 4 * k * (int)strlen(lab), (int)y0 + 4 + 5 * k, 0xc0000000u);
+                put_text(out, ow, oh, (int)x0 + 3, (int)y0 + 3, k, lab, 0xff80ffffu);
+            }
+            double plx = ptr_fx * lw, ply = ptr_fy * g.sh, pcx = vx + plx / z, pcy = vy + ply / z;   /* the pointer: canvas and camera */
+            int ccy = (int)floor((pcy - g.oy - g.wh / 2.0) / g.uy), ccx = (int)floor((pcx - g.ox - g.sw / 2.0 - g.uyx * ccy) / g.ux);
+            char lab[64]; snprintf(lab, sizeof lab, "XY %.0f,%.0f  CAM %d,%d", pcx, pcy, ccx, ccy);
+            int y = tp_view_debug_fps ? 8 + 7 * k : 4;
+            put_box(out, ow, oh, ow - 8 - 4 * k * (int)strlen(lab), y - 2, ow - 2, y + 6 * k, 0xc0000000u);
+            put_text(out, ow, oh, ow - 6 - 4 * k * (int)strlen(lab), y, k, lab, 0xff40ffffu);
+        }
+        if (tp_view_debug_fps) debug_fps(out, ow, oh, k, 1);
     }
     /* The game's cursor at the pointer, at the screen's scale (over the panel the frame has it already). */
     double plx = ptr_fx * lw, ply = ptr_fy * g.sh;
@@ -1257,7 +1458,7 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
             uint16_t u = pub_cursor[y * CUR + x]; if (u == 0xffff) continue;
             int bx = hx + (int)((pub_cur_x + x) * kx), by = hy + (int)((pub_cur_y + y) * ky);
             for (int yy = by; yy < by + (int)ceil(ky); yy++) for (int xx = bx; xx < bx + (int)ceil(kx); xx++)
-                if (xx >= 0 && yy >= 0 && xx < ow && yy < oh) out[(size_t)yy * ow + xx] = pub_pal[u];
+                if (xx >= 0 && yy >= 0 && xx < ow && yy < oh) out[(size_t)yy * dbg_stride + xx] = dbg_col(pub_pal[u]);
         }
     }
     pthread_mutex_unlock(&lock);

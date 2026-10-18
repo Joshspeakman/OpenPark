@@ -393,6 +393,47 @@ after 2, so for a frame the window showed the game's own 4:3 screen. Now the
 switch waits 150 ms without the park (still long before anyone can click).
 Unpaused, the only change flagged was a ride sign scrolling its name.
 
+## Player report batch (2026-10-17, night)
+
+- Advisor portrait background changing with the pointer: interface was found by
+  diffing the screen against the captured park, so interface pixels equal to the
+  park under them showed the zoomed park through (the portrait's edges, text).
+  Now, once the park is captured, its pixels in the back buffer are set to a
+  marker colour (0xcc: unused by the interface, and its row of the blend table
+  [0x1ba2f8] gives only colours the interface never uses); what is drawn over
+  them is interface whatever its colours, and translucent interface (bubble
+  shading) is recomputed over the real park. The park is put back for the
+  screen at PRESENT. The gap filling heuristic is gone.
+- The game's top menus (PARK, OPTIONS, DISPLAY and drop-downs): they open with
+  the pointer on the top bar; [0x1b14d2..5] say which is open (0xff closed),
+  0x1b571a its rectangle (x0, y0, x1, y1, mouse units). While open, the
+  pointer goes to the game anywhere in the park column and the drop-down's
+  rectangle is interface. Checked in full screen with the real pointer.
+- Full screen: the window goes borderless over the display with the Dock and
+  menu bar hidden (as the other ports), not macOS's full-screen space (whose
+  menu and title bar slide down at the top edge); the picture stays below the
+  notch.
+- Edge scrolling at the top again and diagonally at corners.
+- Debug overlays (View menu ⌥⌘F frame rate, ⌥⌘G section grid; remembered):
+  screen, park and game frame rates and drawing time; each pass's complete
+  part outlined and labelled with its camera, and the pointer's canvas
+  coordinates and camera.
+- Speed and pacing: at Original speed the game ran 61 frames a second at 1x but
+  85 zoomed out: the host's work between the game's instructions (the view's
+  passes) shortened the game's waits on the wall clock. Two changes: (1) the
+  retrace, timer interrupt and DOS time follow emulated time (instructions at
+  the governed rate) instead of the wall clock: 61 at every zoom; (2) Steady
+  pacing (default; Launcher Tweaks: Frame Pacing Steady / Like DOSBox): park
+  frames are released at exactly 60 a second at Original (in proportion for the
+  faster speeds) by the game thread (a Mach real-time thread waiting with
+  mach_wait_until), the instruction governor standing aside meanwhile. Frame
+  starts are exactly 16.67 ms apart. The app presents on the display's
+  refresh (CADisplayLink), each frame at the refresh after 0.7 of a frame from
+  its start: shown 16.4..17.0 ms apart on a 120 Hz display. Composing is
+  parallel (bands across the cores) straight into IOSurfaces the layer shows
+  (no copy): 8 ms + 11 ms upload → 0.8 ms. Every visible pass is drawn every
+  frame. Hitches remain only at the moment of a zoom change.
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what
