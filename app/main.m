@@ -26,6 +26,7 @@ extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out
 void tp_view_compose_stride(size_t px);
 void tp_view_debug_hud(uint32_t *out, int ow, int oh);
 void tp_view_count_game_frames(int on);
+void tp_view_set_ui_scale(double k);
 int tp_view_frame_due(void);
 void tp_view_vsync_now(double period, double ago);
 int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy);
@@ -719,7 +720,7 @@ static void *game_thread(void *arg) {
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"SteadyPacing": @YES}];
+                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"SteadyPacing": @YES, @"PanelScale": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
@@ -761,6 +762,7 @@ static void *game_thread(void *arg) {
     _window.acceptsMouseMovedEvents = YES;
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"StartFullScreen"]) [self toggleFull:nil];
     tp_view_debug_fps = [u boolForKey:@"DebugFPS"]; tp_view_debug_grid = [u boolForKey:@"DebugGrid"];
+    tp_view_set_ui_scale([u doubleForKey:@"PanelScale"]);
 
     {
         if ([u boolForKey:@"Sound"] && tp_audio_start() == 0)
@@ -963,6 +965,7 @@ static uint32_t key_of_char(unichar c) {
         }
         else if ([op isEqual:@"full"]) [self toggleFull:nil];
         else if ([op isEqual:@"fps"]) [self toggleFPS:nil];
+        else if ([op isEqual:@"panel"]) tp_view_set_ui_scale(a1);
         else if ([op isEqual:@"grid"]) [self toggleGrid:nil];
         else if ([op isEqual:@"walk"]) {                 /* walk X Y: the Visitor View at map point X,Y (X < 0: the middle of the game's view) */
             double x = a1, y = a2;
@@ -1070,6 +1073,17 @@ static uint32_t key_of_char(unichar c) {
     tp_view_debug_fps = !tp_view_debug_fps; tp_view_count_game_frames(tp_view_debug_fps);
     [NSUserDefaults.standardUserDefaults setBool:tp_view_debug_fps forKey:@"DebugFPS"];
 }
+/* View > Larger / Smaller Panel (remembered; the launcher's Display > Panel Size): the panel and the advisor. */
+- (void)panelLarger:(id)sender { [self panelStep:1]; }
+- (void)panelSmaller:(id)sender { [self panelStep:-1]; }
+- (void)panelStep:(int)d {
+    static const double steps[] = {1.0, 1.25, 1.5, 1.75, 2.0};
+    double k = [NSUserDefaults.standardUserDefaults doubleForKey:@"PanelScale"]; int i = 0;
+    for (int j = 0; j < 5; j++) if (fabs(steps[j] - k) < fabs(steps[i] - k)) i = j;
+    i += d; if (i < 0) i = 0; if (i > 4) i = 4;
+    [NSUserDefaults.standardUserDefaults setDouble:steps[i] forKey:@"PanelScale"];
+    tp_view_set_ui_scale(steps[i]);
+}
 - (void)toggleGrid:(id)sender {
     tp_view_debug_grid = !tp_view_debug_grid;
     [NSUserDefaults.standardUserDefaults setBool:tp_view_debug_grid forKey:@"DebugGrid"];
@@ -1125,6 +1139,9 @@ int main(int argc, const char **argv) {
         [viewMenu addItemWithTitle:@"Zoom In" action:@selector(zoomIn:) keyEquivalent:@"="];
         [viewMenu addItemWithTitle:@"Zoom Out" action:@selector(zoomOut:) keyEquivalent:@"-"];
         [viewMenu addItemWithTitle:@"Actual Size" action:@selector(zoomActual:) keyEquivalent:@"0"];
+        [viewMenu addItem:NSMenuItem.separatorItem];
+        [viewMenu addItemWithTitle:@"Larger Panel" action:@selector(panelLarger:) keyEquivalent:@"]"];
+        [viewMenu addItemWithTitle:@"Smaller Panel" action:@selector(panelSmaller:) keyEquivalent:@"["];
         [viewMenu addItem:NSMenuItem.separatorItem];
         NSMenuItem *dbg = [viewMenu addItemWithTitle:@"Show Frame Rate" action:@selector(toggleFPS:) keyEquivalent:@"f"];
         dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
