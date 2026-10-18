@@ -188,7 +188,7 @@ typedef struct { double fx, fy; uint32_t buttons; } Ev;
 static Ev evq[256]; static int evn;
 static int restore, restore_cx, restore_cy;       /* camera for the game's own view after zooming */
 static uint8_t pub_canvas[MAX_CANVAS];
-static uint16_t pub_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
+static uint16_t pub_overlay[MAX_SCREEN], prev_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
 static uint32_t pub_pal[256];
 static double pub_time;
 #define CUR 64                                    /* the game's cursor, cut out of its last frame */
@@ -202,7 +202,10 @@ static int pub_cx, pub_cy, pub_s;                  /* the published picture's sc
 static uint8_t canvas[MAX_CANVAS], world_only[MAX_SCREEN];
 static int pre_ok;
 static uint8_t pre_extras[MAX_SCREEN]; static int have_pre_extras;
-static uint8_t pre_tool[MAX_SCREEN];             /* the back buffer as the tool preview starts */
+static uint8_t pre_tool[MAX_SCREEN];
+static uint8_t date_clean[MAX_SCREEN], date_cols[256];   /* the date as the extras drew it (clean), and its colours */
+static int date_box[4]; static long date_fixed;
+static int world_ok; static int16_t world_cx, world_cy;   /* world_only holds a park capture, for this camera */                          /* the date's box, as the extras last drew it (x1 = 0: not yet) */             /* the back buffer as the tool preview starts */
 static uint8_t pre_weather[MAX_SCREEN], weather[MAX_SCREEN], weather_rep[MAX_SCREEN]; static int weather_n;   /* what the weather drew (0: nothing) */
 static uint8_t pub_weather[MAX_SCREEN], pub_weather_rep[MAX_SCREEN]; static int pub_weather_n; static int weather_resentinel;
 static volatile int tool_shown; static int tool_resentinel;                   /* the last frame had a tool preview */
@@ -824,7 +827,7 @@ static void seam_check(void) {
  * colour the interface never uses (SENTINEL); what the game draws over them is interface, whatever its
  * colours (a portrait's edges, text over a road). At PRESENT the park is put back for the screen. Park
  * drawn later (tool previews, weather) is drawn over the real park and then marked again. */
-#define SENTINEL 0xcc      /* unused by the interface, and its row of the blend table ([0x1ba2f8], dst * 256 + src) gives
+#define SENTINEL (getenv("TP_SENTINEL") ? (int)strtol(getenv("TP_SENTINEL"), 0, 16) : 0xcc)      /* unused by the interface, and its row of the blend table ([0x1ba2f8], dst * 256 + src) gives
                             * only colours the interface never uses either: a translucent pixel drawn over it is known */
 static int sentinel_on;
 static void sentinel_apply(void) {
@@ -959,7 +962,20 @@ void tp_view_hook(void) {
             for (int r = 0; hud_rect(r, hr); r++)
                 for (int y = hr[1]; y < hr[3]; y++)
                     memcpy(bb + y * SW + hr[0], pre_extras + y * SW + hr[0], (size_t)(hr[2] - hr[0]));
-            memcpy(world_only, bb, n);
+            if (getenv("TP_VIEW_EXTRAS")) { int c = 0, x0 = SW, y0 = SH, x1 = -1, y1 = -1;
+                for (int i = 0; i < SW * WORLD_H; i++) if (keep[i] != pre_extras[i]) { c++; int x = i % SW, y = i / SW; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+                static int k; if (k++ % 60 == 0) fprintf(stderr, "extras drew %d px in %d,%d..%d,%d\n", c, x0, y0, x1, y1); }
+            memcpy(world_only, bb, n); world_ok = 1; world_cx = real_cx; world_cy = real_cy;
+            {   /* the date as the game drew it (a solid box): its rectangle and pixels, all interface at PRESENT */
+                int hr0[4]; hud_rect(0, hr0); int x0 = SW, y0 = SH, x1 = -1, y1 = -1;
+                for (int y = hr0[1]; y < hr0[3]; y++) for (int x = hr0[0]; x < hr0[2]; x++) if (keep[y * SW + x] != pre_extras[y * SW + x]) {
+                    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+                if (x1 - x0 >= 16 && y1 - y0 >= 6) {     /* (kept: the box does not move) */
+                    date_box[0] = x0; date_box[1] = y0; date_box[2] = x1 + 1; date_box[3] = y1 + 1;
+                    memset(date_cols, 0, sizeof date_cols);
+                    for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) { date_clean[y * SW + x] = keep[y * SW + x]; date_cols[keep[y * SW + x]] = 1; }
+                }
+            }
             if (edge_check()) edge_compare(real_cx, real_cy);
             blit_real(real_cx, real_cy);
             memcpy(bb, keep, n);                          /* the game's frame goes on as it drew it */
@@ -973,7 +989,11 @@ void tp_view_hook(void) {
             tp_host_png_rgba(getenv("TP_VIEW_DUMP"), px, SW, SH); free(px);
             fprintf(stderr, "view dump at hook %d\n", tp_hook_which); } }
         if (getenv("TP_VIEW_DEBUG")) { int mx, my; tp_host_mouse_pos(&mx, &my); fprintf(stderr, "view frame: camera %d,%d mouse %d,%d\n", real_cx, real_cy, mx / 2, my / 2); }
-        memcpy(world_only, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
+        /* A frame where the game skipped drawing the park (AFTER_SKIP): the back buffer is the last frame's picture,
+         * interface and all, with this frame's interface drawn over it. The park in it is the last capture's. */
+        if (!getenv("TP_NOSKIPKEEP") && tp_hook_which == 3 && world_ok && real_cx == world_cx && real_cy == world_cy) { if (getenv("TP_HOLE_DEBUG2")) { static int k; if (k++ < 5) fprintf(stderr, "skip frame: park kept\n"); } }
+        else memcpy(world_only, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
+        world_ok = 1; world_cx = real_cx; world_cy = real_cy;
         if (edge_check()) edge_compare(real_cx, real_cy);
         blit_real(real_cx, real_cy);
         have_world = 1;
@@ -986,7 +1006,6 @@ void tp_view_hook(void) {
         if (tp_hook_pcs[5] != TOOL_PREVIEW) goto probe;
         if (active && have_world) {
             extern uint32_t tp_get(unsigned);
-            tool_resentinel = sentinel_on; sentinel_lift();   /* (it may blend with the park under it) */
             memcpy(pre_tool, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
             tp_hook_pcs[6] = r32(tp_get(4)); tp_hooks_changed();   /* its return address */
         }
@@ -1004,16 +1023,15 @@ void tp_view_hook(void) {
                 if (furniture) continue;
                 world_only[i] = bb[i]; n++;
                 int X = bx + x, Y = by + y; if (X >= 0 && Y >= 0 && X < CW && Y < CH) canvas[(size_t)Y * CW + X] = bb[i];
+                if (sentinel_on) M[r32(DISP_BUF) + i] = SENTINEL;   /* (park: marked again; the marker is not lifted around it) */
             }
             tool_shown = n > 0;
-            if (tool_resentinel) sentinel_apply();
         }
         break;
     case 8: case 10:                                      /* WEATHER, WEATHER2: entered */
         if (tp_hook_pcs[tp_hook_which] != (tp_hook_which == 8 ? WEATHER : WEATHER2)) break;
         if (active) {
             extern uint32_t tp_get(unsigned);
-            weather_resentinel = sentinel_on; sentinel_lift();
             memcpy(pre_weather, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
             tp_hook_pcs[tp_hook_which + 1] = r32(tp_get(4)); tp_hooks_changed();
         }
@@ -1026,9 +1044,9 @@ void tp_view_hook(void) {
             for (int i = 0; i < SW * WORLD_H; i++)
                 if (bb[i] != pre_weather[i]) {        /* rain and particles repeat beside the column; lightning does not */
                     weather[i] = bb[i]; weather_rep[i] = !rain_only || (bb[i] & 0xf8) == RAIN_COLOUR; n++; world_only[i] = bb[i];
+                    if (sentinel_on) M[r32(DISP_BUF) + i] = SENTINEL;
                 }
             /* (into world_only too: the weather is not interface; the compositor lays its own layer over the view) */
-            if (weather_resentinel) sentinel_apply();
             weather_n = n;
             if (getenv("TP_VIEW_DEBUG")) { static int k; if (k++ < 6) { int h[256] = {0}, tot = 0;
                 for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] != pre_weather[i]) { h[bb[i]]++; tot++; }
@@ -1077,20 +1095,91 @@ void tp_view_hook(void) {
          * from the same game moment (have_world, set when this frame had passes). */
         if (!have_world) { sentinel_lift(); pthread_mutex_unlock(&lock); break; }
         have_world = 0;
+        if (getenv("TP_VIEW_CACHEDIFF")) {                 /* development: what the landscape cache has beyond the ground */
+            static uint8_t fresh[MAX_SCREEN + 65536]; uint32_t cache = r32(LAND_CACHE);
+            memset(fresh, 0, (size_t)SW * SH);
+            int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32; int rows = ((G.s == 1 ? 400 : 480) + th - 1) / th + 3;
+            tp_native_landscape(M, real_cx, real_cy, rows, fresh, SW, (int)r32(0x1de5c8), WORLD_H);
+            int n = 0, nb = 0, y1 = 0; for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) if (M[cache + y * SW + x] != fresh[y * SW + x]) { n++; if (y >= 150) nb++; y1 = y; }
+            static int k; if (k++ < 30) fprintf(stderr, "cachediff: %d px (%d in rows 150+), last row %d\n", n, nb, y1);
+        }
+        if (sentinel_on && getenv("TP_VIEW_BUBBLE")) {     /* development: marker pixels left inside the advisor's bubble */
+            int n = 0, m = 0; for (int y = 152; y < 172 && y < WORLD_H; y++) for (int x = 60; x < 300; x++) { n += bb[y * SW + x] == SENTINEL; m += bb[y * SW + x] == 0x6c || bb[y * SW + x] == 0x6e; }
+            static int k; if (k++ < 400 && (n || m)) fprintf(stderr, "bubble: %d marker px, %d blend px\n", n, m);
+            static int dumped; if (n > 40 && dumped < 2) { uint32_t *px = malloc(4 * SW * 60 * 3);
+                for (int y = 0; y < 60; y++) for (int x = 0; x < SW; x++) { int i = (130 + y) * SW + x;
+                    px[y * SW + x] = bb[i] == SENTINEL ? 0xffff00ffu : pub_pal[bb[i]];
+                    px[(60 + y) * SW + x] = pub_pal[world_only[i]];
+                    px[(120 + y) * SW + x] = pub_pal[pre_extras[i]]; }
+                char path[300]; snprintf(path, sizeof path, "%s-%d.png", getenv("TP_VIEW_BUBBLE"), dumped++); tp_host_png_rgba(path, px, SW, 180); free(px); } }
         if (sentinel_on) {
             /* translucent interface over the marker: redo its blend over the park (a source giving that result) */
             const uint8_t *gt = M + r32(0x1ba2f8); int16_t src_of[256]; for (int v = 0; v < 256; v++) src_of[v] = -1;
             if (r32(0x1ba2f8) && !getenv("TP_VIEW_NOREMAP")) for (int s2 = 255; s2 >= 0; s2--) src_of[gt[SENTINEL * 256 + s2]] = (int16_t)s2;
+            if (getenv("TP_TEXT_DEBUG")) { static int k; int h[256] = {0}, hw[256] = {0}, c = 0;
+                for (int y = 150; y < 170; y++) for (int x = 60; x < 310; x++) { int i = y * SW + x; if (src_of[bb[i]] >= 0) { c++; h[src_of[bb[i]]]++; hw[world_only[i]]++; } }
+                if (c && k++ < 20) { fprintf(stderr, "text: %d blended px; src:", c); for (int v = 0; v < 256; v++) if (h[v]) fprintf(stderr, " %02x x%d", v, h[v]);
+                    fprintf(stderr, "; under:"); for (int v = 0; v < 256; v++) if (hw[v] > 2) fprintf(stderr, " %02x x%d", v, hw[v]); fprintf(stderr, "\n"); } }
             for (int i = 0; i < SW * WORLD_H; i++) {
                 uint8_t v = bb[i];
                 if (v == SENTINEL) pub_overlay[i] = 0xffff;
-                else if (src_of[v] >= 0 && r32(0x1ba2f8)) pub_overlay[i] = gt[world_only[i] * 256 + src_of[v]];
+                else if (src_of[v] >= 0 && r32(0x1ba2f8)) pub_overlay[i] = 0xfffe;     /* (blended: settled below) */
                 else pub_overlay[i] = v;
             }
+            /* Blended interface (the advisor's text darkens what is under it): over the interface beside it (the
+             * bubble's white) when there is some, as it looks in the game; over the park otherwise. */
+            for (int i = SW; i < SW * (WORLD_H - 1); i++) if (pub_overlay[i] == 0xfffe) {
+                int base = -1, best = -1;                  /* the brightest interface pixel near it that is not itself blended */
+                for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
+                    int j = i + dy * SW + dx; if (j < 0 || j >= SW * WORLD_H || pub_overlay[j] >= 0xfffe || src_of[bb[j]] >= 0) continue;
+                    uint32_t c = pub_pal[pub_overlay[j]]; int lum = (int)(c & 255) * 3 + (int)((c >> 8) & 255) * 6 + (int)((c >> 16) & 255);
+                    if (lum > best) { best = lum; base = pub_overlay[j]; } }
+                int under = base >= 0 ? base : world_only[i], res = gt[under * 256 + src_of[bb[i]]], dark = 1 << 30;
+                for (int s2 = 0; s2 < 256; s2++) if (gt[SENTINEL * 256 + s2] == bb[i]) {   /* (several sources give the marker's result:
+                                                                                            * the darkest result, the game's text is dark) */
+                    uint32_t c = pub_pal[gt[under * 256 + s2]]; int lum = (int)(c & 255) * 3 + (int)((c >> 8) & 255) * 6 + (int)((c >> 16) & 255);
+                    if (lum < dark) { dark = lum; res = gt[under * 256 + s2]; } }
+                pub_overlay[i] = (uint16_t)res;
+            }
+            /* Marker left inside interface: pixels the game did not redraw this frame because they still held its
+             * last frame's interface (the advisor's bubble is redrawn only where it changed). What the game had
+             * there (world_only) is interface when it is not the park as the passes drew it and the pixel is
+             * mostly surrounded by interface. Twice, for small clumps. */
+            if (getenv("TP_HOLE_DEBUG2")) { static int k; int c = 0, ex[6][5], ne = 0;
+                for (int y = 150; y < 168; y++) for (int x = 60; x < 300; x++) { int i = y * SW + x;
+                    if (pub_overlay[i] == 0xffff && pub_overlay[i - 1] != 0xffff && pub_overlay[i + 1] != 0xffff) { c++;
+                        if (ne < 6) { ex[ne][0] = x; ex[ne][1] = y; ex[ne][2] = bb[i]; ex[ne][3] = world_only[i]; ex[ne][4] = prev_overlay[i]; ne++; } } }
+                if (c && k++ < 60) { fprintf(stderr, "holes2: %d:", c); for (int e = 0; e < ne; e++) fprintf(stderr, " (%d,%d s%02x w%02x p%04x)", ex[e][0], ex[e][1], ex[e][2], ex[e][3], ex[e][4]); fprintf(stderr, "\n"); } }
+            if (getenv("TP_HOLE_DEBUG")) { static int k; int c = 0;
+                for (int y = 150; y < 168; y++) for (int x = 60; x < 300; x++) { int i = y * SW + x;
+                    if (pub_overlay[i] == 0xffff && prev_overlay[i] != 0xffff) { if (c++ < 4 && k < 40) fprintf(stderr, "hole %d,%d: screen %02x world %02x prev %02x canvas %02x\n", x, y, bb[i], world_only[i], prev_overlay[i],
+                        canvas[(size_t)(cam_oy(real_cy) + y) * CW + cam_ox(real_cx, real_cy) + x]); } }
+                if (c && k++ < 40) fprintf(stderr, "holes: %d\n", c); }
+            for (int pass2 = 0; pass2 < 3; pass2++) {
+                int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
+                for (int y = 1; y < WORLD_H - 1; y++) for (int x = 1; x < SW - 1; x++) {
+                    int i = y * SW + x; if (pub_overlay[i] != 0xffff) continue;
+                    int X = bx + x, Y = by + y; if (X < 0 || Y < 0 || X >= CW || Y >= CH) continue;
+                    int nb = 0; for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) if ((dx || dy) && pub_overlay[i + dy * SW + dx] != 0xffff) nb++;
+                    if (nb < 3) continue;
+                    if (canvas[(size_t)Y * CW + X] != world_only[i]) pub_overlay[i] = world_only[i];
+                    else if (nb >= 5 && prev_overlay[i] != 0xffff) pub_overlay[i] = prev_overlay[i];   /* (what it showed last frame) */
+                }
+            }
+            if (getenv("TP_DATE_DEBUG")) { static int k; if (k++ % 30 == 0) { int nc = 0; for (int c = 0; c < 256; c++) nc += date_cols[c];
+                fprintf(stderr, "date: box %d,%d..%d,%d, %d colours, fixed %ld\n", date_box[0], date_box[1], date_box[2], date_box[3], nc, date_fixed); } }
+            {   /* the date's box, whole, from the screen (the game draws it every frame, sometimes with the park,
+                 * sometimes after it: either way the box's pixels on the screen are the date) */
+                const uint8_t *sb = M + r32(DISP_BUF);
+                for (int y = date_box[1]; y < date_box[3]; y++) for (int x = date_box[0]; x < date_box[2]; x++) { int i = y * SW + x; uint8_t v = sb[i] == SENTINEL ? world_only[i] : sb[i];   /* (marker: the date as drawn with the park) */
+                      pub_overlay[i] = date_cols[v] ? v : date_clean[i]; if (!date_cols[v]) date_fixed++; }   /* (drawn with the park, things can cover it: those pixels from the clean date) */
+            }
+            memcpy(prev_overlay, pub_overlay, sizeof prev_overlay);
             sentinel_lift();
             { uint8_t *wb = M + r32(DISP_BUF); for (int i = 0; i < SW * WORLD_H; i++) if (src_of[wb[i]] >= 0 && r32(0x1ba2f8)) wb[i] = (uint8_t)pub_overlay[i]; }   /* (the screen too) */
         }
         else for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
+        if (getenv("TP_DATE_DEBUG")) { static int k; if (k++ % 60 == 0) fprintf(stderr, "present: sentinel %d have_world %d box %d..%d\n", sentinel_on, 1, date_box[0], date_box[2]); }
         if (getenv("TP_VIEW_HIST")) { static long h[256]; static int fr; for (int i = 0; i < SW * SH; i++) if (i >= SW * WORLD_H || pub_overlay[i] != 0xffff) h[bb[i]]++;
             if (++fr % 300 == 0) { fprintf(stderr, "view hist: unused:"); for (int c = 0; c < 256; c++) if (!h[c]) fprintf(stderr, " %02x", c); fprintf(stderr, "\n"); } }
         if (topbar) for (int i = 0; i < SW * TOPBAR_H; i++) pub_overlay[i] = bb[i];   /* the top bar is drawn with the park: all interface */
