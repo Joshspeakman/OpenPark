@@ -738,6 +738,17 @@ Not known: what +4/+6/+8 govern in play (the game's own easy..hard values are in
   pixels from last frame's interface. Gaps are now filled only within 2 px of
   interface the game drew this frame. Checked in the full-screen app: the face
   goes with the bubble.
+- Still there (the player, later): once the advisor has spoken, the game itself
+  keeps drawing his face for good (checked with the view off: face drawn every
+  frame for over a minute after the bubble and the tool went; with the view on,
+  the game paints ~534 face pixels over the marker each frame). So the view now
+  leaves the face out (x < 32, the bottom 38 park rows; x2 in 640x480) when
+  there is no bubble beside it (the bubble's place, x 40..120 of rows
+  WORLD_H-24..-6, under a quarter interface; a game window there keeps it), and
+  his bow tie's 3 rows in the panel's top come from a copy taken while he was
+  away. TP_KEEP_ADVISOR=1 keeps the game's way. Only with the view on (wide or
+  zoomed); a 4:3 window at 1x shows the game's own screen. Checked full screen:
+  face with the bubble, none after; check suite and view tests pass.
 - Game windows were speckled and their insets black (the installed 0fa4694):
   the two colours a blend over the marker gives are also window colours. Each
   patch of them is now settled by what it touches: the bubble's white (text,

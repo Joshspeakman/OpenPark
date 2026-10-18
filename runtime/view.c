@@ -836,6 +836,8 @@ static void seam_check(void) {
  * colour the interface never uses (SENTINEL); what the game draws over them is interface, whatever its
  * colours (a portrait's edges, text over a road). At PRESENT the park is put back for the screen. Park
  * drawn later (tool previews, weather) is drawn over the real park and then marked again. */
+#define FACE_ROWS 3         /* the advisor's face: rows of the panel's top it reaches (x2 in 640x480) */
+static int face_hidden, face_strip_ok; static uint8_t face_strip[FACE_ROWS * 2 * 64];
 #define SENTINEL 0xcc      /* unused by the interface, and its row of the blend table ([0x1ba2f8], dst * 256 + src) gives
                             * only colours the interface never uses either: a translucent pixel drawn over it is known */
 static int sentinel_on;
@@ -1234,6 +1236,21 @@ void tp_view_hook(void) {
                 for (int y = date_box[1]; y < date_box[3]; y++) for (int x = date_box[0]; x < date_box[2]; x++) { int i = y * SW + x; if (!date_drawn[i]) continue; uint8_t v = sb[i] == SENTINEL ? world_only[i] : sb[i];   /* (marker: the date as drawn with the park) */
                       pub_overlay[i] = date_cols[v] ? v : date_clean[i]; if (!date_cols[v]) date_fixed++; }   /* (drawn with the park, things can cover it: those pixels from the clean date) */
             }
+            /* The advisor's face: once he has spoken the game keeps drawing it for good (checked with the view
+             * off), and the player wants him only while he talks. With no bubble beside it (its place, right of
+             * the face, mostly park) the face is left out; a game window over that place keeps everything.
+             * TP_KEEP_ADVISOR=1: as the game. */
+            face_hidden = 0;
+            if (!getenv("TP_KEEP_ADVISOR")) {
+                int u = SW / 320 > 0 ? SW / 320 : 1, n = 0, a = 0, face = 0;
+                for (int y = WORLD_H - 24 * u; y < WORLD_H - 6 * u; y++) for (int x = 40 * u; x < 120 * u; x++) { a++; n += pub_overlay[y * SW + x] != 0xffff; }
+                for (int y = WORLD_H - 38 * u; y < WORLD_H; y++) for (int x = 0; x < 32 * u; x++) face += pub_overlay[y * SW + x] != 0xffff;
+                if (!face) for (int y = 0; y < FACE_ROWS * u; y++) memcpy(face_strip + y * 64, bb + (size_t)(WORLD_H + y) * SW, (size_t)(32 * u)), face_strip_ok = 1;   /* (the panel's top without him) */
+                else if (n * 4 < a) {
+                    for (int y = WORLD_H - 38 * u; y < WORLD_H; y++) for (int x = 0; x < 32 * u; x++) pub_overlay[y * SW + x] = 0xffff;
+                    face_hidden = 1;
+                }
+            }
             memcpy(prev_overlay, pub_overlay, sizeof prev_overlay);
             sentinel_lift();
             { uint8_t *wb = M + r32(DISP_BUF); for (int i = 0; i < SW * WORLD_H; i++) if (src_of[wb[i]] >= 0 && r32(0x1ba2f8)) wb[i] = (uint8_t)pub_overlay[i]; }   /* (the screen too) */
@@ -1282,6 +1299,8 @@ void tp_view_hook(void) {
             fprintf(stderr, "view overlay: %d px, %d,%d..%d,%d\n", n, x0, y0, x1, y1); } }
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
         memcpy(pub_panel + (size_t)SW * WORLD_H, bb + (size_t)SW * WORLD_H, (size_t)SW * (SH - WORLD_H));
+        if (face_hidden && face_strip_ok) { int u = SW / 320 > 0 ? SW / 320 : 1;   /* (his bow tie reaches into the panel's top rows) */
+            for (int y = 0; y < FACE_ROWS * u; y++) memcpy(pub_panel + (size_t)(WORLD_H + y) * SW, face_strip + y * 64, (size_t)(32 * u)); }
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
