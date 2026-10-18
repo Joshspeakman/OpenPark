@@ -136,6 +136,36 @@ int tp_native_landscape_part(const uint8_t *mem, int cx0, int cy0, int rows, uin
 
 int tp_native_blit_flags(const uint8_t *mem) { M = mem; return (uint16_t)r16(BLIT_FLAGS); }
 
+/* One cell's ground (the landscape loop's body for cell (cx, cy), decorations included) with the
+ * cell's corner (the loop's x, row * height, in the game's 640-wide units) at (gx, gy): for the
+ * Visitor View's floor (walk.c). Off the map: block 0, as the loop draws there. Returns the number
+ * of parts not drawn (frame modes not native). */
+int tp_native_cell_ground(const uint8_t *mem, int cx, int cy, int gx, int gy, uint8_t *buf, int pitch, int w, int h) {
+    M = mem;
+    Target t = {buf, pitch, w, h, r16(SCREEN_MODE) & 1, 0, 0, w, h};
+    int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H);
+    uint32_t map = r32(MAP_PTR), table = r32(BLOCK_TABLE);
+    if (!tw || !th) return -1;
+    unsupported = 0;
+    if (cx < 0 || cx >= 0x40 || cy < 0 || cy >= 0x40) {
+        blit(&t, table + 6, gx, gy + th - M[table + 0xb], 0);
+        return unsupported;
+    }
+    uint32_t p = map + (uint32_t)((cy * 64 + cx) * 4), e = table + (uint32_t)(M[p + 2] + 1) * 6;
+    int ys = gy + th - M[e + 5];
+    blit(&t, e, gx, ys, 0);
+    int cell = cy * 64 + cx, bits = M[p + 3] & 0x3f;            /* (as 0x11bb21..0x11bc9e) */
+    for (int i = 0; bits; i++, bits >>= 1) {
+        if (!(bits & 1)) continue;
+        if (i <= 2) frame(&t, (uint16_t)r16(r32(DECO_TABLE) + 0x252 + i * 2), gx + (cell + M[p + 2] + i * 16) % tw, gy + (cell + i * 16) % th);
+        else if (i == 5) {
+            int hires = r16(SCREEN_MODE) == 8;
+            frame(&t, (uint16_t)r16(r32(DECO_TABLE) + 0x4ae + (M[p + 3] >> 6) * 2), gx + ((tw << 7) >> 8) + (hires ? 4 : 8), ys + (hires ? 8 : 0x10));
+        }
+    }
+    return unsupported;
+}
+
 /* ---- things (stage 3b, in progress) ----
  * The second loop of render_park (0x11be5a..0x11c015) walks the cells as the
  * landscape loop does and calls 0x11c22a(first thing, x, row * height) for each
@@ -148,6 +178,11 @@ int tp_native_blit_flags(const uint8_t *mem) { M = mem; return (uint16_t)r16(BLI
 #define STATIC_TAB  0x1b44c1u
 typedef void (*DrawLog)(int kind, int a, int b, int c, uint32_t d, int e, void *ctx);
 static DrawLog dlog; static void *dctx;
+/* The Visitor View (walk.c) draws one cell at a time, each thing into a picture of its own: then
+ * every thing starts with a mark (kind 6: the thing's index, negative for static scenery, and its
+ * class), the entrance does not draw its neighbours' cells again, and signs show their text
+ * wherever they are (the game leaves out text near its screen's edges). */
+static int marks;
 static void log_blit(uint32_t entry, int x, int y, int flags) {
     if (dlog) dlog(2, x, y, M[entry + 4] | M[entry + 5] << 8, r32(entry), flags, dctx);
 }
@@ -493,7 +528,7 @@ static int class14(uint32_t t, int x, int y) {
         int px = (int16_t)(x + ((tw << 7) >> 8) + (hires ? 4 : 8)), py = (int16_t)(y + (hires ? 8 : 0x10));
         int lit = M[r32(0x1d3818) + 0x18] != 0;
         frame_logged((uint16_t)r16(deco + (lit ? (f == 0x13f ? 0x27a : 0x27c) : (f == 0x13f ? 0x27e : 0x440))), px, py);
-        if (!r16(0x1d6652)) {
+        if (!r16(0x1d6652) && !marks) {
             uint32_t cell = map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4);
             if (f == 0x13f) {
                 uint32_t str = lit ? r32(0x1d3814) + 0x20 : r32(r32(0x1d7bd0) + 0x19c);
@@ -757,7 +792,7 @@ static int class6(uint32_t t, int x, int y) {
     if (M[SCREEN_MODE] & 8) { dx /= 2; dy /= 2; }
     int tx = (int16_t)(dx + px), ty = (int16_t)(dy + py);
     int lim = (M[SCREEN_MODE] & 8) ? 0x1e0 : 0x190;
-    if (tx > 0 && tx < 0x280 - (lo ? 8 : 4) * 6 && ty > 0 && ty < lim - (lo ? 0xc : 6)) {
+    if (marks || (tx > 0 && tx < 0x280 - (lo ? 8 : 4) * 6 && ty > 0 && ty < lim - (lo ? 0xc : 6))) {
         uint32_t h = 2166136261u; for (int i = 0; i < 6 && win[i]; i++) h = (h ^ win[i]) * 16777619u;
         tp_native_text = win;
         if (dlog) dlog(4, tx, ty, M[0x1d7773], h, lo ? 1 : 0, dctx);
@@ -769,6 +804,7 @@ static int class6(uint32_t t, int x, int y) {
 static int cell_things(int idx, int x, int y) {
     int tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
     while (idx) {
+        if (marks && dlog) dlog(6, idx, idx < 0 ? -1 : M[r32(THINGS) + (uint32_t)idx * 0xc8 + 4], 0, 0, 0, dctx);
         if (idx < 0) {                                           /* static scenery: one frame, then the list ends */
             int f = (uint16_t)r16(r32(DECO_TABLE) + (uint16_t)r16(STATIC_TAB + (uint32_t)(-idx) * 2) * 2);
             frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 4 : 8)), (int16_t)((uint16_t)y + (hires ? 8 : 0x10)));
@@ -832,4 +868,16 @@ void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg
         }
     }
     dlog = NULL;
+}
+/* One cell's things (cell (cx, cy), its corner at (gx, gy) in the game's units), each thing after a
+ * mark (kind 6): the Visitor View's pictures of things (walk.c). Draws what a pass would. */
+int tp_native_cell_things(const uint8_t *mem, int cx, int cy, int gx, int gy, DrawLog lg, void *ctx) {
+    M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); nbumps = 0; rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
+    int missing = 0;
+    if (cx >= 0 && cx < 0x40 && cy >= 0 && cy < 0x40) {
+        int16_t first = r16(r32(MAP_PTR) + (uint32_t)((cy * 64 + cx) * 4));
+        if (first) { marks = 1; missing = cell_things(first, gx, gy); marks = 0; }
+    }
+    dlog = NULL;
+    return missing;
 }
