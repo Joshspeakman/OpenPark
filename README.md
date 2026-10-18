@@ -29,7 +29,10 @@ speed in thousands of instructions per second (default 10000, as in GOG's
 DOSBox configuration). Control-click is the right mouse button. Zoom the park
 with a pinch or ⌘-scroll (⌘= / ⌘- / ⌘0 in the View menu), move around with
 scroll or the arrow keys while zoomed; R in the park switches the game to its
-640x480 mode (runtime/view.c, docs/PLAN.md "Engine rebuild"). Sound needs
+640x480 mode (runtime/view.c, docs/PLAN.md "Engine rebuild"). View > Visitor View (⇧⌘V, experimental)
+drops you into the park at a visitor's height: WASD and drag to look, F follow a visitor, R ride
+along, Esc back (runtime/walk.c, docs/PLAN.md "Visitor View"; `bash tests/check_walk.sh` tests it
+on a synthetic park). Sound needs
 the driver images described in [tools/dump_drivers.md](tools/dump_drivers.md);
 without them the app runs silent.
 

@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
     uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
     double fuzz = 0; int intro = 0;            /* after the deterministic part: seconds of random clicks in real time */
-    const char *rt_keys = "";   /* real time: seconds:key(hex) or seconds:m:x:y:buttons */
+    const char *rt_keys = "";   /* real time: seconds:key(hex) or seconds:m:x:y:buttons (and the letters below) */
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : "";
         if (!strcmp(a, "--game")) game = v, i++;
@@ -101,11 +101,17 @@ int main(int argc, char **argv) {
     int r;
     if (realtime) {
         double next_shot = shots; int shot_n = 0; const char *k = rt_keys;
+        double walk_in[3] = {0}, walk_until = 0, walk_last = 0;   /* Visitor View input held (i:...) */
         for (;;) {
             r = tp_host_run(2000, 0, 20);
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double el = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9;
             if (r || el >= seconds) break;
+            if (tp_walk_active()) {                     /* the walker moves on the app's side: here, every step */
+                int held = el < walk_until;
+                tp_walk_input(held ? walk_in[0] : 0, held ? walk_in[1] : 0, held ? walk_in[2] : 0, 0, 0, 0, walk_last ? el - walk_last : 0.02);
+                walk_last = el;
+            }
             while (*k && strtod(k, NULL) <= el) {
                 char *e; strtod(k, &e); e++;
                 if (*e == 'm' || *e == 'v') {           /* m: the game's mouse; v: through the zoomed view (view.c) */
@@ -142,6 +148,30 @@ int main(int argc, char **argv) {
                         }
                         free(o2);
                     }
+                } else if (*e == 'w') {                  /* w:X:Y: the Visitor View at map point X,Y (X < 0: the middle of the game's view) */
+                    double x = strtod(e + 2, &e), y = strtod(e + 1, &e);
+                    if (x < 0 && !tp_view_point_to_world(0.5, 0.45, &x, &y)) x = y = 32;
+                    fprintf(stderr, "walk: start at %.2f,%.2f: %d\n", x, y, tp_walk_start(x, y));
+                } else if (*e == 'p' || *e == 'r' || *e == 'o' || *e == 'n') {   /* p follow (possess), r ride along, o view, n noclip */
+                    char c = *e++;
+                    tp_walk_command(c == 'p' ? TP_WALK_FOLLOW : c == 'r' ? TP_WALK_RIDE : c == 'o' ? TP_WALK_VIEW : TP_WALK_NOCLIP);
+                    char st[256]; tp_walk_status(st, sizeof st); fprintf(stderr, "walk: %s\n", st);
+                } else if (*e == 't') {                  /* t:X:Y:YAW: put the walker there, looking YAW degrees (0 east, -90 north) */
+                    double x = strtod(e + 2, &e), y = strtod(e + 1, &e), yaw = strtod(e + 1, &e);
+                    tp_walk_teleport(x, y, yaw * M_PI / 180);
+                } else if (*e == 'i') {                  /* i:FWD:STRAFE:TURN:SECONDS: hold walking input */
+                    walk_in[0] = strtod(e + 2, &e); walk_in[1] = strtod(e + 1, &e); walk_in[2] = strtod(e + 1, &e);
+                    walk_until = el + strtod(e + 1, &e);
+                } else if (*e == 'g') {                  /* g:name: the Visitor View, 960x600, to out/name.png */
+                    char name[256]; int n = 0; e += 2; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
+                    static uint32_t img[960 * 600];
+                    tp_walk_input(0, 0, 0, 0, 0, 0, 0);
+                    int ok = tp_walk_render(img, 960, 600);
+                    char p[1024], st[256]; snprintf(p, sizeof p, "%s/%s.png", out, name);
+                    int tp_host_png_rgba(const char *, const uint32_t *, int, int); if (ok) tp_host_png_rgba(p, img, 960, 600);
+                    tp_walk_status(st, sizeof st); double wx, wy; tp_walk_position(&wx, &wy);
+                    int type = -1; char ride[64] = ""; int on = tp_walk_ride(&type, ride, sizeof ride);
+                    fprintf(stderr, "walk shot %s drawn=%d at %.2f,%.2f riding=%d type %d '%s' | %s\n", p, ok, wx, wy, on, type, ride, st);
                 } else { uint32_t key = (uint32_t)strtoul(e, &e, 16); tp_host_key(key); tp_host_key_raw(key >> 8, 1); tp_host_key_raw(key >> 8, 0); }
                 k = *e ? e + 1 : e;
             }

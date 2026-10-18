@@ -434,6 +434,90 @@ Unpaused, the only change flagged was a ride sign scrolling its name.
   (no copy): 8 ms + 11 ms upload → 0.8 ms. Every visible pass is drawn every
   frame. Hitches remain only at the moment of a zoom change.
 
+## Visitor View (experimental) — 2026-10-18
+
+Decision (2026-10-18): the user asked for a first-person "walk your park" mode like Street View
+(drop in anywhere, walk at a visitor's height with everything at the right scale, buy things,
+ride rides, a ride's video while riding) and, after a survey of options, to build it fully on an
+experimental branch (`claude/focused-volta-nsneko`, Claude Code in a cloud session). Chosen: one
+pseudo-3D renderer for both an eye-level view and a raised "diorama" view (V switches), from the
+game's own state and art; interaction through real visitors (ride along) rather than a pretend
+one, because buying and riding are the visitor AI's and faking them would put made-up state into
+the simulation.
+
+**What it is** (runtime/walk.c; app: View > Visitor View, ⇧⌘V, then click where to stand):
+- Floor: the game's ground, un-sheared. The landscape is a plain shear (cell corner at
+  tw (X - cx) + tw/3 (Y - cy) + C0, th (Y - cy); C0 = 0x280 - tw ((0x280 - [0x1d6624]) / tw), from
+  0x11b8fe), so each cell's block and decorations, drawn by the native landscape code
+  (`tp_native_cell_ground`), become one square of a 64x64-cell texture. Updated per changed cell.
+- Things: each drawn by the native things code into a picture of its own (`tp_native_cell_things`
+  marks each thing's start, kind 6; the entrance does not redraw neighbours; sign text is kept):
+  the game's art with animation, riders, carried items, thoughts. A picture is a card facing the
+  camera with its foot on the ground: people and other things placed by bytes 6/8 at their exact
+  place; others at the middle of the picture's bottom edge, moved back half an estimated footprint.
+- Scale: one for everything (an art pixel is 1/tws of a cell across, aspect/tws up; 320x200's
+  pixels are 1.2 times as tall). The eye is at 0.92 of the median visitor picture's height.
+  TP_WALK_SCALE multiplies it all if calibration says so.
+- Walking: WASD/arrows, Q/E turn, drag (grab) or two-finger scroll to look, Shift runs. Rides
+  (class 4, 0x12) and scenery block their estimated footprint; N walks through.
+- Visitors: F follows the nearest visitor (you see what they see, where they go, what they buy),
+  Space hops to another one ahead, R joins someone riding the nearest ride ahead. Riding is read
+  from the rider chains (word 0x47 from class 4 rides and 0x0e cars, 0x0a's one rider, 0x12
+  trains' cars through word 0x7a). On a car the camera rides the car (lifted by its stack level);
+  on other rides it turns with the ride. If `~/Games/ThemeParkNative/rides/<type>.mp4|mov|m4v`
+  (type 0..28, or the ride's name) exists it plays instead, looping, until the ride ends.
+- The game's camera follows the walker, so ride music and sounds are those around you.
+- Survey aid: TP_WALK_WATCH=1 logs every byte of the followed visitor's record (and its ride's)
+  that changes, with the game tick.
+
+**Verified** (tests/check_walk.sh, any C compiler, ASan/UBSan, synthetic memory, no game data):
+the snapshot changes no game memory but the camera; the floor's every cell has its own colour
+(all 4,096 cells, 9 samples each) and follows changes in both buffers; the cell-to-screen formula
+matches the transcribed landscape loop for view offsets -24..40; the drop-point mapping
+(`tp_view_point_to_world`, view.c) returns 17,808 points of 24 cameras and 8 offsets exactly; a
+visitor's card stands at its place with its foot at the art's; the render puts a visitor ahead in
+the middle at the right height and a tree to the north-east right of the middle, and the floor
+under the view is the right cell; a tree blocks the way; riding along finds the ride's type and
+name. Cost on this (x86 cloud) machine, 1,000 visitors and 300 trees: snapshot 1.8 ms (2.8 ms
+with a changed cell), drawing 720x450 4.2 ms.
+
+**Not verified — nothing here has met the real game.** The session had no game files and no
+macOS: app/main.m (menu, keys, drop click, status line, ride video) was written but not
+compiled; the build scripts include walk.c but were not run. Unknown until it runs on the Mac:
+whether real ground blocks are flat parallelograms (raised water edges would be cut), the right
+height scale (the art is drawn looking down ~40°, so cards may look squat or tall), how well the
+footprint guess fits real rides, whether 0x47 chains on real rides are riders only, the ride-type
+lookup for cars, performance with the real art on Apple Silicon.
+
+**Limits, by design until more is reverse-engineered**:
+- One art direction: rides and shops are cards turning to face you (their backs are their
+  fronts); the art's own ground under a ride stands up with the card. Diorama view keeps near
+  the art's own angle, where this shows least.
+- You cannot steer a visitor, queue or buy yourself: the visitor AI (where it picks its way at a
+  cell, how it chooses a shop or ride, its cash) is not known. Free walking is an onlooker.
+- No ride videos were found or checked in the GOG data; the generated seat view is the default.
+
+**To test on the Mac** (scratch profile, muted, bounded, as CLAUDE.md requires):
+`bash tests/check_walk.sh`; then build with tools/build_app.sh and either (a) the app with
+TP_CONTROL: `walk -1 0` (the middle of the game's view), `walkshot PATH`, `walkcmd 1` (follow;
+2 hop, 3 ride along, 4 view, 5 noclip), `walkhold FWD STRAFE TURN SECONDS`, `walkteleport X Y
+YAW`, `walkstop`; or (b) tp-headless `--realtime S --rt-keys` with `T:w:X:Y` (X < 0: the view's
+middle), `T:p` follow, `T:r` ride along, `T:o` view, `T:n` noclip, `T:t:X:Y:YAW`,
+`T:i:FWD:STRAFE:TURN:SECONDS`, `T:g:NAME` (out/NAME.png, 960x600, with the walker's state logged).
+
+**On the Mac (2026-10-18, merged into nightly):** compiled first time; tests/check_walk.sh passes
+(with stubs for nightly's pacing); in the real test park, headless and in the full-screen app, the
+floor un-shears correctly (paths, flower beds, fence), visitors, shops and rides stand as cards at
+a plausible scale, walking, turning, diorama view and following a visitor work, and leaving returns
+to the park view (60 frames a second). Not yet checked: riding along, ride videos, footprints of
+large rides, the pointer drop point in the app.
+
+**Next steps**: (1) run it in a park and look (scale, footprints, flicker, the drop point);
+(2) list GAME/ and THEME.CD/ for any ride animations; (3) the visitor AI with TP_WALK_WATCH and
+TP_PROFILE: the heading/state/target bytes and the function choosing a visitor's next cell, then
+a hook there to steer the followed visitor (Street View arrows at path junctions), which gives
+real buying and queueing; (4) which cells are paths (for walking on paths only).
+
 ## Reused from decomp.wtf (2026-10-17)
 
 The user forked i12bp8/decomp.wtf (MIT, discontinued 2026-10-15) and asked what
