@@ -384,9 +384,10 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     NSRect r = [self viewRect]; NSPoint p = _mouse; double m = 6, v = 9;
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     double lw = [self layoutW], col = (lw - _sw) / 2 / lw;
-    if (fy > (double)_wh / _sh && fx >= col && fx < 1 - col) return;   /* over the panel */
+    BOOL panel = fy > (double)_wh / _sh && fx >= col && fx < 1 - col;   /* over the panel: only its outer edge scrolls */
     double dx = p.x < NSMinX(r) + m ? -v : p.x > NSMaxX(r) - m ? v : 0;
     double dy = p.y > NSMaxY(r) - m ? -v : p.y < NSMinY(r) + m ? v : 0;   /* (corners: both, diagonally) */
+    if (panel && !(p.y < NSMinY(r) + m) && !(p.x < NSMinX(r) + m) && !(p.x > NSMaxX(r) - m)) return;
     if (dx || dy) [self panBy:dx :dy];
 }
 - (void)magnifyWithEvent:(NSEvent *)e {

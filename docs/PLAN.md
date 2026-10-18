@@ -607,6 +607,17 @@ Stage 2 (extent 128, 2026-10-18):
   blend patches touching the park or one or two pixels thin are shadows over
   the park, not window colours; the date box keeps only the pixels the date
   drew (stale pixels a frame 23 -> 2 in the picture verify).
+- Downward scrolling (2026-10-18, the player: "scrolling downward jumps and goes too fast"):
+  with the pointer on the screen's bottom row (the panel's bottom edge) the game scrolled its own
+  camera a row every frame, and the zoomed view re-centred on it each time (the jump and the
+  speed; the top bar already held the camera, and the sides never reach the game's edge). With
+  the view on, the game's pointer is now kept two pixels off the screen's edges and the app pans
+  at the panel's outer edge at its own steady rate. Also for 128 parks: the view kept the game's
+  camera within the 64 park's range (rows/columns to 51, so the pointer was pinned to the game
+  view's edge below that) — now tp_map_ext - 13; and the game's own scroll limits 0x1143c5 /
+  0x11443b (mov ebx, 0x40) are map-geometry sites (615). Checked in the app (TP_VIEW_DEBUG):
+  pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
+  camera reaches row 64 on a 128 park.
 
 ## Advisor only while talking; Panel Size (2026-10-18)
 
