@@ -632,6 +632,14 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Top bar: no magenta edge (2026-10-18)
+
+The player: a pink line at the bottom of the menu bar at the top. Seen full screen with the pointer on the
+top edge (the blue bar, before a menu drops): its dark bottom row is drawn by darkening what is under it
+through another table (as the menus' edges, PLAN above), so over the marker it came out as colour 0xff,
+magenta (TP_TOPBAR_DEBUG showed row 7: screen ff, park 00). The marker is now off while the pointer is on the
+top bar, as under open menus. Checked full screen: a dark edge, as with the view off.
+
 ## Sound: the card in the game's time (2026-10-18)
 
 The player (nightly, their own park, sound on): some effects choppy or distorted; the game slows for a

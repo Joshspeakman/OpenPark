@@ -851,7 +851,7 @@ static int sentinel_on;
 static void sentinel_apply(void) {
     /* (not under a top menu: its edge and shadow darken what is under them through another table, so over
      * the marker they come out magenta; the camera is held meanwhile and the frame difference is exact) */
-    if (menu_open()) { sentinel_on = 0; return; }
+    if (menu_open() || topbar) { sentinel_on = 0; return; }   /* (the top bar's dark edge too: a magenta line under it) */
     uint8_t *bb = M + r32(DISP_BUF);
     for (int i = 0; i < SW * WORLD_H; i++) if (bb[i] == world_only[i]) bb[i] = SENTINEL;
     sentinel_on = 1;
