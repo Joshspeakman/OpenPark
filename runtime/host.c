@@ -764,6 +764,7 @@ static void interrupt(uint32_t number) {
             if (handles_big[b] >= 0) {                    /* a park's map was written: mark (or unmark) a 128x128 one */
                 char mk[1040]; snprintf(mk, sizeof mk, "%s.big", handles_path[b]);
                 if (handles_big[b]) { FILE *f = fopen(mk, "w"); if (f) { fputs("128\n", f); fclose(f); } } else unlink(mk);
+                { void tp_free_saved(const char *); tp_free_saved(handles_path[b]); }   /* (and its Free Mode rules: freemode.c) */
             }
             carry(0); return;
         }
@@ -776,7 +777,7 @@ static void interrupt(uint32_t number) {
                   char mk[1040]; snprintf(mk, sizeof mk, "%s.big", handles_path[b]);
                   int big = exists(mk), want = big ? 0x10000 : 0x4000;
                   if (big && tp_bigmap_alloc() < 128) { fprintf(stderr, "bigmap: %s holds a 128x128 park (turn on the larger map setting)\n", handles_path[b]); carry(5); return; }
-                  { void tp_bigmap_loaded(void); tp_bigmap_loaded(); }
+                  { void tp_bigmap_loaded(void); tp_bigmap_loaded(); void tp_free_loaded(const char *); tp_free_loaded(handles_path[b]); }
                   if ((int)c != want || (int)tp_map_w != (big ? 128 : 64)) { tp_bigmap_set(big ? 128 : 64, big ? 128 : 64); c = (uint32_t)want; }
               } }
             ssize_t got = 0, r;
