@@ -59,8 +59,8 @@ extern int tp_hook_which;
 void tp_hooks_changed(void);
 
 #define QOL0 12
-enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, NHOOK };
-static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee};
+enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, NHOOK };
+static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x118b92};   /* (H_TICK: a call the park's tick makes, from 0x1139a8) */
 extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 800) */
 #define SIM_LEVEL    0x1d66f1u            /* 0 sandbox, 1 sim, 2 full */
 #define PLAYER_PARK  0x1d3818u            /* -> the player's park record (0x250 bytes): +0x1f visitors, +0x48 bus size, +0x49 level */
@@ -99,6 +99,7 @@ void tp_qol_init(void) {
     if (free_bus < 0) free_bus = 0;
     tp_tune_max_people = 0x320;
     { void tp_bigmap_init(void); tp_bigmap_init(); }   /* larger maps (bigmap.c) */
+    { void tp_free_init(void); tp_free_init(); }       /* Free Mode rules (freemode.c) */
     if (park_tune < 0 || park_tune > NTUNES) park_tune = 0;
     memset(type_tune, -1, sizeof type_tune);
     for (e = getenv("TP_RIDE_TUNES"); e && *e; ) {
@@ -130,6 +131,10 @@ void tp_qol_hook(int nested) {
     int k = tp_hook_which - QOL0;
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
+    if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
+        if (!nested && r32(m, sp) == 0x1139adu) { void tp_free_frame(void); tp_free_frame(); }
+        return;
+    }
     uint32_t ret = r32(m, sp), a1 = r32(m, sp + 4), a2 = r32(m, sp + 8);
     switch (k) {
     case H_SFX: case H_SFX_PARK: case H_SFX3: case H_SFX4: case H_SFX5:
@@ -166,7 +171,7 @@ void tp_qol_hook(int nested) {
         if (log_sounds) { static double l; if (now() - l > 2) { l = now(); fprintf(stderr, "music: no ride on screen, %s\n", park_tune ? "park tune" : "stop"); } }
         return;
     case H_NEW_PARK:                                  /* larger maps (bigmap.c): the new park's size */
-        if (!nested) { void tp_bigmap_new_park(void); tp_bigmap_new_park(); }
+        if (!nested) { void tp_bigmap_new_park(void); tp_bigmap_new_park(); void tp_free_new_park(void); tp_free_new_park(); }
         return;
     case H_BUS_ARRIVES: {                             /* free mode, sandbox parks only */
         int sandbox = m[SIM_LEVEL] == 0;

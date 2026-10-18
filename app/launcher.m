@@ -156,7 +156,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[4], _tweaks[6], _free[3];
+    Setting _display[7], _sound[4], _tweaks[6], _free[5];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -218,11 +218,17 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _tweaks[3] = setting(@"Park Music", @"ParkTune", tunes, tuneL, tuneN);
         _tweaks[4] = setting(@"Frame Pacing", @"SteadyPacing", @[@YES, @NO], @[@"Steady", @"Like DOSBox"],
                              @[@"Every frame the same length, in step with the display", @"The game's speed follows how busy the screen is, as in 1994"]);
-        _free[0] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
+        _free[0] = setting(@"Rules", @"FreeRules", @[@0, @1, @2], @[@"Sandbox", @"Endless", @"True Freeplay"],
+                           @[@"The game's sandbox, at the settings you choose", @"Starts as easy as the first parks and grows to the hardest; research as normal",
+                             @"Every ride and shop researched, and money that never runs out"]);
+        _free[1] = setting(@"Endless Ramp", @"FreeRamp", @[@36, @60, @120], @[@"3 Years", @"5 Years", @"10 Years"],
+                           @[@"Endless parks reach the hardest in three game years", @"Endless parks reach the hardest in five game years",
+                             @"Endless parks reach the hardest in ten game years"]);
+        _free[2] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
                            @[@"The game's limit for a park", @"A hundred more than the game allows", @"Close to all the game's people can be (rides and staff share them)"]);
-        _free[2] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
+        _free[4] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
                            @[@"The game's park size", @"Four times the land for new sandbox parks (saved parks keep their size)"]);
-        _free[1] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
+        _free[3] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
                            @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
                              @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
         self.open = -1; self.hover = HIT_NONE; self.focus = -1;
@@ -241,7 +247,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 6 : self.open == 5 ? 3 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 6 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -452,7 +458,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[2]]];
     if (g == 2) return @"Mouse and keyboard";
     if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]]];
-    if (g == 5) return [NSString stringWithFormat:@"%@ visitors · %@ parks", [self valueOf:&_free[0]], [self valueOf:&_free[2]]];
+    if (g == 5) return [NSString stringWithFormat:@"%@ · %@ visitors · %@", [self valueOf:&_free[0]], [self valueOf:&_free[2]], [self valueOf:&_free[4]]];
     return @"Saved parks, in the Finder";
 }
 - (void)drawRect:(NSRect)dirty {

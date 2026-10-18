@@ -632,6 +632,46 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Endless and True Freeplay (sandbox parks), 2026-10-18
+
+Decision (2026-10-18): the player asked for an endless mode for sandbox parks that "start[s] out at
+the difficulty of basically the first couple of levels and then ramp[s] up to the hardest as you
+play", with research as normal, and a "true freeplay where everything is unlocked with infinite
+money". Launcher > Free Mode > Rules: Sandbox (as before) / Endless / True Freeplay, and Endless
+Ramp: 3, 5 (default) or 10 game years. Campaign (Sim, Full) parks are never touched.
+
+Survey (memory diffs on the player-details screen; reads of each byte in the build):
+- the screen's choices: 0x1d66f1 sim level, 0x1d66f2 park visitors (0 happy .. 2 fussy),
+  0x1d66f5 start level (0 easy .. 2 hard; the screen's default 1), 0x1d66f6 opponents level;
+- what they do: start money 0x1b7f7c[start level] (200,000 / 150,000 / 100,000 -> 0x1d6718, then
+  the player's block, *0x1d3b00 + 0x0a); a park being bought (0x16e8xx) writes its record
+  (0x1cf1e0 + 0x250 n, the player's at [0x1d3818]): +0 = 200 + 50 fussy (a visitor's +0x54 is
+  compared with it, 0x132c95), +2 = -200 + 50 fussy (changes in play: not touched), +4 = 100 + 40 (2
+  - start), +6 = 25 + 15 (2 - start), +8 = 104 + 20 (2 - fussy); a new visitor's +0x54 =
+  (2 - fussy) * 50 (0x128534). The bus table 0x1b78cc is indexed by the park's bus upgrades (+0x49),
+  not a difficulty. The month: the player record's +0x5ed ([0x1d3814], 0..11); no year counter
+  was found, so Endless counts months itself.
+- Research needs nothing: sandbox researches as the other levels do (only the QA scripts unlocked).
+
+runtime/freemode.c: a new park's rules (or a loaded one's) are settled at its first frame (view.c's
+FRAME_RENDER, held on until then: the setting-up screens come after the park is first built);
+then every park tick (a hook on 0x118b92, only when called from the tick at 0x1139a8):
+- Endless: at the start Easy's money and the record's values for difficulty 0; each month
+  d = 2 x months / ramp (to 2): the record's values in proportion, the start/opponents bytes
+  rounded, and the visitors byte dithered between its neighbours each tick, so visitors arrive on
+  average as fussy as d;
+- True Freeplay: every ride's and shop's researched flag (the runtime tables, as the QA unlock) and
+  the money topped up to 5,000,000 whenever it falls below 1,000,000.
+A park's rules, months and ramp are kept beside its save (<save>.free, "rules months ramp"; host.c,
+with the 128x128 marker), so a loaded park keeps its own rules whatever the Launcher says.
+
+Checked in the app (muted, scratch data, TP_FREE_LOG): a new Endless park starts with 200,000 and
+the record 200/180/55/144; seven game months later (3-year ramp) d = 0.39 and the record is
+219/164/49/136; the autosave at the year end wrote "1 11"; continued with the Launcher on Sandbox
+it loaded as Endless at month 11. True Freeplay: money 5,000,000, the Flight Sim (late research)
+in the ride list at once. tests/check_macos.sh --park passes.
+Not known: what +4/+6/+8 govern in play (the game's own easy..hard values are interpolated).
+
 ## Advisor only while talking; Panel Size (2026-10-18)
 
 - The advisor's face stayed after his bubble went: the gap rule refilled his

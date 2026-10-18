@@ -900,6 +900,7 @@ void tp_view_hook(void) {
     switch (tp_hook_which) {
     case 0:                                               /* FRAME_RENDER */
         { void tp_bigmap_setup_done(void); tp_bigmap_setup_done(); }   /* (the park is on: its size is settled; bigmap.c) */
+        { void tp_free_park_shown(void); tp_free_park_shown(); }       /* (and its Free Mode rules; freemode.c) */
         tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
         { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
           if (fresh) { st_game++; st_game_total++; if (pacing) pace_frame(); } }
@@ -942,7 +943,8 @@ void tp_view_hook(void) {
         if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); coherent = 1; }
         else if (!w) {                                    /* the view is off: no hooks at all until it is wanted */
             active = 0; hooks(0);
-            if (!hires_wanted && !poster_wanted && !fps_game_hook && !pacing && !tp_walk_active()) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
+            int tp_free_waiting(void);
+            if (!hires_wanted && !poster_wanted && !fps_game_hook && !pacing && !tp_walk_active() && !tp_free_waiting()) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
         }
         else if (active) {                                /* passes at most 60 times a second (the game draws faster) */
             static double last; double t = now();
