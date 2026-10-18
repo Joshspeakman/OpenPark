@@ -677,6 +677,7 @@ static void *game_thread(void *arg) {
             QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
             QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
             QOL_ENV("TP_FREE_BUS", [u integerForKey:@"FreeBus"]);
+            QOL_ENV("TP_BIG_MAPS", [u integerForKey:@"FreeMapSize"] == 128);   /* (bigmap.c: room for 128x128 sandbox parks) */
             if (![u boolForKey:@"SteadyPacing"] && !getenv("TP_PACING")) setenv("TP_PACING", "dosbox", 1);
             #undef QOL_ENV
             NSDictionary *tunes = [u dictionaryForKey:@"RideTunes"];
@@ -720,7 +721,7 @@ static void *game_thread(void *arg) {
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"SteadyPacing": @YES, @"PanelScale": @1.0}];
+                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"SteadyPacing": @YES, @"PanelScale": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */

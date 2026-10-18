@@ -93,13 +93,17 @@ int main(int argc, char **argv) {
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));
-    if (tp_host_init(game, overlay, !realtime, &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
+    if (tp_host_init(game, overlay, !realtime || getenv("TP_PREFIX_BLOCKS"), &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);    /* (as the app's game thread) */
     if (!intro) { void tp_qol_init(void); tp_qol_init(); }            /* quality-of-life hooks (qol.c) */
     if (!intro && getenv("TP_COUNT_FRAMES")) { void tp_view_count_game_frames(int); tp_view_count_game_frames(1); }   /* (development: frames counted with the view off) */
     if (getenv("TP_START_HIRES")) tp_view_request_hires(1);          /* as the app's Start In 640x480 */
     int r;
     if (realtime) {
+        if (getenv("TP_PREFIX_BLOCKS")) {   /* development: the scripted part (--keys, --clicks, --block-clicks) first, e.g. a new park */
+            r = tp_host_run(quantum, (uint32_t)atoi(getenv("TP_PREFIX_BLOCKS")), 0);
+            tp_host_set_realtime(); clock_gettime(CLOCK_MONOTONIC, &t0);
+        }
         double next_shot = shots; int shot_n = 0; const char *k = rt_keys;
         double walk_in[3] = {0}, walk_until = 0, walk_last = 0;   /* Visitor View input held (i:...) */
         for (;;) {

@@ -65,6 +65,24 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"118508": {
+"new": "(tp_map_ext/2u)"
+},
+"118547": {
+"new": "tp_map_ext"
+},
+"118570": {
+"new": "tp_map_ext"
+},
+"11857a": {
+"new": "(tp_map_ext-1u)"
+},
+"118598": {
+"new": "tp_map_ext"
+},
+"1185a2": {
+"new": "(tp_map_ext-1u)"
+},
 "1185cc": {
 "asm": "shl eax, 6",
 "old": "n = 6u",
@@ -126,6 +144,12 @@
 },
 "119052": {
 "disp": 1
+},
+"119059": {
+"new": "(tp_map_ext/2u-1u)"
+},
+"119060": {
+"new": "(tp_map_ext/2u+1u)"
 },
 "119077": {
 "disp": 1
@@ -372,6 +396,9 @@
 },
 "11a14b": {
 "new": "(tp_map_ext/2u+tp_map_ext*tp_map_w)"
+},
+"11a1cd": {
+"new": "(tp_map_ext/2u)"
 },
 "11a20c": {
 "new": "tp_map_ext"
@@ -1951,24 +1978,75 @@
 "1511f1": {
 "new": "((tp_map_ext+1u)*tp_map_w*4u)"
 },
+"159c26": {
+"new": "(tp_map_ext/2u)"
+},
+"159efe": {
+"new": "(tp_map_ext-11u)"
+},
+"159f1c": {
+"new": "(tp_map_ext-11u)"
+},
+"159fbc": {
+"new": "(tp_map_ext-11u)"
+},
+"159fda": {
+"new": "(tp_map_ext-11u)"
+},
 "15a04f": {
 "disp": "abs"
 },
 "15a067": {
 "disp": "abs"
 },
+"15a1c9": {
+"new": "(tp_map_ext-14u)"
+},
+"15a1e7": {
+"new": "(tp_map_ext-14u)"
+},
 "15a25f": {
 "asm": "shl eax, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
+},
+"15a2d8": {
+"new": "(tp_map_ext-14u)"
 },
 "15a2f0": {
 "asm": "shl eax, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"15a377": {
+"new": "(tp_map_ext-14u)"
+},
+"15a395": {
+"new": "(tp_map_ext-14u)"
+},
 "15a426": {
 "disp": "abs"
+},
+"15a4d8": {
+"new": "(tp_map_ext/2u)"
+},
+"15a4fc": {
+"new": "(tp_map_ext-15u)"
+},
+"15a51a": {
+"new": "(tp_map_ext-15u)"
+},
+"15a735": {
+"new": "(tp_map_ext-13u)"
+},
+"15a753": {
+"new": "(tp_map_ext-13u)"
+},
+"15a805": {
+"new": "(tp_map_ext-12u)"
+},
+"15a823": {
+"new": "(tp_map_ext-12u)"
 },
 "15a8aa": {
 "disp": "abs"
@@ -1976,16 +2054,73 @@
 "15a8c2": {
 "disp": "abs"
 },
+"15a8fd": {
+"new": "(tp_map_ext/2u)"
+},
+"15a921": {
+"new": "(tp_map_ext-12u)"
+},
+"15a93f": {
+"new": "(tp_map_ext-12u)"
+},
+"15a9c8": {
+"new": "(tp_map_ext/2u)"
+},
+"15a9ec": {
+"new": "(tp_map_ext-13u)"
+},
+"15aa0a": {
+"new": "(tp_map_ext-13u)"
+},
 "15aa91": {
 "disp": "abs"
 },
 "15aaa9": {
 "disp": "abs"
 },
+"15ac00": {
+"new": "(tp_map_ext-12u)"
+},
+"15ac1e": {
+"new": "(tp_map_ext-12u)"
+},
 "15ad11": {
 "asm": "shl eax, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
+},
+"15aec3": {
+"new": "(tp_map_ext-11u)"
+},
+"15aee3": {
+"new": "(tp_map_ext-11u)"
+},
+"15b0c5": {
+"new": "(tp_map_ext-12u)"
+},
+"15b0e5": {
+"new": "(tp_map_ext-12u)"
+},
+"15b2c7": {
+"new": "(tp_map_ext-13u)"
+},
+"15b2e7": {
+"new": "(tp_map_ext-13u)"
+},
+"15b6c7": {
+"new": "(tp_map_ext/2u+-5)"
+},
+"15b6d0": {
+"new": "(tp_map_ext-12u)"
+},
+"15b6e7": {
+"new": "(tp_map_ext/2u+8)"
+},
+"15b6f0": {
+"new": "(tp_map_ext-20u)"
+},
+"15b707": {
+"new": "(tp_map_ext/2u+18)"
 },
 "1612c8": {
 "asm": "mov ebx, 0x40",

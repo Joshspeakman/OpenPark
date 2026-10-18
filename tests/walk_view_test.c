@@ -19,6 +19,8 @@ void tp_host_key(uint32_t k) { (void)k; }
 void tp_host_key_raw(uint8_t s, int d) { (void)s; (void)d; }
 uint32_t tp_get(unsigned i) { (void)i; return 0; }
 uint32_t tp_hook_pcs[24]; int tp_hook_which; uint64_t tp_insns, tp_rep;
+uint32_t tp_map_w = 64, tp_map_ext = 64;   /* (the game's park size; bigmap.c) */
+void tp_bigmap_setup_done(void) {}
 void tp_hooks_changed(void) {}
 volatile double tp_frame_paced_at; double tp_host_cycles(void) { return 10000; }   /* (nightly's pacing) */
 int tp_view_point_to_world(double fx, double fy, double *wx, double *wy);

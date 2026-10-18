@@ -114,18 +114,21 @@ static Geo G;                       /* the emulation thread's (tp_view_hook) */
 #define STEP_X G.stx                /* passes, in camera steps */
 #define STEP_Y G.sty
 #define CXMIN 2
-#define CXMAX 53
+#define CXMAX ((int)tp_map_ext - 11)     /* (53 for the game's 64x64 park; bigmap.c) */
 #define CYMIN (-2)
-#define CYMAX 53
+#define CYMAX ((int)tp_map_ext - 11)
 #define GAME_CX0 4
 #define GAME_CX1 51
 #define GAME_CY0 0
 #define GAME_CY1 51
 #define MAX_SCREEN (640 * 480)
-#define MAX_CANVAS (3968 * 2200)
+#define MAX_CANVAS (4400 * 2400)              /* (a 128x128 park in 640x480: 4352 x 2340) */
 /* The art is the same size in both modes (measured: a camera step moves the
  * picture (24, 0) or (8, 16) pixels in either); 640x480 shows more of the park. */
+extern uint32_t tp_map_w, tp_map_ext;
+static uint32_t geo_ext;                  /* the park size G was made for */
 static Geo geo(int s) {
+    geo_ext = tp_map_ext;
     Geo g; if (s != 2) s = 1;
     g.s = s; g.sw = 320 * s; g.sh = s == 1 ? 200 : 480; g.wh = s == 1 ? 178 : 436;
     g.ux = 24; g.uyx = 8; g.uy = 16;
@@ -570,14 +573,14 @@ static void blit_real(int cx, int cy) {
 
 /* The grid of passes covering the canvas. */
 typedef struct { int16_t cx, cy; int x0, y0, x1, y1; } Pass;
-static Pass grid[512]; static uint8_t drawn[512]; static int ngrid, rr, rr_done;
+static Pass grid[4096]; static uint8_t drawn[4096];   /* (512 for a 64x64 park; a 128x128 one needs ~2000) */ static int ngrid, rr, rr_done;
 static void make_grid(void) {
     ngrid = 0; memset(drawn, 0, sizeof drawn);
     for (int cy = CYMIN - (PT + UY - 1) / UY; ; cy += STEP_Y) {
         if (cam_oy(cy) + PT >= CH) break;
         for (int cx = (int)floor((double)(-UYX * cy - OX - TX0) / UX); ; cx += STEP_X) {
             int x0 = cam_ox(cx, cy) + TX0;
-            if (x0 >= CW || ngrid == 512) break;
+            if (x0 >= CW || ngrid == 4096) break;
             grid[ngrid++] = (Pass){(int16_t)cx, (int16_t)cy, x0, cam_oy(cy) + PT, x0 + (TX1 - TX0), cam_oy(cy) + PB};
         }
     }
@@ -877,7 +880,7 @@ void tp_view_hook(void) {
     int sc = mode_scale();
     if (dbg > 0) { dbg--; fprintf(stderr, "view hook %d want %d active %d scale %d\n", tp_hook_which, w, active, sc); }
     if (!sc) { if (active) { active = 0; hooks(0); } return; }
-    if (sc != G.s) {                                      /* the game changed its screen mode ([R]): start again */
+    if (sc != G.s || geo_ext != tp_map_ext) {             /* the game changed its screen mode ([R]) or the park size: start again */
         G = geo(sc); ngrid = 0; memset(canvas, 0, (size_t)CW * CH);
         have_world = have_pre_extras = pre_ok = 0; in_frame = 0;
         pthread_mutex_lock(&lock); pub_time = 0; pub_cur_ok = 0; pthread_mutex_unlock(&lock);
@@ -892,6 +895,7 @@ void tp_view_hook(void) {
     }
     switch (tp_hook_which) {
     case 0:                                               /* FRAME_RENDER */
+        { void tp_bigmap_setup_done(void); tp_bigmap_setup_done(); }   /* (the park is on: its size is settled; bigmap.c) */
         tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
         { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
           if (fresh) { st_game++; st_game_total++; if (pacing) pace_frame(); } }
@@ -1466,7 +1470,7 @@ int tp_view_point_to_world(double fx, double fy, double *wx, double *wy) {
     double c0 = (0x280 - tw * ((0x280 - off) / tw)) >> lo;
     *wy = (py - g.oy) / g.uy;
     *wx = (px - g.ox - c0 - g.uyx * *wy) / g.ux;
-    return *wx >= 0 && *wy >= 0 && *wx < 64 && *wy < 64;
+    return *wx >= 0 && *wy >= 0 && *wx < (int)tp_map_ext && *wy < (int)tp_map_ext;
 }
 void tp_view_canvas_size(double *w, double *h) { Geo g = geo(vis_s); *w = g.cw; *h = g.ch; }
 /* The game's cursor as RGBA (CUR x CUR, w x h used), its corner's offset from the pointer in screen
