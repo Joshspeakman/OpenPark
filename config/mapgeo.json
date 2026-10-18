@@ -17,6 +17,12 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"1143c5": {
+"new": "tp_map_ext"
+},
+"11443b": {
+"new": "tp_map_ext"
+},
 "114b64": {
 "new": "tp_map_ext"
 },

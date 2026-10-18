@@ -118,9 +118,9 @@ static Geo G;                       /* the emulation thread's (tp_view_hook) */
 #define CYMIN (-2)
 #define CYMAX ((int)tp_map_ext - 11)
 #define GAME_CX0 4
-#define GAME_CX1 51
+#define GAME_CX1 ((int)tp_map_ext - 13)  /* (51 for the 64x64 park) */
 #define GAME_CY0 0
-#define GAME_CY1 51
+#define GAME_CY1 ((int)tp_map_ext - 13)
 #define MAX_SCREEN (640 * 480)
 #define MAX_CANVAS (4400 * 2400)              /* (a 128x128 park in 640x480: 4352 x 2340) */
 /* The art is the same size in both modes (measured: a camera step moves the
@@ -1351,8 +1351,11 @@ void tp_view_poll(void) {
             pthread_mutex_unlock(&lock);
         }
         if (!on || ui) {
-            double fx = incol ? cxs / SW : (cxs < 0 ? 0 : 0.9999);
-            tp_host_mouse(fx, in_band ? ly_ui / SH : q[i].fy, q[i].buttons);
+            double fx = incol ? cxs / SW : (cxs < 0 ? 0 : 0.9999), fy = in_band ? ly_ui / SH : q[i].fy;
+            /* The game scrolls itself while the pointer is on the screen's edge (the panel's bottom row,
+             * say): with the view on, the app pans instead, so the game's pointer stays off the edges. */
+            if (on) { fx = fmin(fmax(fx, 2.0 / SW), (SW - 2.0) / SW); fy = fmin(fy, (SH - 2.0) / SH); }
+            tp_host_mouse(fx, fy, q[i].buttons);
             continue;
         }
         {
