@@ -632,6 +632,17 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Bouncy castle riders (2026-10-18)
+
+The player: no one bouncing on the bouncy castle (other rides perhaps too). The ride renderer 0x169840
+chooses how riders are drawn by the ride type's byte 0xb3: 0 and 1 (seats, turning), 5 and 7 (seats),
+8 (the maze: people at random places), 9 (the bouncy castle): if word 0x32 is clear, no riders, else as
+5 and 7 (0x169a59 -> 0x169a6f); 2, 3, 4, 6 none. The native port had turned 9 without word 0x32 into 2
+but never sent 9 with it down the seat path: the castle stayed empty. Fixed (one condition); 3, 4 and
+6 draw no riders in the game either (tubing and race cars, coasters, the tower family: their cars are
+things of their own). Checked in the player's park: riders on the castle in the app as in the game's
+frame. (Found by tracing: the "bouncer" first suspected was the maze's, drawn correctly.)
+
 ## Top bar: no magenta edge (2026-10-18)
 
 The player: a pink line at the bottom of the menu bar at the top. Seen full screen with the pointer on the
