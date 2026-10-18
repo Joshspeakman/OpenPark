@@ -60,7 +60,7 @@ void tp_hooks_changed(void);
 
 #define QOL0 12
 enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, NHOOK };
-static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x118b92};   /* (H_TICK: a call the park's tick makes, from 0x1139a8) */
+static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad};   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
 extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 800) */
 #define SIM_LEVEL    0x1d66f1u            /* 0 sandbox, 1 sim, 2 full */
 #define PLAYER_PARK  0x1d3818u            /* -> the player's park record (0x250 bytes): +0x1f visitors, +0x48 bus size, +0x49 level */
@@ -132,7 +132,7 @@ void tp_qol_hook(int nested) {
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
     if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
-        if (!nested && r32(m, sp) == 0x1139adu) { void tp_free_frame(void); tp_free_frame(); }
+        if (!nested) { void tp_free_frame(void); tp_free_frame(); }
         return;
     }
     uint32_t ret = r32(m, sp), a1 = r32(m, sp + 4), a2 = r32(m, sp + 8);
