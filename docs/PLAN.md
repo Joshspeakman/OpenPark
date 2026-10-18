@@ -518,7 +518,7 @@ TP_PROFILE: the heading/state/target bytes and the function choosing a visitor's
 a hook there to steer the followed visitor (Street View arrows at path junctions), which gives
 real buying and queueing; (4) which cells are paths (for walking on paths only).
 
-## Larger maps (sandbox parks) — in progress, 2026-10-18
+## Larger maps (sandbox parks), 2026-10-18
 
 Goal: 128x128 parks in the non-campaign mode (campaign stays 64x64).
 
@@ -562,9 +562,32 @@ Verification so far:
 - Note: a 0x10000 *MAP block at stride 64 departs from the original after 22M
   blocks (less free memory for the game's caches); campaign parks keep 0x4000.
 
-Next: extent 128 (park creation edges, entrance in the middle of the bottom
-edge, camera limits, minimap, our native renderer and walk view), the launcher
-choice (Free Mode: Map Size) only for sandbox parks, versioned saves.
+Stage 2 (extent 128, 2026-10-18):
+- More sites: the camera (its clamp, centring on the middle column 0x20, the
+  tutorial's positions), the entrance gap in the bottom fence (x 31..33), the
+  entrance area's rows in 0x159xxx-0x15bxxx, a map-row walker's end
+  (map + 0x4100) and the map's memset (the whole block). Rules: x near 0 or y
+  near 0 stay absolute; near 63 they count from the far edge; x near 32 counts
+  from the middle column. Not geometry (checked): 0x39c5 / 0x39c1 passed to
+  0x1349eb are a mask of cell types; 0x3cb0 at 0x113dfb a marker.
+- Our code: native_land.c (cells by tp_map_w, bounds by tp_map_ext), view.c
+  (camera range E-11, canvas up to 4400x2400, 4096 passes), walk.c (tables for
+  128, loops over the extent). Native passes 0 differ at 64 and at 128.
+- Which parks: Free Mode > Map Size (FreeMapSize, TP_BIG_MAPS) gives the map
+  block 128x128 room at start-up. The game builds a new park (0x119eee, hooked)
+  before the player picks the sim level, so it is built 64x64 and, while it is
+  being set up, a choice of Sandbox rebuilds it 128x128 (the game's 0x118bc0
+  removes the entrance and builds the border and the entrance again; the bus is
+  moved and relinked). The first park frame or a load ends the setting up.
+  Other parks stay 64x64 and save in the game's own format.
+- Saves: a 128x128 park's save has a marker beside it (<save>.big, written when
+  the map chunk written is 0x10000 bytes); a read of the map chunk switches to
+  the layout of the save (and refuses a 128x128 save without the setting).
+  Checked in the app: a new sandbox park at 128 (log, picture), its autosave
+  (0xC000 bytes more, marker) loads back at 128; the 64x64 demo park loads at
+  64 with the setting on.
+- Not yet checked: visitors walking far from the entrance, the overview map,
+  every ride and shop on the big map (the final QA), performance zoomed out.
 
 ## Advisor only while talking; Panel Size (2026-10-18)
 

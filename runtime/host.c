@@ -140,6 +140,9 @@ static uint32_t next_selector, heap;
 static uint32_t free_selectors[4096]; static int nfree_selectors;
 static uint32_t vec_sel[256], vec_pc[256]; static uint8_t vec_set[256];
 static int handles_fd[20] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}; static int handles_writable[20];
+/* Larger maps (bigmap.c): a save holding a 128x128 park has a marker beside it (<save>.big). */
+static char handles_path[20][1024]; static int handles_big[20];
+int tp_bigmap_alloc(void); void tp_bigmap_set(int w, int ext); extern uint32_t tp_map_w;
 static uint64_t ticks;
 static uint32_t video_mode;
 static uint8_t port_val[65536]; static uint8_t port_known[65536];
@@ -733,6 +736,7 @@ static void interrupt(uint32_t number) {
             int fd = open(path, (a & 3) ? O_RDWR : O_RDONLY);
             if (fd < 0) { carry(5); return; }
             handles_fd[h] = fd; handles_writable[h] = (a & 3) != 0;
+            snprintf(handles_path[h], sizeof handles_path[h], "%s", path); handles_big[h] = -1;
             S(EAX, h); carry(0); return;
         }
         if (ah == 0x3c) {
@@ -743,6 +747,7 @@ static void interrupt(uint32_t number) {
             int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) stop("cannot create %s", path);
             handles_fd[h] = fd; handles_writable[h] = 1;
+            snprintf(handles_path[h], sizeof handles_path[h], "%s", path); handles_big[h] = -1;
             S(EAX, h); carry(0); return;
         }
         if (ax == 0x4300) {
@@ -755,12 +760,25 @@ static void interrupt(uint32_t number) {
         }
         if (ah == 0x3e) {
             if (b >= 20 || handles_fd[b] < 0) { carry(6); return; }
-            close(handles_fd[b]); handles_fd[b] = -1; carry(0); return;
+            close(handles_fd[b]); handles_fd[b] = -1;
+            if (handles_big[b] >= 0) {                    /* a park's map was written: mark (or unmark) a 128x128 one */
+                char mk[1040]; snprintf(mk, sizeof mk, "%s.big", handles_path[b]);
+                if (handles_big[b]) { FILE *f = fopen(mk, "w"); if (f) { fputs("128\n", f); fclose(f); } } else unlink(mk);
+            }
+            carry(0); return;
         }
         if (ah == 0x3f) {
             if (b >= 20 || handles_fd[b] < 0) { carry(6); return; }
             uint32_t at = address(DS, d);
             if ((uint64_t)at + c > MEMORY) stop("DOS read outside memory");
+            { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);   /* a park's map: the layout of the park being read (bigmap.c) */
+              if (mp && at == mp && (c == 0x4000 || c == 0x10000)) {
+                  char mk[1040]; snprintf(mk, sizeof mk, "%s.big", handles_path[b]);
+                  int big = exists(mk), want = big ? 0x10000 : 0x4000;
+                  if (big && tp_bigmap_alloc() < 128) { fprintf(stderr, "bigmap: %s holds a 128x128 park (turn on the larger map setting)\n", handles_path[b]); carry(5); return; }
+                  { void tp_bigmap_loaded(void); tp_bigmap_loaded(); }
+                  if ((int)c != want || (int)tp_map_w != (big ? 128 : 64)) { tp_bigmap_set(big ? 128 : 64, big ? 128 : 64); c = (uint32_t)want; }
+              } }
             ssize_t got = 0, r;
             while ((uint32_t)got < c && (r = read(handles_fd[b], mem + at + got, c - got)) > 0) got += r;
             if (getenv("TP_DEBUG_READ")) { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);   /* (development: reads into the map) */
@@ -795,6 +813,8 @@ static void interrupt(uint32_t number) {
             if (!handles_writable[b]) { carry(5); return; }
             uint32_t count = 0;
             if (c) {
+                { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);
+                  if (mp && address(DS, d) == mp && (c == 0x4000 || c == 0x10000)) handles_big[b] = c == 0x10000; }
                 ssize_t w = write(handles_fd[b], mem + address(DS, d), c);
                 if (w < 0) stop("write failed: %s", strerror(errno));
                 count = (uint32_t)w;

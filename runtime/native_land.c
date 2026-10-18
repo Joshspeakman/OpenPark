@@ -10,7 +10,7 @@
  *       the camera, cells right to left, 48-pixel steps (word [0x1d663a]),
  *       staggered a third of a step per row; a cell's ground block is entry
  *       (byte 2 + 1) of the 6-byte block table [0x1d3b90], drawn so its foot
- *       is on the row line; cells off the 64x64 map get block 0 (grass);
+ *       is on the row line; cells off the map get block 0 (grass);
  *       flag bits of byte 3 add decorations (not yet: they are reported)
  *   0x15ec9c / 0x15ed21  the sprite blitter: {pointer, width, height} entry;
  *       in 320x200 (word [0x1de5f6] bit 0) positions and the table's doubled
@@ -21,7 +21,8 @@
 #include <string.h>
 #include <stdio.h>
 
-#define MAP_PTR     0x1d3b08u   /* 64x64 cells of 4 bytes */
+#define MAP_PTR     0x1d3b08u   /* cells of 4 bytes: tp_map_ext square, rows tp_map_w apart (bigmap.c) */
+extern uint32_t tp_map_w, tp_map_ext;
 #define BLOCK_TABLE 0x1d3b90u   /* MBLK: 6-byte entries {u32 data, u8 width, u8 height}, doubled sizes */
 #define TILE_W      0x1d663au   /* word: 48 */
 #define TILE_H      0x1d6654u   /* word: row height */
@@ -95,16 +96,16 @@ int tp_native_landscape_part(const uint8_t *mem, int cx0, int cy0, int rows, uin
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR), table = r32(BLOCK_TABLE);
     if (!tw || !th) return -1;
-    uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
+    uint32_t base = map + (uint32_t)((cy0 * (int)tp_map_w + cx0) * 4);
     int skipped = 0; unsupported = 0;
-    for (int r = 0, y = cy0; r < rows; r++, y++, base += 0x100) {
+    for (int r = 0, y = cy0; r < rows; r++, y++, base += tp_map_w * 4) {
         int left = off + (tw / 3) * r - (r / 3 + 1) * tw;
         int x = (tw / 3) * r + 0x280 - (r / 3 + 1) * tw;
         int cx = (cx0 - (r / 3 + 1)) + (0x280 - off) / tw;
         uint32_t p = base - (uint32_t)((r / 3) * 4 + 4) + (uint32_t)(((0x280 - off) / tw) * 4);
         for (; (int16_t)x >= (int16_t)left; x -= tw, p -= 4, cx--) {
             if (x < off - tw) continue;
-            if ((int16_t)cx >= 0 && (int16_t)cx < 0x40 && (int16_t)y >= 0 && (int16_t)y < 0x40) {
+            if ((int16_t)cx >= 0 && (int16_t)cx < (int)tp_map_ext && (int16_t)y >= 0 && (int16_t)y < (int)tp_map_ext) {
                 uint32_t e = table + (uint32_t)(M[p + 2] + 1) * 6;
                 int ys = (int16_t)(r * th + th) - M[e + 5];
                 blit(&t, e, (int16_t)x, (int16_t)ys, 0);
@@ -147,14 +148,14 @@ int tp_native_cell_ground(const uint8_t *mem, int cx, int cy, int gx, int gy, ui
     uint32_t map = r32(MAP_PTR), table = r32(BLOCK_TABLE);
     if (!tw || !th) return -1;
     unsupported = 0;
-    if (cx < 0 || cx >= 0x40 || cy < 0 || cy >= 0x40) {
+    if (cx < 0 || cx >= (int)tp_map_ext || cy < 0 || cy >= (int)tp_map_ext) {
         blit(&t, table + 6, gx, gy + th - M[table + 0xb], 0);
         return unsupported;
     }
-    uint32_t p = map + (uint32_t)((cy * 64 + cx) * 4), e = table + (uint32_t)(M[p + 2] + 1) * 6;
+    uint32_t p = map + (uint32_t)((cy * (int)tp_map_w + cx) * 4), e = table + (uint32_t)(M[p + 2] + 1) * 6;
     int ys = gy + th - M[e + 5];
     blit(&t, e, gx, ys, 0);
-    int cell = cy * 64 + cx, bits = M[p + 3] & 0x3f;            /* (as 0x11bb21..0x11bc9e) */
+    int cell = cy * (int)tp_map_w + cx, bits = M[p + 3] & 0x3f;            /* (as 0x11bb21..0x11bc9e) */
     for (int i = 0; bits; i++, bits >>= 1) {
         if (!(bits & 1)) continue;
         if (i <= 2) frame(&t, (uint16_t)r16(r32(DECO_TABLE) + 0x252 + i * 2), gx + (cell + M[p + 2] + i * 16) % tw, gy + (cell + i * 16) % th);
@@ -253,7 +254,7 @@ static int class12(uint32_t t, int x, int y) {
     int step = (M[SCREEN_MODE] & 8) ? 0xc : 0x18;
     int div = (M[FRAME_MODE] & 8) ? (uint16_t)r16(0x1d6642) : 1;
     uint32_t deco = r32(DECO_TABLE), map = r32(MAP_PTR);
-    int cellb = M[map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4) + 2];
+    int cellb = M[map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4) + 2];
     int q = (uint16_t)r16(0x1b44d9 + (uint32_t)cellb * 4);
     int typ = (uint16_t)r16(t + 0x16), sub = M[t + 0x44];
     if (typ == 1 || typ == 2) {
@@ -305,7 +306,7 @@ static int class2(uint32_t t, int x, int y) {
         x = (int16_t)(x + (int8_t)M[0x1b16d8 + k]); y = (int16_t)(y + (int8_t)M[0x1b16d9 + k]);
         is_common = 1;
     } else if (sub == 0x12) {                                    /* 0x11cb13: only on a cell of kind 0x40 */
-        uint32_t cell = map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4);
+        uint32_t cell = map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4);
         if ((uint16_t)r16(0x1b44d9 + (uint32_t)M[cell + 2] * 4) != 0x40) return 0;
         is_common = 1;
     }
@@ -340,7 +341,7 @@ static int class2(uint32_t t, int x, int y) {
             return r16(FRAME_MODE) == 8 ? 0 : 0x302;
         return 0;                                                /* (0x4e plays a sound; 0x75 and unknown keys draw nothing) */
     }
-    if (sub == 0xc && find_in_cell(map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4), 0x1a)) py = (int16_t)(py - 8);
+    if (sub == 0xc && find_in_cell(map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4), 0x1a)) py = (int16_t)(py - 8);
     if ((M[0x1b14cc] & 7) && (M[t + 5] & 0x80)) frame_logged((uint16_t)r16(deco + 0x46c), px, py);
     frame_logged((uint16_t)r16(t + 0xa), px, py);
     int items = (uint16_t)r16(t + 0x52);
@@ -445,7 +446,7 @@ static int classE(uint32_t t, int x, int y) {
             uint32_t parent = things + (uint32_t)(uint16_t)r16(t + 0x16) * 0xc8;
             if ((uint16_t)r16(parent + 0x2e) > M[0x1ccf78 + (uint16_t)r16(parent + 0x16)]) off = (int16_t)(off - (rand15() & 3));
         }
-        uint32_t ride = find_in_cell(map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4), 0x12);
+        uint32_t ride = find_in_cell(map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4), 0x12);
         if (!ride) ride = find_in_cell(map + (uint32_t)((int16_t)r16(t + 0x10) * 4), 0x12);
         uint32_t rider = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
         if (!ride) {                                             /* no ride: the rider alone */
@@ -529,7 +530,7 @@ static int class14(uint32_t t, int x, int y) {
         int lit = M[r32(0x1d3818) + 0x18] != 0;
         frame_logged((uint16_t)r16(deco + (lit ? (f == 0x13f ? 0x27a : 0x27c) : (f == 0x13f ? 0x27e : 0x440))), px, py);
         if (!r16(0x1d6652) && !marks) {
-            uint32_t cell = map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4);
+            uint32_t cell = map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4);
             if (f == 0x13f) {
                 uint32_t str = lit ? r32(0x1d3814) + 0x20 : r32(r32(0x1d7bd0) + 0x19c);
                 int len = 0; while (len < 4096 && M[str + len]) len++;
@@ -850,15 +851,15 @@ void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg
     M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); nbumps = 0; rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR);
-    uint32_t base = map + (uint32_t)(((cy0 << 6) + cx0) * 4);
-    for (int r = 0, y = cy0; r < rows; r++, y++, base += 0x100) {
+    uint32_t base = map + (uint32_t)((cy0 * (int)tp_map_w + cx0) * 4);
+    for (int r = 0, y = cy0; r < rows; r++, y++, base += tp_map_w * 4) {
         int left = off + (tw / 3) * r - (r / 3 + 1) * tw;
         int x = (tw / 3) * r + 0x280 - (r / 3 + 1) * tw;
         int cx = (cx0 - (r / 3 + 1)) + (0x280 - off) / tw;
         uint32_t p = base - (uint32_t)((r / 3) * 4 + 4) + (uint32_t)(((0x280 - off) / tw) * 4);
         for (; (int16_t)x >= (int16_t)left; x -= tw, p -= 4, cx--) {
             if (x < off - tw) continue;
-            if ((int16_t)cx < 0 || (int16_t)cx >= 0x40 || (int16_t)y < 0 || (int16_t)y >= 0x40) continue;
+            if ((int16_t)cx < 0 || (int16_t)cx >= (int)tp_map_ext || (int16_t)y < 0 || (int16_t)y >= (int)tp_map_ext) continue;
             int16_t first = r16(p);
             if (!first) continue;
             int cy = (uint16_t)(r * th);
@@ -874,8 +875,8 @@ void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg
 int tp_native_cell_things(const uint8_t *mem, int cx, int cy, int gx, int gy, DrawLog lg, void *ctx) {
     M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); nbumps = 0; rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
     int missing = 0;
-    if (cx >= 0 && cx < 0x40 && cy >= 0 && cy < 0x40) {
-        int16_t first = r16(r32(MAP_PTR) + (uint32_t)((cy * 64 + cx) * 4));
+    if (cx >= 0 && cx < (int)tp_map_ext && cy >= 0 && cy < (int)tp_map_ext) {
+        int16_t first = r16(r32(MAP_PTR) + (uint32_t)((cy * (int)tp_map_w + cx) * 4));
         if (first) { marks = 1; missing = cell_things(first, gx, gy); marks = 0; }
     }
     dlog = NULL;

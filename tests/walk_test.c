@@ -22,6 +22,7 @@ uint8_t *tp_host_memory(void) { return mem; }
 static uint32_t pal_rgba(int i) { return 0xff000000u | (uint32_t)((i * 7) & 255) << 16 | (uint32_t)(255 - i) << 8 | (uint32_t)i; }
 void tp_host_palette_rgba(uint32_t pal[256]) { for (int i = 0; i < 256; i++) pal[i] = pal_rgba(i); }
 uint32_t tp_hook_pcs[24];
+uint32_t tp_map_w = 64, tp_map_ext = 64;   /* (the game's park size; bigmap.c) */
 void tp_hooks_changed(void) {}
 
 int tp_walk_start(double wx, double wy);

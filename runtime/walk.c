@@ -56,6 +56,10 @@ extern const uint8_t *tp_native_text;
 extern int tp_native_stable_rng;
 
 #define MAP_PTR     0x1d3b08u
+#define MAPN        128                 /* tables sized for the biggest park; the map itself: tp_map_ext square, rows tp_map_w apart */
+extern uint32_t tp_map_w, tp_map_ext;
+#define MAPE ((int)tp_map_ext)
+#define MAPW ((int)tp_map_w)
 #define THINGS      0x1d3b10u
 #define TILE_W      0x1d663au
 #define TILE_H      0x1d6654u
@@ -104,7 +108,7 @@ typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
     Card cards[MAXCARDS]; int ncards;
     uint16_t pix[POOL]; uint32_t npix;
-    uint8_t blocked[64 * 64];
+    uint8_t blocked[MAPN * MAPN];
     int16_t riding[NTH];            /* rider -> the ride, car or train it is on (0: none) */
     Cont conts[MAXCONT]; int nconts;
     float eye;                      /* a visitor's eye height, cells */
@@ -112,8 +116,8 @@ typedef struct {
     int f_idx, f_ok, f_cont, f_cls, f_type; float f_x, f_y, f_elev; char f_name[40];
 } Snap;
 static Snap snaps[2]; static int front = -1;
-static uint8_t floor_tex[2][64 * TMAX * 64 * TMAX], off_tex[2][TMAX * TMAX];
-static uint16_t floor_key[2][4096]; static uint32_t floor_geo[2]; static int floor_valid[2];   /* each cell's ground as drawn */
+static uint8_t floor_tex[2][MAPN * TMAX * MAPN * TMAX], off_tex[2][TMAX * TMAX];
+static uint16_t floor_key[2][MAPN * MAPN]; static uint32_t floor_geo[2]; static int floor_valid[2];   /* each cell's ground as drawn */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---- the walker (app thread; under the lock) ---- */
@@ -158,9 +162,9 @@ static void build_floor(const Geom *g, int fi, int T, uint32_t geo, const uint16
     int all = !floor_valid[fi] || floor_geo[fi] != geo;
     if (all) cell_texture(g, -1, -1, ot, T, T, 0);
     uint8_t grass = ot[(T / 2) * T + T / 2];
-    for (int i = 0; i < 4096; i++) {
-        if (!all && floor_key[fi][i] == key[i]) continue;
-        cell_texture(g, i & 63, i >> 6, ft + (size_t)(i >> 6) * T * 64 * T + (size_t)(i & 63) * T, 64 * T, T, grass);
+    for (int i = 0; i < MAPN * MAPN; i++) {
+        if (i % MAPN >= MAPE || i / MAPN >= MAPE || (!all && floor_key[fi][i] == key[i])) continue;
+        cell_texture(g, i % MAPN, i / MAPN, ft + (size_t)(i / MAPN) * T * MAPN * T + (size_t)(i % MAPN) * T, MAPN * T, T, grass);
         floor_key[fi][i] = key[i];
     }
     floor_geo[fi] = geo; floor_valid[fi] = 1;
@@ -230,7 +234,7 @@ static void finish(Build *B) {
             if (d < 1) d = 1; if (d > 6) d = 6;
             for (int yy = (int)floor(wy - d / 2 + 0.25); yy <= (int)floor(wy + d / 2 - 0.25); yy++)
                 for (int xx = (int)floor(wx - d / 2 + 0.25); xx <= (int)floor(wx + d / 2 - 0.25); xx++)
-                    if (xx >= 0 && xx < 64 && yy >= 0 && yy < 64) s->blocked[yy * 64 + xx] = 1;
+                    if (xx >= 0 && xx < MAPE && yy >= 0 && yy < MAPE) s->blocked[yy * MAPN + xx] = 1;
         }
     }
     for (int y = B->y0; y < B->y1; y++) { memset(sa + y * SW_ + B->x0, 0, (size_t)(B->x1 - B->x0)); memset(sb + y * SW_ + B->x0, 0xff, (size_t)(B->x1 - B->x0)); }
@@ -309,8 +313,8 @@ static double car_lift(const Geom *g, int i) {
     uint32_t things = r32(THINGS), t = things + (uint32_t)i * 0xc8, map = r32(MAP_PTR);
     int cls = M[t + 4], units = 0;
     if (cls == 0x12) units = (M[t + 0x79] + 1) * 0x18;
-    else if (cls == 0x0e && M[t + 7] < 64 && M[t + 9] < 64) {
-        for (int k = r16(map + (uint32_t)((M[t + 9] * 64 + M[t + 7]) * 4)), n = 0; valid_idx(k) && n < 64; k = r16(things + (uint32_t)k * 0xc8 + 2), n++)
+    else if (cls == 0x0e && M[t + 7] < MAPE && M[t + 9] < MAPE) {
+        for (int k = r16(map + (uint32_t)((M[t + 9] * MAPW + M[t + 7]) * 4)), n = 0; valid_idx(k) && n < 64; k = r16(things + (uint32_t)k * 0xc8 + 2), n++)
             if (M[things + (uint32_t)k * 0xc8 + 4] == 0x12) { uint32_t rd = things + (uint32_t)k * 0xc8; units = r16(rd + 0x16) == 3 ? 0x18 : M[rd + 0x79] * 0x18; break; }
     }
     return units / 2.0 * g->aspect / g->tws;               /* (both modes: half the units on screen) */
@@ -347,8 +351,8 @@ static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
     s->weather = M[WEATHER];
     int T = (int)g->tws; if (T > TMAX) T = TMAX; if (T < 8) T = 8;
     /* floor: the cells whose ground changed (a path laid, litter, land bought), into the floor not on show */
-    static uint16_t key[4096]; uint32_t map = r32(MAP_PTR);
-    for (int i = 0; i < 4096; i++) key[i] = (uint16_t)(M[map + i * 4 + 2] | M[map + i * 4 + 3] << 8);
+    static uint16_t key[MAPN * MAPN]; uint32_t map = r32(MAP_PTR);
+    for (int y = 0; y < MAPE; y++) for (int x = 0; x < MAPE; x++) { uint32_t c = map + (uint32_t)(y * MAPW + x) * 4; key[y * MAPN + x] = (uint16_t)(M[c + 2] | M[c + 3] << 8); }
     uint32_t geo = (uint32_t)(g->tw * 131 + g->th * 7 + g->lo) * 2654435761u ^ r32(0x1d3b90) ^ (uint32_t)T << 24;
     int fi = front >= 0 ? snaps[front].fi : 0;
     if (!floor_valid[fi] || floor_geo[fi] != geo || memcmp(floor_key[fi], key, sizeof key)) {
@@ -363,7 +367,7 @@ static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
     B.a = base; B.b = base; B.b.buf = sb;
     static int cleared; if (!cleared) { memset(sa, 0, sizeof sa); memset(sb, 0xff, sizeof sb); cleared = 1; }
     int keep = tp_native_stable_rng; tp_native_stable_rng = 1;
-    for (int cy = 0; cy < 64; cy++) for (int cx = 0; cx < 64; cx++) {
+    for (int cy = 0; cy < MAPE; cy++) for (int cx = 0; cx < MAPE; cx++) {
         double dx = cx + 0.5 - ax, dy = cy + 0.5 - ay;
         if (dx * dx + dy * dy > 44 * 44) continue;
         B.cx = cx; B.cy = cy; B.idx = 0; B.any = 0;
@@ -387,7 +391,7 @@ static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
             for (int k = 0; k < s->nconts; k++) if (s->conts[k].idx == cont) { s->f_x = s->conts[k].x; s->f_y = s->conts[k].y; }
             s->f_type = ride_type(cont); s->f_elev = (float)car_lift(g, cont);
             if (s->f_type >= 0) snprintf(s->f_name, sizeof s->f_name, "%.39s", (const char *)M + RIDE_TYPES + (uint32_t)s->f_type * 0xc8);
-        } else if (t[4] == 2 && t[7] < 64 && t[9] < 64) {
+        } else if (t[4] == 2 && t[7] < MAPE && t[9] < MAPE) {
             s->f_ok = 1; s->f_x = (float)(t[7] + t[6] / 256.0); s->f_y = (float)(t[9] + t[8] / 256.0);
         }
         watch(follow, t, s->f_cont);
@@ -443,8 +447,8 @@ void tp_walk_position(double *x, double *y) {
 }
 
 static int blocked(const Snap *s, double x, double y) {
-    if (x < 0.2 || y < 0.2 || x > 63.8 || y > 63.8) return 1;
-    return s->blocked[(int)y * 64 + (int)x];
+    if (x < 0.2 || y < 0.2 || x > MAPE - 0.2 || y > MAPE - 0.2) return 1;
+    return s->blocked[(int)y * MAPN + (int)x];
 }
 static double wrap(double a) { while (a > M_PI) a -= 2 * M_PI; while (a < -M_PI) a += 2 * M_PI; return a; }
 /* Nearest visitor to (x, y) within r cells, ahead (cos of the angle off yaw at least `cone`), not `skip`. */
@@ -648,7 +652,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                     double px = gx + ((k & 1) - 0.5) * 0.5 * sx + ((k >> 1) - 0.25) * qx, py = gy + ((k & 1) - 0.5) * 0.5 * sy + ((k >> 1) - 0.25) * qy;
                     int X = (int)floor(px), Y = (int)floor(py), u = (int)((px - X) * T), v = (int)((py - Y) * T);
                     if (u >= T) u = T - 1; if (v >= T) v = T - 1;
-                    uint32_t c = s->pal[X >= 0 && X < 64 && Y >= 0 && Y < 64 ? ft[(size_t)(Y * T + v) * 64 * T + (size_t)X * T + u] : ot[v * T + u]];
+                    uint32_t c = s->pal[X >= 0 && X < MAPE && Y >= 0 && Y < MAPE ? ft[(size_t)(Y * T + v) * MAPN * T + (size_t)X * T + u] : ot[v * T + u]];
                     r += c & 255; gg += (c >> 8) & 255; bb += (c >> 16) & 255;
                 }
                 uint32_t c = 0xff000000u | (bb / 4) << 16 | (gg / 4) << 8 | r / 4;
@@ -659,7 +663,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
         for (int x = 0; x < ow; x++, gx += sx, gy += sy) {
             int X = (int)floor(gx), Y = (int)floor(gy), u = (int)((gx - X) * T), v = (int)((gy - Y) * T);
             if (u >= T) u = T - 1; if (v >= T) v = T - 1;
-            uint8_t c = X >= 0 && X < 64 && Y >= 0 && Y < 64 ? ft[(size_t)(Y * T + v) * 64 * T + (size_t)X * T + u] : ot[v * T + u];
+            uint8_t c = X >= 0 && X < MAPE && Y >= 0 && Y < MAPE ? ft[(size_t)(Y * T + v) * MAPN * T + (size_t)X * T + u] : ot[v * T + u];
             o[x] = fog > 0 ? mix(s->pal[c], fogc, fog) : s->pal[c];
         }
     }
@@ -707,9 +711,9 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
 int tp_walk_floor_at(double x, double y) {
     pthread_mutex_lock(&lock);
     const Snap *s = front >= 0 ? &snaps[front] : NULL; int c = -1;
-    if (s && s->valid && x >= 0 && y >= 0 && x < 64 && y < 64) {
+    if (s && s->valid && x >= 0 && y >= 0 && x < MAPE && y < MAPE) {
         int T = s->T, X = (int)x, Y = (int)y, u = (int)((x - X) * T), v = (int)((y - Y) * T);
-        c = floor_tex[s->fi][(size_t)(Y * T + v) * 64 * T + (size_t)X * T + u];
+        c = floor_tex[s->fi][(size_t)(Y * T + v) * MAPN * T + (size_t)X * T + u];
     }
     pthread_mutex_unlock(&lock);
     return c;

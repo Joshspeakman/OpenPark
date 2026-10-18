@@ -156,7 +156,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[4], _tweaks[6], _free[2];
+    Setting _display[7], _sound[4], _tweaks[6], _free[3];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -220,6 +220,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                              @[@"Every frame the same length, in step with the display", @"The game's speed follows how busy the screen is, as in 1994"]);
         _free[0] = setting(@"Visitors", @"FreeVisitors", @[@0, @900, @1000], @[@"800", @"900", @"1,000"],
                            @[@"The game's limit for a park", @"A hundred more than the game allows", @"Close to all the game's people can be (rides and staff share them)"]);
+        _free[2] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
+                           @[@"The game's park size", @"Four times the land for new sandbox parks (saved parks keep their size)"]);
         _free[1] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
                            @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
                              @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
@@ -239,7 +241,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 6 : self.open == 5 ? 2 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 6 : self.open == 5 ? 3 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -450,7 +452,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[2]]];
     if (g == 2) return @"Mouse and keyboard";
     if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]]];
-    if (g == 5) return [NSString stringWithFormat:@"%@ visitors · Bus %@", [self valueOf:&_free[0]], [self valueOf:&_free[1]]];
+    if (g == 5) return [NSString stringWithFormat:@"%@ visitors · %@ parks", [self valueOf:&_free[0]], [self valueOf:&_free[2]]];
     return @"Saved parks, in the Finder";
 }
 - (void)drawRect:(NSRect)dirty {
@@ -484,10 +486,10 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         if (self.open == 5) {
             NSArray *lines = @[@"For sandbox parks: Sim Level Sandbox when you set up a park.",
                                @"Other parks play by the game's rules, whatever is set here.",
-                               @"The park itself cannot be bigger: Theme Park's land is a fixed",
-                               @"64 × 64 grid, and every park is already walled to its edges."];
+                               @"A 128 × 128 park is made when you start a new sandbox park;",
+                               @"saved parks always load at the size they were made."];
             for (NSUInteger i = 0; i < lines.count; i++)
-                label(lines[i], plain(15), note_c(), NSMakeRect(p.origin.x + 50, p.origin.y + 80 + 74 * 2 + 40 + 24 * i, p.size.width - 100, 22), NSTextAlignmentLeft, 0.3, NO);
+                label(lines[i], plain(15), note_c(), NSMakeRect(p.origin.x + 50, p.origin.y + 80 + 74 * 3 + 30 + 24 * i, p.size.width - 100, 22), NSTextAlignmentLeft, 0.3, NO);
         }
         for (NSInteger k = 0; k < self.rowCount; k++) {
             [self drawRow:k];
