@@ -68,6 +68,22 @@ void tp_view_request_poster(void);            /* "Save Park Picture": render the
 int  tp_view_take_poster(uint32_t **rgba, int *w, int *h);   /* 1 when ready; the pixels are the caller's to free */
 void tp_view_request_hires(int on);           /* press the game's R once its park is up (start in 640x480) */
 
+/* Visitor View (walk.c, experimental): walk the park at a visitor's height, drawn natively from the
+ * game's state (docs/PLAN.md, "Visitor View"). Map points are in cells (x across, y down the map). */
+int  tp_view_point_to_world(double fx, double fy, double *wx, double *wy);   /* under a point of the picture */
+int  tp_walk_start(double wx, double wy);     /* 0: no park */
+void tp_walk_stop(void);
+int  tp_walk_active(void);
+enum { TP_WALK_FOLLOW = 1, TP_WALK_HOP, TP_WALK_RIDE, TP_WALK_VIEW, TP_WALK_NOCLIP };
+void tp_walk_command(int cmd);
+/* fwd, strafe, turn in -1..1; look in radians; dt seconds (the app's tick) */
+void tp_walk_input(double fwd, double strafe, double turn, double look_yaw, double look_pitch, int run, double dt);
+int  tp_walk_render(uint32_t *rgba, int w, int h);           /* 0: nothing to show yet */
+int  tp_walk_status(char *buf, int n);
+int  tp_walk_ride(int *type, char *name, int n);             /* 1 while the visitor followed is on a ride */
+void tp_walk_position(double *x, double *y);
+void tp_walk_teleport(double x, double y, double yaw);       /* development: yaw in radians, NAN keeps it */
+
 /* Saved files below the overlay (sha256), for tests. */
 void tp_host_list_saved(void (*fn)(const char *rel, const char *sha256_hex, void *), void *ctx);
 #endif

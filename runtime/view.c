@@ -858,6 +858,7 @@ static void hooks(int on) {
 static void hires_step(int sc);
 static void poster_step(void);
 static volatile int hires_wanted, poster_wanted;   /* (below) */
+void tp_walk_frame(void); int tp_walk_active(void);   /* the Visitor View (walk.c) */
 /* Called by the host when the game reaches a hooked address. */
 void tp_view_hook(void) {
     M = tp_host_memory();
@@ -883,6 +884,7 @@ void tp_view_hook(void) {
     }
     switch (tp_hook_which) {
     case 0:                                               /* FRAME_RENDER */
+        tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
         { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
           if (fresh) { st_game++; st_game_total++; if (pacing) pace_frame(); } }
         if (getenv("TP_VIEW_DEBUG")) { static double l; static long c0; if (now() - l > 1) { fprintf(stderr, "view: %ld game frames/s\n", st_game_total - c0); c0 = st_game_total; l = now(); } }
@@ -924,7 +926,7 @@ void tp_view_hook(void) {
         if (w && !active) { active = 1; hooks(1); render_visible(vx, vy, vw, vh, 1); coherent = 1; }
         else if (!w) {                                    /* the view is off: no hooks at all until it is wanted */
             active = 0; hooks(0);
-            if (!hires_wanted && !poster_wanted && !fps_game_hook && !pacing) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
+            if (!hires_wanted && !poster_wanted && !fps_game_hook && !pacing && !tp_walk_active()) { tp_hook_pcs[0] = 0xffffffffu; tp_hooks_changed(); }
         }
         else if (active) {                                /* passes at most 60 times a second (the game draws faster) */
             static double last; double t = now();
@@ -1078,7 +1080,7 @@ void tp_view_hook(void) {
         if (sentinel_on) {
             /* translucent interface over the marker: redo its blend over the park (a source giving that result) */
             const uint8_t *gt = M + r32(0x1ba2f8); int16_t src_of[256]; for (int v = 0; v < 256; v++) src_of[v] = -1;
-            if (r32(0x1ba2f8)) for (int s2 = 255; s2 >= 0; s2--) src_of[gt[SENTINEL * 256 + s2]] = (int16_t)s2;
+            if (r32(0x1ba2f8) && !getenv("TP_VIEW_NOREMAP")) for (int s2 = 255; s2 >= 0; s2--) src_of[gt[SENTINEL * 256 + s2]] = (int16_t)s2;
             for (int i = 0; i < SW * WORLD_H; i++) {
                 uint8_t v = bb[i];
                 if (v == SENTINEL) pub_overlay[i] = 0xffff;
@@ -1300,6 +1302,31 @@ void tp_view_camera_center(double *cx, double *cy) {
     *cx = g.ux * x + g.uyx * y + g.ox + g.sw / 2.0; *cy = g.uy * y + g.oy + g.wh / 2.0;
 }
 int tp_view_camera_moves(void) { return camera_moves; }
+/* The map point (cells; x across, y down the map) under a point of the window's picture (fx, fy in
+ * 0..1 of what the app shows: the zoomed view when it is live, else the game's own screen). A cell's
+ * corner is at tws X + tws/3 Y + C0 on the canvas (walk.c has the derivation). 0 over the panel. */
+#define VIEW_OFF 0x1d6624u
+int tp_view_point_to_world(double fx, double fy, double *wx, double *wy) {
+    M = tp_host_memory();
+    int tw = (uint16_t)r16(0x1d663au), lo = M[SCREEN_MODE] & 1, off = r16(VIEW_OFF);
+    if (tw < 6) return 0;
+    pthread_mutex_lock(&lock);
+    Geo g = geo(vis_s); double px, py;
+    int live = want && pub_time && pub_park && pub_s == vis_s && now() - pub_time < 0.5;
+    if (live) {
+        double lw = vis_lw > g.sw ? vis_lw : g.sw;
+        px = vis_x + fx * lw / vis_z; py = vis_y + fy * g.sh / vis_z;
+    } else {
+        if (fy * g.sh >= g.wh) { pthread_mutex_unlock(&lock); return 0; }
+        int cx = r16(CAM_X), cy = r16(CAM_Y);
+        px = g.ux * cx + g.uyx * cy + g.ox + fx * g.sw; py = g.uy * cy + g.oy + fy * g.sh;
+    }
+    pthread_mutex_unlock(&lock);
+    double c0 = (0x280 - tw * ((0x280 - off) / tw)) >> lo;
+    *wy = (py - g.oy) / g.uy;
+    *wx = (px - g.ox - c0 - g.uyx * *wy) / g.ux;
+    return *wx >= 0 && *wy >= 0 && *wx < 64 && *wy < 64;
+}
 void tp_view_canvas_size(double *w, double *h) { Geo g = geo(vis_s); *w = g.cw; *h = g.ch; }
 /* The game's cursor as RGBA (CUR x CUR, w x h used), its corner's offset from the pointer in screen
  * pixels; returns a number that changes when it does (0: no cursor). */

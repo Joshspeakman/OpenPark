@@ -10,6 +10,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <ImageIO/ImageIO.h>
 #import <GameController/GameController.h>
+#import <AVFoundation/AVFoundation.h>
 #include <pthread.h>
 #include "host.h"
 int tp_audio_start(void);
@@ -68,6 +69,10 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)zoomIn:(id)sender;
 - (void)zoomOut:(id)sender;
 - (void)centerOn:(double)cx :(double)cy;
+- (BOOL)walkStartAt:(double)x :(double)y;
+- (void)walkStop;
+- (void)walkHold:(double)fwd :(double)strafe :(double)turn :(double)seconds;
+- (void)walkPad:(double)fwd :(double)strafe :(double)lookX :(double)lookY;
 @end
 
 @implementation GameView {
@@ -90,6 +95,13 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when the view last ended */
     uint32_t *_big; int _bigW, _bigH;
     NSPoint _mouse; BOOL _mouseIn;
+    /* Visitor View (runtime/walk.c): ⇧⌘V, then a click in the park drops you there */
+    BOOL _walkDrop;                      /* waiting for the click */
+    BOOL _wk[8], _wkRun;                 /* keys held: forward, back, left, right, turn left, turn right */
+    double _walkLast, _lookDX, _lookDY, _hold[3], _holdUntil, _pad[4];
+    uint32_t *_walkPx; int _walkW, _walkH;
+    CATextLayer *_hud; char _hudText[256];
+    AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
 }
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
@@ -136,6 +148,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     [CATransaction commit];
 }
 - (void)present {
+    if (tp_walk_active()) { [self presentWalk]; return; }
+    if (_hud && !_hud.hidden) { [CATransaction begin]; [CATransaction setDisableActions:YES]; _hud.hidden = YES; [CATransaction commit]; [self stopRideVideo]; }
     int w, h;
     if (!tp_host_frame_size(&w, &h) || !tp_host_frame_rgba_any(_pixels, 640 * 480)) return;
     int fw = w, fh = h; uint32_t *px = _pixels;
@@ -242,6 +256,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)sendMouse:(NSEvent *)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     _mouse = p; _mouseIn = YES;
+    if (_walkDrop || tp_walk_active()) { [self setCursorHidden:NO]; return; }   /* (the Visitor View takes the pointer) */
     NSRect r = _live ? [self viewRect] : [self screenRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
@@ -256,7 +271,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 
 /* The game's cursor (view.c reads it from the game) as the Mac cursor over the park view, at the view's scale. */
 - (void)updateGameCursor {
-    BOOL want = _live && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"];
+    BOOL want = _live && !_walkDrop && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"];
     tp_view_hw_cursor = want;
     if (!want) { if (_gameCursor) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; } return; }
     static uint32_t px[64 * 64]; int w = 0, h = 0, ox = 0, oy = 0;
@@ -287,7 +302,9 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     if (getenv("TP_CURSOR_DEBUG")) fprintf(stderr, "cursor: serial %d, %dx%d px -> %.0fx%.0f pt, mouse in %d, key %d, hidden %d\n", serial, w, h, w * kx, h * ky, _mouseIn, self.window.isKeyWindow, _cursorHidden);
 }
 - (void)resetCursorRects {
-    if (_gameCursor) [self addCursorRect:[self viewRect] cursor:_gameCursor];
+    if (_walkDrop) [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor];
+    else if (tp_walk_active()) [self addCursorRect:self.bounds cursor:NSCursor.openHandCursor];
+    else if (_gameCursor) [self addCursorRect:[self viewRect] cursor:_gameCursor];
 }
 
 /* A pointer from elsewhere (a game controller), in 0..1 of what is shown. */
@@ -372,10 +389,15 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     if (dx || dy) [self panBy:dx :dy];
 }
 - (void)magnifyWithEvent:(NSEvent *)e {
+    if (tp_walk_active()) return;
     [self zoomTo:_zoom * (1 + e.magnification) at:[self convertPoint:e.locationInWindow fromView:nil]];
 }
 - (void)scrollWheel:(NSEvent *)e {
     double dy = e.scrollingDeltaY, dx = e.scrollingDeltaX;
+    if (tp_walk_active()) {                            /* two-finger scroll looks around too */
+        if (!e.hasPreciseScrollingDeltas) { dx *= 12; dy *= 12; }
+        _lookDX += dx * 0.004; _lookDY += dy * 0.004; return;
+    }
     if (!e.hasPreciseScrollingDeltas) { dx *= 12; dy *= 12; }
     if (e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))
         [self zoomTo:_zoom * pow(1.006, dy) at:[self convertPoint:e.locationInWindow fromView:nil]];
@@ -385,20 +407,32 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)zoomOut:(id)sender { [self zoomTo:_zoom / 1.25 at:NSMakePoint(NAN, NAN)]; }
 - (void)zoomActual:(id)sender { [self zoomTo:1 at:NSMakePoint(NAN, NAN)]; }
 - (void)mouseMoved:(NSEvent *)e { [self sendMouse:e]; }
-- (void)mouseDragged:(NSEvent *)e { if (_panning) [self dragPan:e]; else [self sendMouse:e]; }
+- (void)mouseDragged:(NSEvent *)e {
+    if (tp_walk_active()) { _lookDX -= e.deltaX * 0.005; _lookDY -= e.deltaY * 0.005; return; }   /* grab and turn the view, as Street View */
+    if (_panning) [self dragPan:e]; else [self sendMouse:e];
+}
 - (void)rightMouseDragged:(NSEvent *)e { [self sendMouse:e]; }
 - (void)otherMouseDragged:(NSEvent *)e { if (_panning) [self dragPan:e]; else [self sendMouse:e]; }
 - (void)mouseExited:(NSEvent *)e { [self setCursorHidden:NO]; _mouseIn = NO; }
 - (void)mouseEntered:(NSEvent *)e { [self sendMouse:e]; }
 - (void)mouseDown:(NSEvent *)e {
+    if (_walkDrop) {                                    /* the Visitor View: drop in here */
+        NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+        NSRect r = _live ? [self viewRect] : [self screenRect];
+        double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height, wx, wy;
+        if (fx >= 0 && fx < 1 && fy >= 0 && fy < 1 && tp_view_point_to_world(fx, fy, &wx, &wy) && [self walkStartAt:wx :wy]) return;
+        NSBeep(); return;
+    }
+    if (tp_walk_active()) { [NSCursor.closedHandCursor set]; return; }
     if (_live && (e.modifierFlags & NSEventModifierFlagOption)) { [self startPan:e]; return; }   /* Option-drag pans too */
     /* Control-click acts as the right button for one-button trackpads. */
     _buttons |= (e.modifierFlags & NSEventModifierFlagControl) ? 2 : 1;
     [self sendMouse:e];
 }
 - (void)mouseUp:(NSEvent *)e {
+    if (tp_walk_active() || _walkDrop) { if (tp_walk_active()) [NSCursor.openHandCursor set]; return; }
     if (_panning) { _panning = NO; return; } _buttons &= ~3u; [self sendMouse:e]; }
-- (void)rightMouseDown:(NSEvent *)e { _buttons |= 2; [self sendMouse:e]; }
+- (void)rightMouseDown:(NSEvent *)e { if (tp_walk_active() || _walkDrop) return; _buttons |= 2; [self sendMouse:e]; }
 - (void)rightMouseUp:(NSEvent *)e { _buttons &= ~2u; [self sendMouse:e]; }
 - (void)otherMouseDown:(NSEvent *)e {
     if (_live) { [self startPan:e]; return; }          /* the park view: the middle button drags it (the game does not use it) */
@@ -421,6 +455,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         }
         return;
     }
+    if (_walkDrop && kc == 0x35) { [self endDrop]; return; }   /* Escape: no Visitor View after all */
+    if (tp_walk_active()) { [self walkKey:kc down:YES]; return; }
     if (_viewOn && kc >= 0x7b && kc <= 0x7e) {          /* the park view: the arrows move it */
         double step = 40;
         [self panBy:(kc == 0x7b ? -step : kc == 0x7c ? step : 0) :(kc == 0x7e ? -step : kc == 0x7d ? step : 0)];
@@ -448,6 +484,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         return;
     }
     if (e.modifierFlags & NSEventModifierFlagCommand) return;
+    if (tp_walk_active()) { [self walkKey:e.keyCode down:NO]; return; }
     uint8_t scan = e.keyCode < 128 ? scan_of[e.keyCode] : 0;
     if (scan) tp_host_key_raw(scan, 0);
 }
@@ -457,7 +494,123 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     if (m & NSEventModifierFlagControl) f |= 4;
     if (m & NSEventModifierFlagOption) f |= 8;
     if (m & NSEventModifierFlagCapsLock) f |= 0x40;
+    _wkRun = (m & NSEventModifierFlagShift) != 0;
+    if (tp_walk_active()) return;
     tp_host_shift(f);
+}
+
+/* ---- the Visitor View (runtime/walk.c) ---- */
+- (void)visitorView:(id)sender {
+    if (tp_walk_active()) { [self walkStop]; return; }
+    if (_walkDrop) { [self endDrop]; return; }
+    _walkDrop = YES; _gameCursor = nil;
+    self.window.subtitle = @"Visitor View: click where you want to stand (Esc cancels)";
+    [self.window invalidateCursorRectsForView:self];
+    [NSCursor.crosshairCursor set];
+}
+- (void)endDrop {
+    _walkDrop = NO; self.window.subtitle = @"";
+    [self.window invalidateCursorRectsForView:self];
+}
+- (BOOL)walkStartAt:(double)x :(double)y {
+    if (!tp_walk_start(x, y)) return NO;
+    [self endDrop];
+    memset(_wk, 0, sizeof _wk); _walkLast = 0; _lookDX = _lookDY = 0; _holdUntil = 0; _videoType = -2;
+    [self setCursorHidden:NO]; _gameCursor = nil;
+    [self.window invalidateCursorRectsForView:self];
+    return YES;
+}
+- (void)walkStop {
+    tp_walk_stop();
+    [self stopRideVideo];
+    _hud.hidden = YES; self.window.subtitle = @"";
+    [self.window invalidateCursorRectsForView:self];
+    [self setNeedsLayout:YES]; [self layout];        /* the game's picture where it was; the park view looks where you were */
+}
+- (void)walkHold:(double)fwd :(double)strafe :(double)turn :(double)seconds {
+    _hold[0] = fwd; _hold[1] = strafe; _hold[2] = turn; _holdUntil = CACurrentMediaTime() + seconds;
+}
+- (void)walkPad:(double)fwd :(double)strafe :(double)lookX :(double)lookY { _pad[0] = fwd; _pad[1] = strafe; _pad[2] = lookX; _pad[3] = lookY; }
+/* W/↑ forward, S/↓ back, A/D sideways, Q/E or ←/→ turn, Shift runs; F follow a visitor, Space hop to
+ * another, R ride along, V eye level or diorama, N walk through things, Esc leave. */
+- (void)walkKey:(unsigned short)kc down:(BOOL)down {
+    int k = kc == 0x0d || kc == 0x7e ? 0 : kc == 0x01 || kc == 0x7d ? 1 : kc == 0x00 ? 2 : kc == 0x02 ? 3
+          : kc == 0x0c || kc == 0x7b ? 4 : kc == 0x0e || kc == 0x7c ? 5 : -1;
+    if (k >= 0) { _wk[k] = down; return; }
+    if (!down) return;
+    if (kc == 0x35) [self walkStop];
+    else if (kc == 0x03) tp_walk_command(TP_WALK_FOLLOW);
+    else if (kc == 0x31) tp_walk_command(TP_WALK_HOP);
+    else if (kc == 0x0f) tp_walk_command(TP_WALK_RIDE);
+    else if (kc == 0x09) tp_walk_command(TP_WALK_VIEW);
+    else if (kc == 0x2d) tp_walk_command(TP_WALK_NOCLIP);
+}
+- (void)presentWalk {
+    double t = CACurrentMediaTime(), dt = _walkLast ? t - _walkLast : 1.0 / 60; _walkLast = t;
+    double fwd = _wk[0] - _wk[1] + _pad[0], strafe = _wk[3] - _wk[2] + _pad[1], turn = _wk[5] - _wk[4];
+    if (t < _holdUntil) { fwd += _hold[0]; strafe += _hold[1]; turn += _hold[2]; }
+    fwd = fmax(-1, fmin(1, fwd)); strafe = fmax(-1, fmin(1, strafe)); turn = fmax(-1, fmin(1, turn));
+    tp_walk_input(fwd, strafe, turn, _lookDX + _pad[2] * dt * 2.2, _lookDY + _pad[3] * dt * 1.6, _wkRun, dt);
+    _lookDX = _lookDY = 0;
+    /* drawn at a chunky size (the game's pixels are big too) and scaled up without smoothing */
+    NSRect b = self.bounds; if (b.size.width < 8 || b.size.height < 8) return;
+    long rows = [NSUserDefaults.standardUserDefaults integerForKey:@"WalkRows"]; if (rows < 150 || rows > 1200) rows = 450;
+    int oh = (int)rows, ow = (int)lround(oh * b.size.width / b.size.height);
+    if (!_walkPx || _walkW != ow || _walkH != oh) { free(_walkPx); _walkW = ow; _walkH = oh; _walkPx = calloc((size_t)ow * oh, 4); }
+    if (!tp_walk_render(_walkPx, ow, oh)) for (int i = 0; i < ow * oh; i++) _walkPx[i] = 0xff000000u;   /* (the first picture is on its way) */
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(_walkPx, ow, oh, 8, ow * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    _screen.frame = b; _screen.magnificationFilter = kCAFilterNearest; _screen.contents = (__bridge id)img; _scan.hidden = YES;
+    if (!_hud) {
+        _hud = [CATextLayer layer];
+        _hud.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null], @"hidden": [NSNull null], @"string": [NSNull null]};
+        _hud.fontSize = 13; _hud.alignmentMode = kCAAlignmentCenter; _hud.foregroundColor = NSColor.whiteColor.CGColor;
+        _hud.backgroundColor = [NSColor colorWithWhite:0 alpha:0.55].CGColor;
+        [self.layer addSublayer:_hud];
+    }
+    char st[256]; tp_walk_status(st, sizeof st);
+    if (strcmp(st, _hudText)) { snprintf(_hudText, sizeof _hudText, "%s", st); _hud.string = [NSString stringWithUTF8String:st] ?: @""; }
+    _hud.contentsScale = self.window.backingScaleFactor ?: 2;
+    _hud.frame = NSMakeRect(0, 0, b.size.width, 22); _hud.hidden = NO;
+    [CATransaction commit];
+    CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs);
+    [self updateRideVideo];
+}
+/* A ride's video, if the player put one in ~/Games/ThemeParkNative/rides: named by the ride's type
+ * number (0..28, the game's type table order) or its name, .mp4, .mov or .m4v. It plays (looping)
+ * while the visitor followed is on that ride; otherwise the view from the seat shows. */
+- (NSURL *)rideVideoFor:(int)type name:(const char *)name {
+    NSString *dir = [dataRoot() stringByAppendingPathComponent:@"rides"];
+    NSMutableArray *stems = [NSMutableArray array];
+    if (type >= 0) [stems addObject:[NSString stringWithFormat:@"%d", type]];
+    if (name && *name) [stems addObject:[NSString stringWithUTF8String:name] ?: @""];
+    for (NSString *stem in stems) for (NSString *ext in @[@"mp4", @"mov", @"m4v"]) {
+        NSString *p = [[dir stringByAppendingPathComponent:stem] stringByAppendingPathExtension:ext];
+        if ([NSFileManager.defaultManager fileExistsAtPath:p]) return [NSURL fileURLWithPath:p];
+    }
+    return nil;
+}
+- (void)updateRideVideo {
+    int type = -1; char name[64] = "";
+    if (!tp_walk_ride(&type, name, sizeof name)) { [self stopRideVideo]; return; }
+    if (_videoType == type) { if (_videoLayer) _videoLayer.frame = self.bounds; return; }
+    [self stopRideVideo]; _videoType = type;
+    NSURL *u = [self rideVideoFor:type name:name];
+    if (!u) return;
+    _video = [AVQueuePlayer new];
+    _looper = [AVPlayerLooper playerLooperWithPlayer:_video templateItem:[AVPlayerItem playerItemWithURL:u]];
+    _videoLayer = [AVPlayerLayer playerLayerWithPlayer:_video];
+    _videoLayer.videoGravity = AVLayerVideoGravityResizeAspect; _videoLayer.backgroundColor = NSColor.blackColor.CGColor;
+    _videoLayer.frame = self.bounds;
+    [self.layer insertSublayer:_videoLayer below:_hud];
+    [_video play];
+    fprintf(stderr, "walk: ride video %s\n", u.path.UTF8String);
+}
+- (void)stopRideVideo {
+    if (_video) { [_video pause]; [_videoLayer removeFromSuperlayer]; }
+    _video = nil; _videoLayer = nil; _looper = nil; _videoType = -2;
 }
 @end
 
@@ -689,6 +842,18 @@ static void *game_thread(void *arg) {
 - (void)pollController {
     GCExtendedGamepad *g = GCController.controllers.firstObject.extendedGamepad;
     if (!g) return;
+    if (tp_walk_active()) {                             /* Visitor View: left stick walks, right stick looks, A follow, X hop, Y ride, Menu leaves */
+        static BOOL a0, x0, y0, m0;
+        float lx = g.leftThumbstick.xAxis.value, ly = g.leftThumbstick.yAxis.value, rx = g.rightThumbstick.xAxis.value, ry = g.rightThumbstick.yAxis.value;
+        [_view walkPad:fabsf(ly) > 0.15 ? ly : 0 :fabsf(lx) > 0.15 ? lx : 0 :fabsf(rx) > 0.15 ? rx : 0 :fabsf(ry) > 0.15 ? -ry : 0];
+        if (g.buttonA.pressed && !a0) tp_walk_command(TP_WALK_FOLLOW);
+        if (g.buttonX.pressed && !x0) tp_walk_command(TP_WALK_HOP);
+        if (g.buttonY.pressed && !y0) tp_walk_command(TP_WALK_RIDE);
+        if (g.buttonMenu.pressed && !m0) [_view walkStop];
+        a0 = g.buttonA.pressed; x0 = g.buttonX.pressed; y0 = g.buttonY.pressed; m0 = g.buttonMenu.pressed;
+        return;
+    }
+    [_view walkPad:0 :0 :0 :0];
     static double px = 0.5, py = 0.4; static BOOL a, b, ls, rs, menu;
     float lx = g.leftThumbstick.xAxis.value, ly = g.leftThumbstick.yAxis.value;
     BOOL moved = NO;
@@ -799,6 +964,21 @@ static uint32_t key_of_char(unichar c) {
         else if ([op isEqual:@"full"]) [self toggleFull:nil];
         else if ([op isEqual:@"fps"]) [self toggleFPS:nil];
         else if ([op isEqual:@"grid"]) [self toggleGrid:nil];
+        else if ([op isEqual:@"walk"]) {                 /* walk X Y: the Visitor View at map point X,Y (X < 0: the middle of the game's view) */
+            double x = a1, y = a2;
+            if (x < 0 && !tp_view_point_to_world(0.5, 0.45, &x, &y)) x = y = 32;
+            fprintf(stderr, "control: walk %.2f,%.2f: %d\n", x, y, [_view walkStartAt:x :y]);
+        }
+        else if ([op isEqual:@"walkcmd"]) tp_walk_command((int)a1);   /* 1 follow, 2 hop, 3 ride along, 4 view, 5 noclip */
+        else if ([op isEqual:@"walkhold"]) [_view walkHold:a1 :a2 :p.count > 3 ? [p[3] doubleValue] : 0 :p.count > 4 ? [p[4] doubleValue] : 1];   /* walkhold FWD STRAFE TURN SECONDS */
+        else if ([op isEqual:@"walkteleport"]) tp_walk_teleport(a1, a2, p.count > 3 ? [p[3] doubleValue] * M_PI / 180 : NAN);   /* X Y YAW(degrees) */
+        else if ([op isEqual:@"walkstop"]) [_view walkStop];
+        else if ([op isEqual:@"walkshot"]) {             /* walkshot PATH: the Visitor View at 960x600 */
+            uint32_t *img = malloc(4 * 960 * 600); int ok = tp_walk_render(img, 960, 600);
+            int tp_host_png_rgba(const char *, const uint32_t *, int, int); if (ok) tp_host_png_rgba([line substringFromIndex:9].fileSystemRepresentation, img, 960, 600);
+            char st[256]; tp_walk_status(st, sizeof st); free(img);
+            fprintf(stderr, "walkshot %s drawn=%d | %s\n", [line substringFromIndex:9].UTF8String, ok, st);
+        }
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
         else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
@@ -950,6 +1130,7 @@ int main(int argc, const char **argv) {
         dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
         dbg = [viewMenu addItemWithTitle:@"Show Section Grid" action:@selector(toggleGrid:) keyEquivalent:@"g"];
         dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+        [viewMenu addItemWithTitle:@"Visitor View" action:@selector(visitorView:) keyEquivalent:@"V"];   /* ⇧⌘V (experimental) */
         viewItem.submenu = viewMenu;
         a.mainMenu = bar;
         AppDelegate *d = [AppDelegate new];
