@@ -232,7 +232,7 @@ int sb16_port_out(unsigned port, unsigned v);
 int sb16_take_irq(void);
 void sb16_render(float *out, int frames, double out_rate);
 void sb16_reset(void);
-static int audio_attached; static double audio_pumped;
+static int audio_attached;
 void tp_host_audio_attached(int on) { audio_attached = on; }
 static int floating_port(unsigned port) {     /* ISA I/O with no device behind it */
     if (port >= 0x200 && port < 0x400) {
@@ -403,19 +403,10 @@ static void realtime_events(void) {
     debug_stats();
     tp_view_poll();
     if (in_callback && tp_watch_hit) in_callback = 0;
+    { void sb16_pump(double t); sb16_pump(now_s()); }   /* the card's DMA, in small steps in the game's time (sb16.c) */
     if (!(G(EFLAGS) & 0x200)) return;
     double t = now_s(), te = emu_now();
     double period = pit_divisor / 1193182.0;
-    if (!audio_attached) {                               /* headless: advance sound at wall-clock rate, muted */
-        if (!audio_pumped || t - audio_pumped > 0.5) audio_pumped = t;
-        int frames = (int)((t - audio_pumped) * 44100);
-        if (frames > 64) {
-            static float scratch[2 * 4096];
-            if (frames > 4096) frames = 4096;
-            sb16_render(scratch, frames, 44100);
-            audio_pumped += frames / 44100.0;
-        }
-    }
     if (te >= timer_next && timer_installed()) {
         if (te - timer_next > 0.25) timer_next = te;      /* do not replay a long stall */
         timer_next += period;
@@ -1040,7 +1031,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     port60 = 0;
     key_at = click_at = block_click_at = 0;
     tp_audio_midi_reset();
-    stopped = 0; exit_code = -1; mpu_n = 0; sb16_reset(); sb_irq_pending = 0; audio_pumped = 0;
+    stopped = 0; exit_code = -1; mpu_n = 0; sb16_reset(); sb_irq_pending = 0;
     arena_init(&linear_arena, 0x400000, MEMORY, 4096);
     arena_init(&conventional, 0x40000, 0x90000, 16);
     next_selector = 0x100; heap = 0x400000;

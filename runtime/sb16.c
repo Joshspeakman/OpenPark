@@ -90,6 +90,8 @@ static int dma_port_in(unsigned port, unsigned *v) {
         return 0;
     }
     if (reg < 8) {
+        static long reads; static int dbg = -1; if (dbg < 0) dbg = getenv("TP_DEBUG") != NULL;
+        if (dbg && ++reads % 200 == 1) fprintf(stderr, "dma: position read ch %d reg %d (%ld so far)\n", ch, reg, reads);
         uint32_t x = (reg & 1) ? dma[ch].count : dma[ch].addr;
         *v = flipflop[ctl] ? (x >> 8) & 0xff : x & 0xff;
         flipflop[ctl] ^= 1;
@@ -113,7 +115,7 @@ static uint32_t test_reg;
 static int playing, bits16, stereo, is_signed, autoinit, paused;
 static uint32_t block_len, block_left;  /* in samples (frames * channels) */
 static double phase;
-static float hold_l, hold_r;
+static float hold_l, hold_r, prev_l, prev_r;   /* the card's last two samples: output between them (linear) */
 
 static void push(uint8_t b) { if (outq_n < 64) outq[outq_n++] = b; }
 static void raise_irq(int sixteen) {
@@ -283,14 +285,53 @@ void sb16_render(float *out, int frames, double out_rate) {
             phase += step;
             while (phase >= 1.0 && playing) {
                 phase -= 1.0;
+                prev_l = hold_l; prev_r = hold_r;
                 if (fetch(&hold_l, &hold_r)) { hold_l = hold_r = 0; break; }
             }
-            out[2 * i] = hold_l; out[2 * i + 1] = hold_r;
+            double f = phase < 1.0 ? phase : 1.0;
+            out[2 * i] = prev_l + (hold_l - prev_l) * (float)f; out[2 * i + 1] = prev_r + (hold_r - prev_r) * (float)f;
             if (hold_l > peak) peak = hold_l; else if (-hold_l > peak) peak = -hold_l;
         } else out[2 * i] = out[2 * i + 1] = 0;
         if (!playing || paused) step = 0;
     }
     pthread_mutex_unlock(&lock);
+}
+
+/* The card plays in the game's time: the CPU thread advances it (sb16_pump, at every chance, by the wall clock)
+ * in steps of a fraction of a millisecond, as the hardware's DMA would. The HMI driver reads the DMA position
+ * ~700 times a second and mixes just ahead of it; advanced by the audio callback instead, the position jumped
+ * ~12 ms at a time, so the card read what the driver had not mixed yet (choppy, harsh) and the driver waited
+ * on it. The audio output (sb16_play) plays what the pump made, ~25 ms behind. */
+#define RING 16384                     /* output frames */
+static float ring[2 * RING]; static unsigned r_head, r_tail; static int primed;
+static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
+static double pumped;
+static long underruns;
+void sb16_pump(double t) {
+    if (pumped == 0 || t < pumped || t - pumped > 0.25) { pumped = t; return; }   /* (a long stall is not replayed) */
+    int frames = (int)((t - pumped) * 44100);
+    if (frames < 16) return;
+    if (frames > 4096) frames = 4096;
+    static float tmp[2 * 4096];
+    sb16_render(tmp, frames, 44100);
+    pumped += frames / 44100.0;
+    pthread_mutex_lock(&ring_lock);
+    for (int i = 0; i < frames; i++, r_head++) { ring[(r_head % RING) * 2] = tmp[2 * i]; ring[(r_head % RING) * 2 + 1] = tmp[2 * i + 1]; }
+    if (r_head - r_tail > RING) r_tail = r_head - RING;
+    pthread_mutex_unlock(&ring_lock);
+}
+void sb16_play(float *out, int frames) {
+    pthread_mutex_lock(&ring_lock);
+    unsigned avail = r_head - r_tail;
+    if (!primed && avail >= 1024) primed = 1;
+    if (primed && avail > 4096) r_tail = r_head - 1536;   /* (far behind, the game ran ahead of the device: catch up) */
+    int i = 0;
+    if (primed) for (; i < frames && r_tail != r_head; i++, r_tail++) { out[2 * i] = ring[(r_tail % RING) * 2]; out[2 * i + 1] = ring[(r_tail % RING) * 2 + 1]; }
+    if (i < frames) {                                    /* (ran dry: silence, and fill up again before playing on) */
+        if (primed) { primed = 0; underruns++; if (getenv("TP_DEBUG")) fprintf(stderr, "sb16: output ran dry (%ld)\n", underruns); }
+        for (; i < frames; i++) out[2 * i] = out[2 * i + 1] = 0;
+    }
+    pthread_mutex_unlock(&ring_lock);
 }
 
 void sb16_reset(void) {
@@ -300,6 +341,7 @@ void sb16_reset(void) {
     flipflop[0] = flipflop[1] = 0;
     memset(mixer, 0, sizeof mixer);
     outq_n = 0; want = nargs = 0; playing = 0; irq_raise = 0; irq8_pending = irq16_pending = 0;
-    rate = 22050; block8 = 0x7ff;
+    rate = 22050; block8 = 0x7ff; hold_l = hold_r = prev_l = prev_r = 0;
     pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&ring_lock); r_tail = r_head; primed = 0; pumped = 0; pthread_mutex_unlock(&ring_lock);
 }

@@ -632,6 +632,25 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Sound: the card in the game's time (2026-10-18)
+
+The player (nightly, their own park, sound on): some effects choppy or distorted; the game slows for a
+moment when some effects (the "ew") play.
+- The HMI driver reads the DMA count (channel 1, register 3) about 480 times a second: two bytes per
+  240 Hz timer tick (TP_DEBUG logs it), mixing a little ahead of the play position each tick (~4 ms).
+  The card used to be advanced by the audio callback, ~512 output frames (~12 ms) at a time: the
+  position jumped past what the driver had mixed, so the card played unmixed or stale data.
+- Now the CPU thread advances the card (sb16_pump, realtime_events and the pacing wait, which sleeps a
+  millisecond at a time) by the wall clock into a ring; the audio callback plays from it (sb16_play,
+  ~25 ms behind; fills up again after running dry; skips ahead after a stall over ~93 ms). The card's
+  samples are interpolated linearly to 44.1 kHz instead of held. Headless runs use the same pump.
+- Still coarse: a native pass (~3.5 ms, on the CPU thread) holds the card meanwhile, at the edge of the
+  driver's mix-ahead. If crackles remain, look there first.
+- Checked (the player's save, sound and music on at their request): no output underruns in 60 s, park
+  ticks steady (worst gap ~28 ms), check suite and view tests pass. TP_AUDIO_REC=<file> records the card's
+  output (44.1 kHz stereo float). The slowdown was not reproduced in a scripted run (no tick or frame gap
+  over 40 ms around effects); it may have been the driver waiting on the card.
+
 ## Up to 10,000 visitors in 128x128 parks, 2026-10-18
 
 The player: "i would like the guest limit on the bigger maps to be closer to 10,000 and we will
