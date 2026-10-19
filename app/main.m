@@ -16,6 +16,7 @@
 int tp_audio_start(void);
 void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
+int tp_audio_cd_play(const char *path, int loop); void tp_audio_cd_stop(void);
 BOOL tp_launcher_run(void);
 struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
@@ -721,6 +722,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 static AppDelegate *app;
 static volatile int game_done, game_result;
+static volatile int main_running;                 /* MAIN.EXE is the image (not the intro): its music words are valid */
 
 /* The launcher's settings into the environment, where the C modules read them (qol.c, freemode.c, bigmap.c,
  * view.c; a variable already set wins, for tests). On the main thread before the game thread starts: setenv is
@@ -782,6 +784,7 @@ static void *game_thread(void *arg) {
         tp_host_set_args(args);
     }
     for (;;) {
+        main_running = 0;
         tp_view_enable(1);                               /* the zoomable park view knows MAIN.EXE's code */
         tp_view_request_hires([NSUserDefaults.standardUserDefaults boolForKey:@"StartHiRes"] || getenv("TP_START_HIRES"));
         if (tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
@@ -791,7 +794,9 @@ static void *game_thread(void *arg) {
         tp_qol_init();                                   /* quality-of-life hooks (qol.c), MAIN.EXE's code */
         if (tp_view_debug_fps) tp_view_count_game_frames(1);
         int r;
+        main_running = 1;
         do r = tp_host_run(4000, 0, 50); while (r == 0);
+        main_running = 0;
         game_result = r;
         /* THEME.BAT restarts the game when it exits with errorlevel >= 10. */
         if (r == 1 && tp_host_exit_code() >= 10) { tp_walk_stop(); continue; }   /* (Visitor View does not outlive its game, issue #6) */
@@ -821,7 +826,7 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
                           @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
                           @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
@@ -1122,8 +1127,46 @@ static uint32_t key_of_char(unichar c) {
     [self tick];
 }
 - (void)timerTick { if (CACurrentMediaTime() - _lastDisplayTick > 0.05) [self tick]; }
+/* Music Type (Launcher > Sound): 0 the game's General MIDI, 1 the Amiga CD32's CD-audio tracks (imported from
+ * the owner's disc by tools/extras.py into extras/amiga-cd32). The game runs its music as always; this follows
+ * its current tune (word 0x1ba71a: 1-17 ride tunes, 18 heartbeat, 19 fanfare, 20 takeover, 21 win, 22
+ * funeral) and plays the Amiga game's track for it (its own tune -> track table, in the manifest). Ride tunes
+ * and the heartbeat loop; the jingles play out even after the game's shorter MIDI version has ended. */
+- (void)musicTick {
+    static int mode = -1, last = -1, loaded, ntab; static int tab[64]; static NSString *dir; static double next_check;
+    double t = CACurrentMediaTime();
+    if (t >= next_check) {                               /* (the setting can change in the launcher) */
+        next_check = t + 1;
+        int m = (int)[NSUserDefaults.standardUserDefaults integerForKey:@"MusicType"];
+        if (getenv("TP_MUSIC_TYPE")) m = atoi(getenv("TP_MUSIC_TYPE"));
+        if (m != mode) { mode = m; last = -1; tp_audio_cd_stop(); }
+        if (mode == 1 && !loaded) {
+            loaded = 1;
+            dir = [dataRoot() stringByAppendingPathComponent:@"extras/amiga-cd32"];
+            NSDictionary *man = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"manifest.json"]] ?: [NSData data] options:0 error:nil];
+            NSArray *tt = [man isKindOfClass:NSDictionary.class] ? man[@"tune_tracks"] : nil;
+            for (NSNumber *n in tt) if (ntab < 64) tab[ntab++] = n.intValue;
+            fprintf(stderr, "music: Amiga CD32 tracks %s\n", ntab ? "found" : "not imported (tools/extras.py): the game's MIDI plays");
+        }
+    }
+    if (mode != 1 || !ntab || !main_running) return;
+    uint8_t *tp_host_memory(void); uint8_t *mem = tp_host_memory();
+    if (!mem) return;
+    int16_t tune; memcpy(&tune, mem + 0x1ba71a, 2);
+    if (tune == last) return;
+    int was = last; last = tune;
+    int track = tune > 0 && tune < ntab ? tab[tune] : tune >= 30 ? tune - 30 : 0;
+    NSString *f = track ? [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"track%02d.wav", track]] : nil;
+    if (f && [NSFileManager.defaultManager fileExistsAtPath:f]) {
+        tp_audio_cd_play(f.fileSystemRepresentation, tune <= 18);
+        if (getenv("TP_SOUND_LOG")) fprintf(stderr, "music: tune %d -> CD track %d\n", tune, track);
+    } else if (!(tune == 0 && was >= 19 && was <= 22)) {
+        tp_audio_cd_stop();                              /* (none, or a tune without a track: the game's MIDI) */
+    }
+}
 - (void)tick {
     [self runControl];
+    [self musicTick];
     [self runTestScript];
     [self pollController];
     [_view present];

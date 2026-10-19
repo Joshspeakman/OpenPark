@@ -159,7 +159,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[8], _tweaks[7], _free[5];
+    Setting _display[7], _sound[9], _tweaks[7], _free[5];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -192,6 +192,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"The shape a 1994 monitor gave it", @"Stretched to the window's shape"]);
         _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"],
                             @[@"Sound Blaster effects and General MIDI music", @"The park is silent"]);
+        _sound[8] = setting(@"Music Type", @"MusicType", @[@0, @1], @[@"General MIDI", @"Amiga CD32"],
+                            @[@"The game's MIDI tunes, as on the PC", @"The CD32 disc's recorded tracks (tools/extras.py imports them)"]);
         _sound[7] = setting(@"Music Instruments", @"SoundBank", @[@""], @[@"Built-in"],
                             @[@"The Mac's synthesizer; → picks a SoundFont"]);
         _sound[1] = slider(@"Effects Volume", @"SoundVolume", vol, volL, volN);
@@ -263,7 +265,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 8 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 9 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -291,6 +293,9 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     return s->labels[[self valueIndex:s]];
 }
 - (NSString *)noteOf:(Setting *)s {
+    if ([s->key isEqual:@"MusicType"] && [self valueIndex:s] == 1 && ![NSFileManager.defaultManager fileExistsAtPath:
+            [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative/extras/amiga-cd32/manifest.json"]] && !NSProcessInfo.processInfo.environment[@"TP_DATA"])
+        return @"Not imported yet: tools/extras.py <your disc's .cue>; MIDI plays until then";
     if ([s->key isEqual:@"RideTunes"])
         return [[NSUserDefaults.standardUserDefaults dictionaryForKey:@"RideTunes"] count] ? @"→ changes them; ← puts every ride back" : s->notes[0];
     if ([s->key isEqual:@"SoundBank"]) {
@@ -327,8 +332,8 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (NSRect)panel { return NSMakeRect(42, 132, WIN_W - 84, 512); }
 - (NSRect)rowRect:(NSInteger)k {
     if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 7 + 63 * k, f.size.width - 20, 63); }
-    NSRect p = self.panel; CGFloat pitch = self.rowCount > 7 ? 54 : self.rowCount > 6 ? 60 : self.rowCount > 5 ? 69 : self.rowCount > 4 ? 70 : 74;
-    return NSMakeRect(p.origin.x + 26, p.origin.y + (self.compact ? 74 : 80) + pitch * k, p.size.width - 52, self.compact ? 54 : 70);
+    NSRect p = self.panel; CGFloat pitch = self.rowCount > 8 ? 47 : self.rowCount > 7 ? 54 : self.rowCount > 6 ? 60 : self.rowCount > 5 ? 69 : self.rowCount > 4 ? 70 : 74;
+    return NSMakeRect(p.origin.x + 26, p.origin.y + (self.compact ? 74 : 80) + pitch * k, p.size.width - 52, self.compact ? pitch : 70);
 }
 /* Eight rows (Sound): each drawn closer, its value, note and slider a few points higher. */
 - (BOOL)compact { return self.open >= 0 && self.rowCount > 7; }
@@ -339,7 +344,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 - (NSRect)trackRect:(NSInteger)k {
     NSRect la = [self arrow:k right:NO], ra = [self arrow:k right:YES], r = [self rowRect:k];
-    return NSMakeRect(NSMaxX(la) + 16, r.origin.y + (self.compact ? 36 : 46), ra.origin.x - NSMaxX(la) - 32, 10);
+    return NSMakeRect(NSMaxX(la) + 16, r.origin.y + (self.rowCount > 8 ? 33 : self.compact ? 36 : 46), ra.origin.x - NSMaxX(la) - 32, 10);
 }
 - (void)slide:(NSInteger)k to:(NSPoint)p {
     Setting *s = [self rowSetting:k]; NSRect t = [self trackRect:k]; NSInteger n = (NSInteger)s->values.count;
@@ -483,7 +488,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         for (NSInteger j = 0; j < n; j++) { CGFloat tx = t.origin.x + t.size.width * (n > 1 ? (CGFloat)j / (n - 1) : 0); [rgb(60, 36, 14) setFill]; NSRectFill(NSMakeRect(tx - 0.5, t.origin.y + 2, 1, t.size.height - 4)); }
         NSRect knob = NSMakeRect(x - 9, NSMidY(t) - 9, 18, 18);
         NSBezierPath *kp = [NSBezierPath bezierPathWithOvalInRect:knob]; [cream() setFill]; [kp fill]; [rgb(120, 70, 20) setStroke]; kp.lineWidth = 2; [kp stroke];
-    } else if (note.length) label(note, plain(14), note_c(), NSMakeRect(va.origin.x - 60, r.origin.y + (self.compact ? 32 : 42), va.size.width + 120, 20), NSTextAlignmentCenter, 0.6, YES);
+    } else if (note.length) label(note, plain(14), note_c(), NSMakeRect(va.origin.x - 60, r.origin.y + (self.rowCount > 8 ? 29 : self.compact ? 32 : 42), va.size.width + 120, 20), NSTextAlignmentCenter, 0.6, YES);
     for (int side = 0; side < 2; side++) {   /* gold pennant arrows */
         NSRect a = side ? ra : la; BOOL lit = self.hover == (side ? 200 : 100) + k;
         NSBezierPath *t = [NSBezierPath bezierPath];
@@ -498,7 +503,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 - (NSString *)summary:(NSInteger)g {
     if (g == 0) return [NSString stringWithFormat:@"%@ · %@ · %@", [self valueOf:&_display[0]], [self valueOf:&_display[1]], [self valueOf:&_display[2]]];
-    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@ · Game %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[6]], [self valueOf:&_sound[2]]];
+    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@%@ · Game %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[6]], [self valueIndex:&_sound[8]] ? @" (CD32)" : @"", [self valueOf:&_sound[2]]];
     if (g == 2) return @"Mouse and keyboard";
     if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Till %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]], [self valueOf:&_tweaks[2]]];
     if (g == 5) return [NSString stringWithFormat:@"%@ · %@ visitors · %@", [self valueOf:&_free[0]], [self valueOf:&_free[2]], [self valueOf:&_free[4]]];

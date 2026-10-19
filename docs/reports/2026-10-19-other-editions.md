@@ -50,6 +50,18 @@ SHA-256 against GOG's package (`config/inputs.json`). Unpacked files stay in the
   file on the data track, the soundtrack is almost certainly the 25 audio tracks. Using it needs a full dump
   of the disc (bin/cue, or the tracks as WAV), then the game-situation → track mapping from `main`.
 
+**The full disc dump (bin/cue, 26 tracks):**
+- **The tracks:** 25 audio tracks, 13.6 minutes in all, 4–82 s each.
+- **The tune → track table:** `main` plays a CD track at 0x53d40 (cd.device command 0x25, one track); its only
+  caller, 0x4d712, takes tune n ≤ 29 to the table at data hunk 6 +0xcd72 and tune n ≥ 30 to track n − 30.
+  - Tunes 1–17 (the rides) → 2, 17, 15, 7, 11, 25, 23, 24, 14, 5, 20, 13, 13, 14, 3, 16, 22.
+  - Tunes 18–27 → the same track number.
+  - Tracks 4, 6, 8, 9, 10 and 12 aren't in the table (tunes ≥ 30, likely menu music).
+- **In the port:** `tools/extras.py` imports the tracks; Launcher > Sound > Music Type: Amiga CD32 plays them
+  for the game's tune (`app/main.m` musicTick, `app/audio.m`).
+- **Checked:** your test park's Super Spinner (tune 12) played track 13. The recorded output matched the track's
+  envelope at 0.96 correlation (another track: 0.16).
+
 ## Demo floppy (PC Gamer, March 1994)
 
 - **The archive:** `GAME.EXE` is a PROPACK SFX 2.18 archive of 41 RNC method-1 blocks; `tools/rnc.py` unpacks
