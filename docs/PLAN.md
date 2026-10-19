@@ -651,6 +651,11 @@ smaller as well as larger with a slider, rail rides cannot be laid.
 - Two more cell-step tables found by scanning the data for 64x64 steps outside the list: 0x1b7df4 (by direction
   bit, used by the path and queue linker 0x12c2ec) and 0x1b48e4 (N E S W). Whether they are what broke laying
   rail rides in a 128x128 park is not yet known.
+- Rail rides, tested in a copy of TESTPARK (128x128): Big Dipper bought, station placed at x 55..59 y 88..89
+  (found by diffing the things pool), five track pieces laid, curve and straights; the installed build before
+  the two tables does the same. The player's failure is not yet reproduced: which ride, where, what happens.
+- A person's path search (0x162d5c, up to 40 steps) took only cells 0x42..0xe7f: rows 1..57 of a 64-wide map,
+  but rows 1..28 of a 128-wide one. Now (tp_map_w + 1) .. (tp_map_ext - 6) * tp_map_w (sites 162e83, 162e8a).
 - Seen while testing: placing a ride in a scratch park (scripted, maybe mis-clicked) gave a 21 s stretch
   without park ticks, the governor holding the game to DOS speed while it drew another screen. To repeat with
   the player's test park (TESTPARK, 128x128, True Freeplay).
