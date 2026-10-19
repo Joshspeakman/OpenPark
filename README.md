@@ -1,6 +1,6 @@
-# Theme Park — native macOS recompilation
+# OpenPark
 
-Bullfrog's Theme Park (1994) running as native code. The DOS game's own code is statically recompiled to C and
+**Theme Park, natively.** Bullfrog's Theme Park (1994) running as native code. The DOS game's own code is statically recompiled to C and
 compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU emulator at run time. macOS on Apple
 Silicon is the first platform; Windows and Linux are next ([docs/PORTING.md](docs/PORTING.md)). You
 build it from your own copy of the game; this repository contains no game code, data or art.
@@ -59,6 +59,7 @@ How a platform is added, and what is portable today: [docs/PORTING.md](docs/PORT
 ## Build and install (macOS)
 
 ```sh
+git clone https://github.com/Joshspeakman/OpenPark.git && cd OpenPark
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # once: Capstone and Unicorn
 .venv/bin/python3 tools/prepare.py ~/Downloads/theme_park_enUS_1_0_33010.pkg
 bash tests/check_macos.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \

@@ -1,4 +1,4 @@
-# Porting to other platforms
+# Porting OpenPark to other platforms
 
 macOS on Apple Silicon is the first platform and the only finished one. Windows and Linux come next. This
 page is the contract a new platform implements, and what is already portable.

@@ -1,4 +1,4 @@
-# Theme Park native recompilation (macOS first; Windows and Linux next)
+# OpenPark: Theme Park native recompilation (macOS first; Windows and Linux next)
 
 - Use only the user's owned Theme Park package. Downloads and installed games are read-only.
 - Final product: native code on each platform (macOS on Apple Silicon first; Windows and Linux next, docs/PORTING.md, the user's say 2026-10-19), no DOSBox, Wine, Rosetta or CPU interpreter at runtime. Platform code lives in platform/<os>/ and runtime/platform_*.c; runtime/ stays portable C. Unicorn is permitted as a development-only differential oracle.

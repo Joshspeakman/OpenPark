@@ -13,6 +13,8 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19: the repository is renamed OpenPark (GitHub Joshspeakman/OpenPark; the old URL redirects), at the user's say.
+
 2026-10-19, cross-platform prep (the user's say): runtime/platform.h with platform/macos/platform_macos.c (the
 Mach and dispatch code from view.c, unchanged) and runtime/platform_posix.c; the Mac app moved from app/ to
 platform/macos/; tools/toolchain.py replaces hard-coded `clang -arch arm64`; tests/check_portable.sh and a CI
