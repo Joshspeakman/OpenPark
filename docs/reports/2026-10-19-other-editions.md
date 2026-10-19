@@ -8,6 +8,7 @@ SHA-256 against GOG's package (`config/inputs.json`). Unpacked files stay in the
 | PC CD (`THEMECD`, two copies) | the DOS CD release; the second copy (UK) is byte-identical to the first | Nothing. 129 of 133 files are identical to GOG's; the other four are GOG's edits (below). |
 | Japanese PC CD (`Mening CD`) | Japanese release: Japanese edition `GAME/MAINCH.EXE`, double-byte fonts | Japanese (kanji and kana) and Simplified Chinese text, redrawn menu and finance screens, a 320×200 installer variant |
 | Amiga CD32 (Mindscape 1995, data track 1 of 26) | Amiga AGA release | Its music is CD audio (`cd.device`; `midi.sng` is 51 KB): tracks 2–26, **not yet dumped** |
+| 3DO (USA) | the 3DO release (Opera filesystem) | A recorded soundtrack of the PC tunes; 17 ride videos, two of them (Space Shuttle, Tree House) for rides with no PC video, three longer cuts |
 | PC Gamer demo floppy (March 1994) | pre-release DOS demo in an RNC ProPack archive | Pre-release data and texts (below) |
 
 ## GOG's edits to the CD release
@@ -61,6 +62,33 @@ SHA-256 against GOG's package (`config/inputs.json`). Unpacked files stay in the
   for the game's tune (`app/main.m` musicTick, `app/audio.m`).
 - **Checked:** your test park's Super Spinner (tune 12) played track 13. The recorded output matched the track's
   envelope at 0.96 correlation (another track: 0.16).
+
+## 3DO (USA)
+
+- **The disc:** one data track (bin/cue, 227 MB) with the 3DO Opera filesystem (`tools/opera.py` lists and
+  extracts it): 270 files, 170 MB. The game is `Park` (ARM), with data in `STP Data/` and 3DO system files.
+- **A recorded soundtrack:** `System/Audio/aiff/RIDE1..17.AIFC` (SDX2 2:1 compressed, mono, 44.1 kHz).
+  - Each is the PC tune of the same number, recorded: lengths match the PC tunes' HMP song times to a second
+    (RIDE1 17.5 s / 17 s … RIDE7 67.3 s / 67 s, RIDE11 74.6 s / 75 s).
+  - Plus `HEART` (76.5 s), `SHARES` (81.6 s, the stock market?) and `CHEMIST` (68.2 s, research?).
+- **17 ride videos and three event videos** (`*.STREAM`: 3DO DataStream, Cinepak 320×200 at 15 fps, SDX2
+  sound; `tools/cinepak.py` decodes them):
+  - **Two rides the PC has no video for: `SHUTTLE` (Space Shuttle, 480 frames: up the launch tower, a
+    "BLAST OFF" display) and `TREE` (Tree House, 481 frames).**
+  - **Longer cuts than the PC's:** `SPINNER` 275 frames (PC 25), `TCUPS` 481 (PC's Merry-Go-Round 120),
+    `PLANE` 180 (PC 60).
+  - The same length as the PC: FLIGHT, HAUNT, MAZE, PARA, PLANET, RACE, ROLER, CASTLE, TUBE, WHEEL; also
+    PIRATE 303 (300), SNAKE 402 (418).
+  - Events: `TO` (takeover?, 130), `WL` (win/lose?, 336), `BUST` (bankrupt, 94).
+- **Other:**
+  - 3DO-drawn screens (`NTSC_*.cel`: main, bank, stock, research, negotiation, award…);
+  - a 3DO intro (`INTRO.FLC`, 18.5 MB) with its own MIDI files;
+  - three languages;
+  - a sample save (`ROLL_GAME`).
+- **Candidates:**
+  - "3DO recorded" as a Music Type (tunes 1–17 map 1:1);
+  - the 3DO ride videos in the ride panel's view button, which would give Space Shuttle and Tree House videos
+    and the longer cuts.
 
 ## Demo floppy (PC Gamer, March 1994)
 

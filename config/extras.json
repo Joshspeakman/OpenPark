@@ -93,6 +93,15 @@
     "GAME/MAIN.EXE",
     "79d3e5734b11bb3a4d290fce9b5e87aae44940e01525b74ca23803af7707c85e"
    ]
+  },
+  "3do-usa": {
+   "title": "3DO (USA)",
+   "gives": "recognised: a recorded soundtrack (the PC tunes, 1:1) and 17 ride videos incl. Space Shuttle and Tree House; import is a later step (docs/reports/2026-10-19-other-editions.md)",
+   "data_track_sha256": "4f0d8e8790294658d68bcbf65b9be71e49e4aa29f741e6a98e79096f4a186013",
+   "key_file": [
+    "Park",
+    "d37ca428cfc807dc62a93a92e28878d897b45a3c879680aa8838d01d931126ca"
+   ]
   }
  }
 }
