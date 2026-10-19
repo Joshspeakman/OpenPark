@@ -685,6 +685,11 @@ smaller as well as larger with a slider, rail rides cannot be laid.
   +0x63f) less (6, 7); the landscape is marked for redrawing for 8 more ticks, as the first frame's own clears
   it. Checked in new 64x64 and 128x128 parks. TP_GAME_CAMERA=1 keeps the game's (the golden first-park check).
 - Panel Size defaults to 0.75x.
+- Port audit (docs/reports/2026-10-18-port-audit.md): the whole image is recompiled (undecoded code: tables and
+  padding only); unhandled DOS services sit in unused library paths and stop with a message if reached; block
+  coverage (TP_COVERAGE=1, ctl `coverage FILE`, work/audit_cov.py) so far 595 of 1,221 game functions. Unfinished
+  in the original: silent fireworks (sample 27 is a NULL placeholder), a removed developer/cheat menu (texts
+  14..69), HORZA cheat mode (0x1d6682), MAKE THINGS TINY, ride animations for 15 of 29 rides.
 - Ew and purchase sound levels (the player: sliders with a few levels and off): EwVolume, PurchaseVolume (0, 1/4,
   1/2, 3/4, 1, of the game sounds' level; TP_EW_VOL, TP_CASH_VOL percent). EXTRAS: EW SOUNDS and PURCHASE SOUNDS
   open submenus OFF .. FULL (drop-downs 32672, 32673; X_FLAGS moved to +0x1c00, texts +0x1c80, table +0x2400 for

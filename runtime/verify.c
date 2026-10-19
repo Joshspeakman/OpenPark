@@ -116,6 +116,15 @@ uint32_t tp_break_pc = 0xffffffffu; int tp_break_hits;
 uint32_t tp_break_list[32]; int tp_break_count[32], tp_break_n;
 /* Optional record of dispatched block addresses (tools/spotcheck.py). */
 uint32_t *tp_trace_buf; uint32_t tp_trace_cap, tp_trace_n;
+/* Block coverage (development, TP_COVERAGE=1): one bit per guest address 0x100000..0x1fffff, set when a block
+ * starts there; tp_coverage_dump ORs it into a file, so runs add up (the port audit, docs/reports). */
+uint8_t *tp_cov;
+void tp_coverage_dump(const char *path) {
+    if (!tp_cov) return;
+    static uint8_t old[0x20000]; FILE *f = fopen(path, "rb"); size_t n = f ? fread(old, 1, sizeof old, f) : 0; if (f) fclose(f);
+    for (size_t i = 0; i < n; i++) tp_cov[i] |= old[i];
+    f = fopen(path, "wb"); if (f) { fwrite(tp_cov, 1, 0x20000, f); fclose(f); }
+}
 uint32_t tp_watch_pc = 0xffffffffu;
 volatile int tp_watch_hit;
 /* The host's hooks: tp_run returns -3 on arriving at one of tp_hook_pcs (once
@@ -157,6 +166,7 @@ int tp_run(uint32_t budget) {
                      for (int k = 0; k < 32; k++) fprintf(stderr, " %02x", G_MEM[a + k]); fprintf(stderr, "\n"); }
         }
         if (tp_trace_buf && tp_trace_n < tp_trace_cap) tp_trace_buf[tp_trace_n++] = state.tc;
+        if (tp_cov && state.tc - 0x100000u < 0x100000u) tp_cov[(state.tc - 0x100000u) >> 3] |= (uint8_t)(1u << (state.tc & 7));
         if (!dispatch_fn(&state)) return -2;
         blocks_run++;
         if (interrupt_number) return (int)interrupt_number;

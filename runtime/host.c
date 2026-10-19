@@ -1084,6 +1084,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     S(CS, 8); S(DS, 16); S(ES, 24); S(SS, 16); S(FS, 16); S(GS, 0);
     S(EIP, entry);
     tp_watch_pc = 0xf010;
+    { extern uint8_t *tp_cov; if (getenv("TP_COVERAGE") && !tp_cov) tp_cov = calloc(0x20000, 1); }   /* (verify.c: the port audit's block coverage) */
     { extern uint32_t tp_break_pc; const char *b = getenv("TP_BREAK"); if (b) tp_break_pc = (uint32_t)strtoul(b, NULL, 16); }
     { extern uint32_t tp_break_list[32]; extern int tp_break_n; const char *b = getenv("TP_BREAKS");
       for (char *e; b && *b && tp_break_n < 32; b = *e ? e + 1 : e) tp_break_list[tp_break_n++] = (uint32_t)strtoul(b, &e, 16); }
