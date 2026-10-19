@@ -73,16 +73,22 @@ extern uint32_t tp_hook_pcs[32]; void tp_hooks_changed(void);
 static void want_frame(void) { tp_hook_pcs[0] = 0x113b9au; tp_hooks_changed(); }
 int tp_free_waiting(void) { return pending != 0; }
 void tp_free_new_park(void) { give_back_settings(); rules = 0; pending = 1; loaded_rules = -1; want_frame(); }
-/* A saved park being read (host.c, its map): its rules from beside the save. */
-void tp_free_loaded(const char *save) {
-    char p[1100]; snprintf(p, sizeof p, "%s.free", save);
-    FILE *f = fopen(p, "r"); int r = 0, mo = 0, ra = ramp_new;   /* "rules months ramp" */
-    if (f) { if (fscanf(f, "%d %d %d", &r, &mo, &ra) < 2) r = mo = 0; fclose(f); }
+/* A saved park being read (host.c, its map): its rules from the save's trailer (r >= 0, issue #5), else from
+ * beside the save (older saves). */
+void tp_free_loaded_rules(const char *save, int r, int mo, int ra) {
+    if (r < 0) {
+        char p[1100]; snprintf(p, sizeof p, "%s.free", save);
+        FILE *f = fopen(p, "r"); r = 0; mo = 0; ra = ramp_new;   /* "rules months ramp" */
+        if (f) { if (fscanf(f, "%d %d %d", &r, &mo, &ra) < 2) r = mo = 0; fclose(f); }
+    }
     loaded_rules = (char)(r >= 0 && r <= 2 ? r : 0); loaded_months = mo < 0 ? 0 : mo;
     loaded_ramp = ra < 1 ? 1 : ra > 600 ? 600 : ra; pending = 2; want_frame();
     if (rules == 1) give_back_settings();              /* (leaving an Endless park; the save's own follow) */
     rules = 0;
 }
+void tp_free_loaded(const char *save) { tp_free_loaded_rules(save, -1, 0, 0); }
+/* The rules of the park being played, for a save's trailer (host.c). */
+int tp_free_state(int *mo, int *ra) { *mo = months; *ra = ramp; return rules; }
 /* A park saved (host.c): its rules beside it (none: the marker goes). */
 void tp_free_saved(const char *save) {
     char p[1100]; snprintf(p, sizeof p, "%s.free", save);
