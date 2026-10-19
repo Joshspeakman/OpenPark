@@ -4,6 +4,7 @@
  * checked against config/milestones.json. Unknown services stop with a
  * message; nothing succeeds silently. */
 #include "host.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -616,10 +617,16 @@ static void dos_time(uint32_t a) {
         S(EDX, (((t / 100) % 60) << 8) | (t % 100));
         return;
     }
+    /* DOS reads the time from the BIOS tick count, so it steps at 18.2 Hz (DOSBox the same): the ride videos'
+     * frame wait (0x16123d: 2 or 8 hundredths) lasts a whole tick or two. A clock exact to the hundredth played
+     * them about three times too fast. */
     struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
     struct tm tm; localtime_r(&ts.tv_sec, &tm);
-    S(ECX, (tm.tm_hour << 8) | tm.tm_min);
-    S(EDX, (tm.tm_sec << 8) | (uint32_t)(ts.tv_nsec / 10000000));
+    double day = tm.tm_hour * 3600.0 + tm.tm_min * 60.0 + tm.tm_sec + ts.tv_nsec / 1e9;
+    double tick = 65536.0 / 1193180.0;
+    uint32_t cs = (uint32_t)(floor(day / tick) * tick * 100.0);
+    S(ECX, ((cs / 360000) << 8) | (cs / 6000 % 60));
+    S(EDX, ((cs / 100 % 60) << 8) | (cs % 100));
 }
 
 /* CPU-speed governor. Theme Park's main loop is not timer-paced: screen

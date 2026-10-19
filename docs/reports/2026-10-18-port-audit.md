@@ -88,6 +88,16 @@ decoded and each shows its own ride: 0 Flight Sim, 2 Pirate Boat, 3 Plane Flyer,
 Tubing, 8 Race Car Ride, 9 Roller Coaster, 12 Big Wheel, 13 Merry-Go-Round (teacups), 14 Bouncy Castle, 19 Snakes and
 Ladders, 21 Parasol Chairs, 26 Super Spinner (25 frames) and 28 Planet Rocket. None shows a ride that is not in the
 game. The number is the ride's index in the ride table (`(thing+0x16)/0xc8`).
+- **Checked in the game (2026-10-19):** the Super Spinner's video plays from its panel and returns to the park.
+  During a video the widescreen side strips keep the last park picture; they should be black (open, cosmetic).
+- **Speed (fixed 2026-10-19):** between frames the player waits for 2 or 8 hundredths on the DOS clock
+  (int 21h/2Ch, 0x16123d; 2 in this mode). DOS derives that clock from the 18.2 Hz BIOS tick, so a wait lasts a
+  whole tick: 18.2 frames a second. The host answered to the hundredth, and the videos ran at about 50. Now the
+  clock steps at the tick, as in DOS and DOSBox. Measured through the same player (the win video, mode 1): 101
+  frames in 2 s before, 36 after.
+- **The intro is unaffected:** it never reads the DOS clock. It paces by a 120 Hz timer event registered with the
+  HMI driver (0x112e3d(120, 0x110010), counter 0x140a82 against a per-segment limit at 0x140a4c set by the video's
+  script). Measured: 1,202 events in 10 s.
 - **How it is played:** button action 14 (jump table 0x13b787, handler 0x13c086). On the ride panel (screen 0x14)
   it calls the player 0x15c04f in mode 2 with the selected ride. On the other panels the same action centres the
   camera on the selected thing.
@@ -125,14 +135,6 @@ nothing in the code is waiting for the cut ids.
 frames {first element, w, h, flags, next}; 10-byte elements {sprite x 6, x, y, flags, next}; 694 animations over the
 3,301 sprites of `MSPR-0`). Every sprite that has art belongs to some animation; 785 sprite slots are empty (0x0),
 which is art taken out of the bank with its slot kept. Of the ride-sized animations that no ride or shop record names:
-- **The one piece of new art with no object: animations 618..621** (sprites 992..995).
-  - What it shows: a gold-roofed booth with red and yellow striped pillars, seen from four sides, with a painted
-    mural and a sign.
-  - Where it sits: in the shops' block of the sprite bank, after the shop pictures (973..982: Gift Shop, Saloon,
-    Arcade, Mr. Whippy, Toy Land, Balloon World, Coffee Shop, Novelty Shop) and between runs of emptied slots.
-  - Nothing else uses its sprites, and no constant or table that was found points to it.
-  - It is most likely the picture of one of the two cut shops (Salty Dog or Bingo Highway). Which one is not
-    proven.
 - **Alternate animations of five existing rides: 610..617.** They are built only from those rides' own sprites:
   Pirate Boat, Space Shuttle, Snakes and Ladders, Ghost House and Tree House. They match those rides' sizes but use
   different frame sequences, and no reference to them was found. They may be extra states that were dropped; they
@@ -142,6 +144,9 @@ which is art taken out of the bank with its slot kept. Of the ride-sized animati
   - 577 is a second Coconut Shy picture (the same art as 568, with different frames);
   - 585 is an 18-frame Race Track loop beside the 17- and 28-frame ones.
 - **Used, not cut:**
+  - 618..621 (sprites 992..995), a gold-roofed booth with striped pillars seen from four sides, is the Race Car
+    Ride's station: it shows in that ride's panel. No ride or shop record names it, which makes it a clear example
+    of the caveat below.
   - 319, 543 and 544 (and the pieces 317, 318, 545, 546) are the park entrance's gate arm and ticket kiosk. Function
     0x118bc0 places them from a 6-byte layout table at 0x1b4ccc, relative to the entrance cell.
   - The four show stages in full (393, 394, 400, 410).
@@ -153,9 +158,8 @@ which is art taken out of the bank with its slot kept. Of the ride-sized animati
   constants and through other tables (302 sites read the start table), and only the ride-sized animations were
   checked one by one.
 
-No ride art was found for Dive Bomber or Planet Bomber. To bring a cut object back, an engine needs a new record
-with the cut id in the matching table (the id already has a name in all five languages) and, except for the booth
-above, new art.
+No art was found for any of the four cut objects. To bring one back, an engine needs a new record with the cut id
+in the matching table (the id already has a name in all five languages) and new art.
 
 ## 3. Modding map (for an OpenThemePark engine)
 
