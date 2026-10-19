@@ -13,6 +13,17 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, sound (#10, #11, Fable's review): the card's clock is now tied to the timer ticks delivered (host.c
+card_tick / tp_host_card_clock): each tick lets it play on one period, never ahead of real time, a stall over 100 ms
+not replayed (sb16_skip_to). Fable's branch held it at the next undelivered tick by emu_now; that is the same while
+frames are paced, but in the menus and while loading emu_now is instruction time and the card still outran the
+mixer. Output ring lead 60 ms (TP_AUDIO_LEAD). Measured, the same scripted session (TESTPARK copy, sound on, zoom
+0.5, panel clicks, a path dragged): card steps over 5 ms 111 (old clock) -> 0, largest step 11.8 -> 4.5 ms, one
+ran-dry gap -> none; sound content unchanged (79% of the time, same rms). TP_CARD_WALLCLOCK=1 runs the old clock
+for A/B. The repeat gate (TP_SFX_REPEAT) now applies only to the ride draw's HAMMER (return 0x11ebd0): it had also
+dropped a dragged path's DIG per tile (5 in that session) and fast button clicks (#11 part 1). The driver's sum did
+not clip in that session (full-scale samples 0): headroom unchanged (#11 part 2).
+
 2026-10-19: the repository is renamed OpenPark (GitHub Joshspeakman/OpenPark; the old URL redirects), at the user's say.
 
 2026-10-19, cross-platform prep (the user's say): runtime/platform.h with platform/macos/platform_macos.c (the

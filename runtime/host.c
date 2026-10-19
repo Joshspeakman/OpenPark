@@ -435,19 +435,28 @@ int tp_host_timer_behind(void) {
     if (deterministic || !timer_installed()) return 0;
     return emu_now() - timer_next > pit_divisor / 1193182.0;
 }
-/* The sound card's clock (sb16_pump): the wall clock, but never past the next timer tick not yet delivered.
- * The HMI driver mixes only a few milliseconds ahead of the DMA position, in its 240 Hz timer handler; while
- * this thread cannot deliver ticks (a pass or a native pass in the view's hook, the pacing wait, the governor's
- * sleep) the card used to run on by the wall clock and, when the ticks resumed, had read past what was mixed:
- * stale or unmixed buffer data, heard as a crackle or a broken effect whenever a frame ran long with a sound
- * playing. Held at the tick instead and advanced in step with the ticks as they are delivered (realtime_events,
- * one a quantum), it never reads unmixed data, and the output ring (sb16_play) covers the time. With IF clear no
- * tick can be delivered: one period of grace, then the wall clock as before. Deterministic runs: unchanged. */
+/* The sound card's clock (sb16_pump): the wall clock, but never more than a timer period past the last timer tick
+ * delivered. The HMI driver mixes only a few milliseconds ahead of the DMA position, in its 240 Hz timer handler;
+ * while this thread cannot deliver ticks (a pass or a native pass in the view's hook, the pacing wait, the
+ * governor's sleep, a long file read) the card used to run on by the wall clock and, when the ticks resumed, had
+ * read past what was mixed: stale or unmixed buffer data, heard as a crackle or a broken effect whenever a frame ran
+ * long with a sound playing (#10). Now each delivered tick lets the card on by one period (card_allow), so it
+ * advances in lockstep with the mixer whatever the clocks (emu_now is the wall clock while frames are paced and
+ * the instruction count's time otherwise: holding by either clock alone let the card outrun the mixer in the menus
+ * and while loading). It never runs ahead of real time, and after a stall over 100 ms it goes on from now (sb16_skip_to): the stall is not replayed. The output ring's
+ * lead (sb16_play) covers the hold. Deterministic runs: the wall clock, as before. */
+static double card_allow;
+static void card_tick(double period) {
+    double t = now_s();
+    if (card_allow < t - 0.1) { void sb16_skip_to(double t); card_allow = t; sb16_skip_to(t); }   /* (after a stall or at the start: on from now, the stall not replayed) */
+    card_allow += period;
+    if (card_allow > t + period) card_allow = t + period;
+}
 double tp_host_card_clock(void) {
     double t = now_s();
-    if (deterministic || !timer_installed() || timer_next <= 0) return t;
-    double period = pit_divisor / 1193182.0, limit = timer_next + ((G(EFLAGS) & 0x200) ? 0 : period);
-    return t < limit ? t : limit;
+    static int wall = -1; if (wall < 0) wall = getenv("TP_CARD_WALLCLOCK") != NULL;   /* (development: the old clock, for A/B) */
+    if (wall || deterministic || !timer_installed() || card_allow <= 0) return t;
+    return t < card_allow ? t : card_allow;
 }
 static void realtime_events(void) {
     debug_stats();
@@ -460,6 +469,7 @@ static void realtime_events(void) {
     if (te >= timer_next && timer_installed()) {
         if (te - timer_next > 0.25) timer_next = te;      /* do not replay a long stall */
         timer_next += period;
+        card_tick(period);                               /* (the card may play on a period: tp_host_card_clock) */
         timer_irq();
     } else if (sb_irq()) { sb_irqs_delivered++; return; }
     else if (keyboard_irq()) return;
