@@ -59,7 +59,7 @@ SHA-256 against GOG's package (`config/inputs.json`). Unpacked files stay in the
   - Tunes 18–27 → the same track number.
   - Tracks 4, 6, 8, 9, 10 and 12 aren't in the table (tunes ≥ 30, likely menu music).
 - **In the port:** `tools/extras.py` imports the tracks; Launcher > Sound > Music Type: Amiga CD32 plays them
-  for the game's tune (`app/main.m` musicTick, `app/audio.m`).
+  for the game's tune (`platform/macos/main.m` musicTick, `platform/macos/audio.m`).
 - **Checked:** your test park's Super Spinner (tune 12) played track 13. The recorded output matched the track's
   envelope at 0.96 correlation (another track: 0.16).
 

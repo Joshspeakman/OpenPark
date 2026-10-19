@@ -1,7 +1,7 @@
-# Theme Park native macOS recompilation
+# Theme Park native recompilation (macOS first; Windows and Linux next)
 
 - Use only the user's owned Theme Park package. Downloads and installed games are read-only.
-- Final product: native Apple Silicon code, no DOSBox, Wine, Rosetta or CPU interpreter at runtime. Unicorn is permitted as a development-only differential oracle.
+- Final product: native code on each platform (macOS on Apple Silicon first; Windows and Linux next, docs/PORTING.md, the user's say 2026-10-19), no DOSBox, Wine, Rosetta or CPU interpreter at runtime. Platform code lives in platform/<os>/ and runtime/platform_*.c; runtime/ stays portable C. Unicorn is permitted as a development-only differential oracle.
 - Keep package contents, executables, generated C, screenshots, saves and traces under ignored work/ or build/. Never commit game-derived material. Stage explicit paths only. Exception (the user's say, 2026-10-19): the README's in-game screenshots in docs/screenshots/.
 - Work locally on nightly. Do not change main, rewrite history, create a remote repository, publish, or install an app without the user's instruction.
 - Follow the user's commit identity: Joshspeakman <44591690+Joshspeakman@users.noreply.github.com>. Identify Codex truthfully in commit messages.

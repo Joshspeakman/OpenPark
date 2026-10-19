@@ -1,0 +1,28 @@
+# Checks that need no game files (the repository holds none), on Linux and macOS. The full checks against the
+# owner's game (tests/check_macos.sh --park, the app build) run on a developer's machine.
+name: ci
+on:
+  push:
+    branches: [main, nightly]
+  pull_request:
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Parser and host tests (synthetic fixtures)
+        run: TP_PYTHON=python bash tests/check.sh
+      - name: CPU model against Unicorn (synthetic instruction cases)
+        run: python tools/check_cpu.py --reference vendor/freedom-force-recomp > /dev/null
+      - name: The portable runtime compiles (runtime/platform.h)
+        run: bash tests/check_portable.sh
+      - name: Visitor View on a synthetic park
+        run: bash tests/check_walk.sh

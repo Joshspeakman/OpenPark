@@ -27,7 +27,7 @@
  * a visitor, buy or queue yourself: you walk as an onlooker, or ride along with a real visitor
  * (follow, hop to another, join someone on a ride) and see what they do and buy. Rides are seen
  * from your seat (cars: from the car; other rides: turning with them); a video plays instead if
- * the app finds one for the ride (app/main.m).
+ * the app finds one for the ride (platform/macos/main.m).
  *
  * Threads: tp_walk_frame runs on the emulation thread at the game's per-frame render (view.c's
  * FRAME_RENDER hook) and makes a snapshot; the app thread moves the camera (tp_walk_input) and

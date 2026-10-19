@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import zlib
+import toolchain
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -128,8 +129,8 @@ def main():
                         '--trace', str(args.trace), '--survey', str(args.survey), '--out', str(build), '--opt=-O1',
                         '--drivers', str(imgdir)], check=True, stdout=subprocess.DEVNULL)
         runner = work / 'tp-headless'
-        subprocess.run(['clang', '-arch', 'arm64', '-O2', '-w', '-I', str(inc), '-I', str(ROOT / 'runtime')]
-                       + [str(ROOT / 'runtime' / f) for f in RUNTIME] + [str(build / 'game.a'), '-lz', '-o', str(runner)], check=True)
+        subprocess.run([*toolchain.cc(), '-O2', '-w', '-I', str(inc), '-I', str(ROOT / 'runtime')]
+                       + [str(ROOT / 'runtime' / f) for f in RUNTIME] + [str(ROOT / 'platform/macos/platform_macos.c'), str(build / 'game.a'), '-lz', '-o', str(runner)], check=True)
         if overlay.exists():
             shutil.rmtree(overlay)
         overlay.mkdir()
