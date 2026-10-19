@@ -96,12 +96,57 @@
   },
   "3do-usa": {
    "title": "3DO (USA)",
-   "gives": "recognised: a recorded soundtrack (the PC tunes, 1:1) and 17 ride videos incl. Space Shuttle and Tree House; import is a later step (docs/reports/2026-10-19-other-editions.md)",
+   "gives": "a recorded soundtrack (Launcher > Sound > Music Type: 3DO Recorded) and its ride videos (Launcher > Display > Ride Videos: 3DO), including Space Shuttle and Tree House",
    "data_track_sha256": "4f0d8e8790294658d68bcbf65b9be71e49e4aa29f741e6a98e79096f4a186013",
    "key_file": [
     "Park",
     "d37ca428cfc807dc62a93a92e28878d897b45a3c879680aa8838d01d931126ca"
-   ]
+   ],
+   "music": {
+    "1": "System/Audio/aiff/RIDE1.AIFC",
+    "2": "System/Audio/aiff/RIDE2.AIFC",
+    "3": "System/Audio/aiff/RIDE3.AIFC",
+    "4": "System/Audio/aiff/RIDE4.AIFC",
+    "5": "System/Audio/aiff/RIDE5.AIFC",
+    "6": "System/Audio/aiff/RIDE6.AIFC",
+    "7": "System/Audio/aiff/RIDE7.AIFC",
+    "8": "System/Audio/aiff/RIDE8.AIFC",
+    "9": "System/Audio/aiff/RIDE9.AIFC",
+    "10": "System/Audio/aiff/RIDE10.AIFC",
+    "11": "System/Audio/aiff/RIDE11.AIFC",
+    "12": "System/Audio/aiff/RIDE12.AIFC",
+    "13": "System/Audio/aiff/RIDE13.AIFC",
+    "14": "System/Audio/aiff/RIDE14.AIFC",
+    "15": "System/Audio/aiff/RIDE15.AIFC",
+    "16": "System/Audio/aiff/RIDE16.AIFC",
+    "17": "System/Audio/aiff/RIDE17.AIFC",
+    "18": "System/Audio/aiff/HEART.AIFC"
+   },
+   "music_extra": [
+    "System/Audio/aiff/SHARES.AIFC",
+    "System/Audio/aiff/CHEMIST.AIFC"
+   ],
+   "ride_videos": {
+    "0": "FLIGHT",
+    "1": "TREE",
+    "2": "PIRATE",
+    "3": "PLANE",
+    "4": "MAZE",
+    "6": "HAUNT",
+    "7": "TUBE",
+    "8": "RACE",
+    "9": "ROLER",
+    "12": "WHEEL",
+    "13": "TCUPS",
+    "14": "CASTLE",
+    "15": "SHUTTLE",
+    "16": "ROLER",
+    "19": "SNAKE",
+    "21": "PARA",
+    "26": "SPINNER",
+    "28": "PLANET"
+   },
+   "ride_videos_note": "Ride index (the ride table at 0x1cced0) -> the disc's NAME.STREAM. Big Dipper (16) shares the coaster's, as the PC's player remaps it."
   }
  }
 }

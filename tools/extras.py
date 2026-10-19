@@ -108,6 +108,36 @@ def import_cd32_audio(audio, pack, dest):
     return '%d audio tracks imported%s' % (len(got), '' if ok else ' (some differ from the known dump: imported anyway)')
 
 
+def import_3do(tracks, pack, dest):
+    """The 3DO disc: its recorded tunes as WAV, its ride videos (the streams as they are, their sound as WAV)."""
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import opera
+    mode, raw = [t for t in tracks.values() if t[0].startswith('MODE')][0]
+    with tempfile.NamedTemporaryFile(suffix='.bin') as tmp:      # (opera reads raw sectors from a file)
+        tmp.write(raw); tmp.flush()
+        disc = opera.Disc(tmp.name)
+        (dest / 'music').mkdir(parents=True, exist_ok=True)
+        (dest / 'video').mkdir(parents=True, exist_ok=True)
+        tunes = {}
+        for tune, f in pack['music'].items():
+            out = 'music/%s.wav' % Path(f).stem
+            (dest / out).write_bytes(opera.wav(*opera.aifc_pcm(disc.read(f))))
+            tunes[tune] = out
+        for f in pack['music_extra']:
+            (dest / 'music' / (Path(f).stem + '.wav')).write_bytes(opera.wav(*opera.aifc_pcm(disc.read(f))))
+        rides = {}
+        for ride, stem in pack['ride_videos'].items():
+            v = dest / 'video' / (stem + '.STREAM')
+            if not v.exists():
+                data = disc.read(stem + '.STREAM')
+                v.write_bytes(data)
+                (dest / 'video' / (stem + '.wav')).write_bytes(opera.wav(*opera.stream_audio(data)))
+            rides[ride] = 'video/' + stem
+    manifest = {'pack': '3do-usa', 'title': pack['title'], 'tunes': tunes, 'ride_videos': rides}
+    (dest / 'manifest.json').write_text(json.dumps(manifest, indent=1) + '\n')
+    return '%d recorded tunes and %d ride videos imported' % (len(tunes), len(set(rides.values())))
+
+
 def scan(source, packs, data):
     src = Path(source).expanduser()
     if src.suffix.lower() == '.cue':
@@ -117,6 +147,8 @@ def scan(source, packs, data):
         h = sha256(user)
         for name, pack in packs.items():
             if pack.get('data_track_sha256') == h:
+                if name == '3do-usa':
+                    return name, import_3do(tracks, pack, data / 'extras' / name)
                 if name != 'amiga-cd32':
                     return name, pack['gives']
                 audio = {n: d for n, (mode, d) in tracks.items() if mode == 'AUDIO'}

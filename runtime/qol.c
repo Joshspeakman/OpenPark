@@ -62,8 +62,8 @@ extern int tp_hook_which;
 void tp_hooks_changed(void);
 
 #define QOL0 12
-enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, H_OPTIONS, H_START_SAMPLE, NHOOK };
-static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc, 0x150ccd, 0x18943f};   /* (H_OPTIONS: the menus' options function, called with its item's word) */   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
+enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, H_OPTIONS, H_START_SAMPLE, H_RIDE_VIDEO, NHOOK };
+static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc, 0x150ccd, 0x18943f, 0x15c04f};   /* (H_OPTIONS: the menus' options function, called with its item's word) */   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
 #define BIG_VISITORS 10000                /* a 128x128 park's most (its 12,000 things, bigmap.c) */
 extern uint32_t tp_things_n;              /* the things pool (bigmap.c): 1200, more in a 128x128 park */
 extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 800) */
@@ -177,6 +177,10 @@ static void play(uint32_t tune) {
 #define X_TAB_MAX ((0x10000 - 0x2400) / 4)
 #define X_ARG    0x7700
 long (*tp_extras_get)(const char *key);              /* (main.m: the app's settings) */
+/* The ride panel's view button (0x15c04f(2, ride): the ride's video, data/rideani.NNN): the app plays an imported
+ * 3DO video instead when it has one for the ride and the setting asks for it (main.m); it returns once the video
+ * has finished (the game waits, as for its own), 1 if it played one. */
+int (*tp_ride_video)(int ride);
 void (*tp_extras_set)(const char *key, long value);
 double (*tp_extras_getf)(const char *key);
 void (*tp_extras_setf)(const char *key, double value);
@@ -295,6 +299,15 @@ void tp_qol_hook(int nested) {
             if (rec > 0x1000 && rec < 0x4000000u) { double v = (sfx_kind == 1 ? tp_system_sound_volume : tp_game_sound_volume * (sfx_kind == 2 ? ew_volume : sfx_kind == 3 ? cash_volume : 1)) * SFX_HEADROOM;
                 int vol = (int16_t)r16(m, rec + 0x10); if (vol > 0) w16(m, rec + 0x10, (uint16_t)(int)(vol * v)); } }
         sfx_kind = 0;
+        return;
+    }
+    if (k == H_RIDE_VIDEO) {                          /* (cdecl (mode, ride): mode 2 a ride's video, 1 the win screen's) */
+        if (nested) return;
+        int mode = (int)r32(m, sp + 4), ride = (int)(r32(m, sp + 8) & 0xff);
+        const char *t = getenv("TP_TEST_RIDE_VIDEO");     /* (development: the win video's call, 1, stands for ride N's) */
+        if (t && mode == 1) { mode = 2; ride = atoi(t); }
+        if (log_sounds) fprintf(stderr, "video: player(%d, %d)\n", mode, ride);
+        if (mode == 2 && tp_ride_video && tp_ride_video(ride)) skip_call();
         return;
     }
     if (k == H_OPTIONS) {                             /* (an EXTRAS item: its word) */

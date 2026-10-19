@@ -82,6 +82,9 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     return (uint32_t)scan << 8;
 }
 
+typedef struct TpVideo TpVideo; TpVideo *tp_video_open(const char *path); const uint8_t *tp_video_next(TpVideo *v);
+int tp_video_fps(TpVideo *v); int tp_video_width(TpVideo *v); int tp_video_height(TpVideo *v); void tp_video_close(TpVideo *v);
+int tp_audio_video_play(const char *path); void tp_audio_video_stop(void);
 @interface GameView : NSView
 - (void)zoomTo:(double)z at:(NSPoint)p;
 - (void)panBy:(double)dx :(double)dy;
@@ -97,6 +100,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)walkPad:(double)fwd :(double)strafe :(double)lookX :(double)lookY;
 @end
 
+static GameView *game_view;                         /* (the 3DO ride videos: ride_video_3do) */
 @implementation GameView {
     CALayer *_screen;
     uint32_t _pixels[640 * 480];
@@ -125,9 +129,11 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     uint32_t *_walkPx; int _walkW, _walkH;
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
+    TpVideo *_v3; CALayer *_v3Layer; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
 }
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
+        game_view = self;
         self.wantsLayer = YES;
         self.layer.backgroundColor = NSColor.blackColor.CGColor;
         _screen = [CALayer layer];
@@ -500,6 +506,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)mouseExited:(NSEvent *)e { [self setCursorHidden:NO]; _mouseIn = NO; }
 - (void)mouseEntered:(NSEvent *)e { [self sendMouse:e]; }
 - (void)mouseDown:(NSEvent *)e {
+    if (_v3) { [self end3DO]; return; }                 /* (a click ends a 3DO ride video, as the game's own) */
     if (_walkDrop) {                                    /* the Visitor View: drop in here */
         NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
         NSRect r = _live ? [self viewRect] : [self screenRect];
@@ -516,7 +523,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)mouseUp:(NSEvent *)e {
     if (tp_walk_active() || _walkDrop) { if (tp_walk_active()) [NSCursor.openHandCursor set]; return; }
     if (_panning) { _panning = NO; return; } _buttons &= ~3u; [self sendMouse:e]; }
-- (void)rightMouseDown:(NSEvent *)e { if (tp_walk_active() || _walkDrop) return; _buttons |= 2; [self sendMouse:e]; }
+- (void)rightMouseDown:(NSEvent *)e { if (_v3) { [self end3DO]; return; } if (tp_walk_active() || _walkDrop) return; _buttons |= 2; [self sendMouse:e]; }
 - (void)rightMouseUp:(NSEvent *)e { _buttons &= ~2u; [self sendMouse:e]; }
 - (void)otherMouseDown:(NSEvent *)e {
     if (_live) { [self startPan:e]; return; }          /* the park view: the middle button drags it (the game does not use it) */
@@ -531,6 +538,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 - (void)keyDown:(NSEvent *)e {
     if (e.modifierFlags & NSEventModifierFlagCommand) { [super keyDown:e]; return; }
+    if (_v3) { [self end3DO]; return; }
     unsigned short kc = e.keyCode;
     if (kc == 0x30) {                                   /* Tab, held: fast forward (the game does not use Tab) */
         if (!e.isARepeat && !getenv("TP_CYCLES")) {
@@ -692,6 +700,45 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     [_video play];
     fprintf(stderr, "walk: ride video %s\n", u.path.UTF8String);
 }
+/* A 3DO ride video (imported by tools/extras.py): Cinepak frames from runtime/cinepak.c in full colour over the
+ * park, at the stream's rate, with its sound; the game is paused until it ends or is clicked away. */
+- (void)play3DO:(NSString *)stream sound:(NSString *)wav done:(dispatch_semaphore_t)done {
+    if (_v3) [self end3DO];
+    _v3 = tp_video_open(stream.fileSystemRepresentation);
+    if (!_v3) { tp_host_pause(0); if (done) dispatch_semaphore_signal(done); return; }
+    _v3done = done; _v3shown = 0; _v3t0 = CACurrentMediaTime();
+    _v3Layer = [CALayer layer];
+    _v3Layer.backgroundColor = NSColor.blackColor.CGColor; _v3Layer.contentsGravity = kCAGravityResizeAspect;
+    _v3Layer.magnificationFilter = kCAFilterLinear;
+    _v3Layer.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null]};
+    _v3Layer.frame = self.bounds; _v3Layer.zPosition = 50;
+    [self.layer addSublayer:_v3Layer];
+    if (wav && [NSFileManager.defaultManager fileExistsAtPath:wav]) tp_audio_video_play(wav.fileSystemRepresentation);
+    fprintf(stderr, "ride video: %s\n", stream.lastPathComponent.UTF8String);
+}
+- (void)video3DOTick {
+    if (!_v3) return;
+    _v3Layer.frame = self.bounds;
+    int due = (int)((CACurrentMediaTime() - _v3t0) * tp_video_fps(_v3));
+    const uint8_t *px = NULL;
+    while (_v3shown <= due) { px = tp_video_next(_v3); _v3shown++; if (!px) { [self end3DO]; return; } }
+    if (!px) return;
+    int w = tp_video_width(_v3), h = tp_video_height(_v3);
+    CFDataRef data = CFDataCreate(NULL, px, (CFIndex)w * h * 3);
+    CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGImageRef img = CGImageCreate(w, h, 8, 24, w * 3, cs, kCGImageAlphaNone, prov, NULL, NO, kCGRenderingIntentDefault);
+    _v3Layer.contents = (__bridge id)img;
+    CGImageRelease(img); CGColorSpaceRelease(cs); CGDataProviderRelease(prov); CFRelease(data);
+}
+- (void)end3DO {
+    if (!_v3) return;
+    tp_audio_video_stop();
+    tp_video_close(_v3); _v3 = NULL;
+    [_v3Layer removeFromSuperlayer]; _v3Layer = nil;
+    if (_v3done) { dispatch_semaphore_signal(_v3done); _v3done = nil; }
+    if (!self.window.miniaturized && self.window.visible) tp_host_pause(0);   /* (still hidden: holdGame resumes it) */
+}
 - (void)stopRideVideo {
     if (_video) { [_video pause]; [_videoLayer removeFromSuperlayer]; }
     _video = nil; _videoLayer = nil; _looper = nil; _videoType = -2;
@@ -699,6 +746,31 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 @end
 
 /* A window that can be key without a title bar (the borderless full screen). */
+/* The ride panel's view button (qol.c's tp_ride_video, on the game thread). Ride Videos (Launcher > Display):
+ * 0 the PC's (data/rideani.NNN) only; 1 the PC's, and the 3DO's for rides the PC has none for (Space Shuttle,
+ * Tree House); 2 the 3DO's wherever there is one. */
+static int ride_video_3do(int ride) {
+    NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
+    long mode = getenv("TP_RIDE_VIDEOS") ? atol(getenv("TP_RIDE_VIDEOS")) : [u integerForKey:@"RideVideos"];
+    if (!mode || !game_view) return 0;
+    NSString *dir = [dataRoot() stringByAppendingPathComponent:@"extras/3do-usa"];
+    NSDictionary *man = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"manifest.json"]] ?: [NSData data] options:0 error:nil];
+    NSString *stem = [man isKindOfClass:NSDictionary.class] ? man[@"ride_videos"][[NSString stringWithFormat:@"%d", ride]] : nil;
+    if (!stem) return 0;
+    if (mode == 1) {                                     /* (the PC's own first: ride 16 borrows 9's, as the game does) */
+        NSString *pc = [dataRoot() stringByAppendingPathComponent:[NSString stringWithFormat:@"game/DATA/RIDEANI.%03d", ride == 16 ? 9 : ride]];
+        if ([NSFileManager.defaultManager fileExistsAtPath:pc]) return 0;
+    }
+    NSString *stream = [[dir stringByAppendingPathComponent:stem] stringByAppendingPathExtension:@"STREAM"];
+    if (![NSFileManager.defaultManager fileExistsAtPath:stream]) return 0;
+    NSString *wav = [[dir stringByAppendingPathComponent:stem] stringByAppendingPathExtension:@"wav"];
+    /* The game waits while it plays, as for its own video: paused like a hidden window (tp_host_pause), which
+     * resumes without replaying the stall (blocking here instead let the game race to catch up afterwards). */
+    tp_host_pause(1);
+    dispatch_async(dispatch_get_main_queue(), ^{ [game_view play3DO:stream sound:wav done:nil]; });
+    return 1;
+}
+
 @interface GameWindow : NSWindow
 @end
 @implementation GameWindow
@@ -790,6 +862,7 @@ static void *game_thread(void *arg) {
         if (tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
             game_result = -1; break;
         }
+        { extern int (*tp_ride_video)(int); tp_ride_video = ride_video_3do; }
         tp_extras_get = extras_get; tp_extras_set = extras_set; tp_extras_getf = extras_getf; tp_extras_setf = extras_setf;
         tp_qol_init();                                   /* quality-of-life hooks (qol.c), MAIN.EXE's code */
         if (tp_view_debug_fps) tp_view_count_game_frames(1);
@@ -826,7 +899,7 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
+    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"RideVideos": @1, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
                           @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
                           @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
@@ -1127,46 +1200,52 @@ static uint32_t key_of_char(unichar c) {
     [self tick];
 }
 - (void)timerTick { if (CACurrentMediaTime() - _lastDisplayTick > 0.05) [self tick]; }
-/* Music Type (Launcher > Sound): 0 the game's General MIDI, 1 the Amiga CD32's CD-audio tracks (imported from
- * the owner's disc by tools/extras.py into extras/amiga-cd32). The game runs its music as always; this follows
- * its current tune (word 0x1ba71a: 1-17 ride tunes, 18 heartbeat, 19 fanfare, 20 takeover, 21 win, 22
- * funeral) and plays the Amiga game's track for it (its own tune -> track table, in the manifest). Ride tunes
- * and the heartbeat loop; the jingles play out even after the game's shorter MIDI version has ended. */
+/* Music Type (Launcher > Sound): 0 the game's General MIDI; 1 the Amiga CD32's CD-audio tracks; 2 the 3DO's
+ * recordings of the PC tunes (both imported from the owner's discs by tools/extras.py into extras/). The game
+ * runs its music as always; this follows its current tune (word 0x1ba71a: 1-17 ride tunes, 18 heartbeat, 19
+ * fanfare, 20 takeover, 21 win, 22 funeral) and plays the source's recording of it: the Amiga game's own tune ->
+ * track table, or the 3DO's RIDEn per tune. Ride tunes and the heartbeat loop; jingles play out even after the
+ * game's shorter MIDI version has ended; a tune the source lacks plays the game's MIDI. */
 - (void)musicTick {
-    static int mode = -1, last = -1, loaded, ntab; static int tab[64]; static NSString *dir; static double next_check;
+    static int mode = -1, last = -1; static NSMutableDictionary<NSNumber *, NSString *> *files; static double next_check;
     double t = CACurrentMediaTime();
     if (t >= next_check) {                               /* (the setting can change in the launcher) */
         next_check = t + 1;
         int m = (int)[NSUserDefaults.standardUserDefaults integerForKey:@"MusicType"];
         if (getenv("TP_MUSIC_TYPE")) m = atoi(getenv("TP_MUSIC_TYPE"));
-        if (m != mode) { mode = m; last = -1; tp_audio_cd_stop(); }
-        if (mode == 1 && !loaded) {
-            loaded = 1;
-            dir = [dataRoot() stringByAppendingPathComponent:@"extras/amiga-cd32"];
-            NSDictionary *man = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"manifest.json"]] ?: [NSData data] options:0 error:nil];
-            NSArray *tt = [man isKindOfClass:NSDictionary.class] ? man[@"tune_tracks"] : nil;
-            for (NSNumber *n in tt) if (ntab < 64) tab[ntab++] = n.intValue;
-            fprintf(stderr, "music: Amiga CD32 tracks %s\n", ntab ? "found" : "not imported (tools/extras.py): the game's MIDI plays");
+        if (m != mode) {
+            mode = m; last = -1; tp_audio_cd_stop(); files = [NSMutableDictionary new];
+            NSString *dir = [dataRoot() stringByAppendingPathComponent:m == 1 ? @"extras/amiga-cd32" : @"extras/3do-usa"];
+            NSDictionary *man = m ? [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"manifest.json"]] ?: [NSData data] options:0 error:nil] : nil;
+            if ([man isKindOfClass:NSDictionary.class] && m == 1) {
+                NSArray *tt = man[@"tune_tracks"];
+                for (NSUInteger tune = 1; tune < tt.count; tune++) if ([tt[tune] intValue])
+                    files[@(tune)] = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"track%02d.wav", [tt[tune] intValue]]];
+            } else if ([man isKindOfClass:NSDictionary.class] && m == 2) {
+                NSDictionary *tt = man[@"tunes"];
+                for (NSString *k in tt) files[@(k.intValue)] = [dir stringByAppendingPathComponent:tt[k]];
+            }
+            if (m) fprintf(stderr, "music: %s %s\n", m == 1 ? "Amiga CD32" : "3DO", files.count ? "recordings found" : "not imported (tools/extras.py): the game's MIDI plays");
         }
     }
-    if (mode != 1 || !ntab || !main_running) return;
+    if (!mode || !files.count || !main_running) return;
     uint8_t *tp_host_memory(void); uint8_t *mem = tp_host_memory();
     if (!mem) return;
     int16_t tune; memcpy(&tune, mem + 0x1ba71a, 2);
     if (tune == last) return;
     int was = last; last = tune;
-    int track = tune > 0 && tune < ntab ? tab[tune] : tune >= 30 ? tune - 30 : 0;
-    NSString *f = track ? [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"track%02d.wav", track]] : nil;
+    NSString *f = tune > 0 ? files[@(tune)] : nil;
     if (f && [NSFileManager.defaultManager fileExistsAtPath:f]) {
         tp_audio_cd_play(f.fileSystemRepresentation, tune <= 18);
-        if (getenv("TP_SOUND_LOG")) fprintf(stderr, "music: tune %d -> CD track %d\n", tune, track);
+        if (getenv("TP_SOUND_LOG")) fprintf(stderr, "music: tune %d -> %s\n", tune, f.lastPathComponent.UTF8String);
     } else if (!(tune == 0 && was >= 19 && was <= 22)) {
-        tp_audio_cd_stop();                              /* (none, or a tune without a track: the game's MIDI) */
+        tp_audio_cd_stop();                              /* (none, or a tune without a recording: the game's MIDI) */
     }
 }
 - (void)tick {
     [self runControl];
     [self musicTick];
+    [_view video3DOTick];
     [self runTestScript];
     [self pollController];
     [_view present];

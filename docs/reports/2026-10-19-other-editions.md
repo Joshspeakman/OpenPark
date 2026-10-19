@@ -85,10 +85,16 @@ SHA-256 against GOG's package (`config/inputs.json`). Unpacked files stay in the
   - a 3DO intro (`INTRO.FLC`, 18.5 MB) with its own MIDI files;
   - three languages;
   - a sample save (`ROLL_GAME`).
-- **Candidates:**
-  - "3DO recorded" as a Music Type (tunes 1–17 map 1:1);
-  - the 3DO ride videos in the ride panel's view button, which would give Space Shuttle and Tree House videos
-    and the longer cuts.
+- **In the port (2026-10-19):** `tools/extras.py` imports the recorded tunes as WAV and keeps the ride streams
+  as they are, with their sound as WAV.
+  - **Music:** Music Type: 3DO Recorded; tunes 1–17 play RIDEn, and 18 plays HEART.
+  - **Ride videos:** Ride Videos (PC / PC + 3DO / 3DO). `qol.c` hooks the game's player at 0x15c04f (mode 2,
+    ride), and the app decodes the Cinepak frames itself (`runtime/cinepak.c`, the same as `tools/cinepak.py`
+    byte for byte) and shows them in full colour.
+  - **Pausing:** the game is paused like a hidden window while a video plays. Blocking the game thread let it
+    race to catch up afterwards: 7 in-game months in 40 s; now one week for the 4 s around the video, and 10
+    days in the next 5 s, its normal rate.
+  - **Checked:** Space Shuttle played in the game; RIDE12 played for the Super Spinner.
 
 ## Demo floppy (PC Gamer, March 1994)
 
