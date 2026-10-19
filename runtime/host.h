@@ -77,7 +77,7 @@ int  tp_view_point_to_world(double fx, double fy, double *wx, double *wy);   /* 
 int  tp_walk_start(double wx, double wy);     /* 0: no park */
 void tp_walk_stop(void);
 int  tp_walk_active(void);
-enum { TP_WALK_FOLLOW = 1, TP_WALK_HOP, TP_WALK_RIDE, TP_WALK_VIEW, TP_WALK_NOCLIP };
+enum { TP_WALK_FOLLOW = 1, TP_WALK_HOP, TP_WALK_RIDE, TP_WALK_VIEW, TP_WALK_NOCLIP, TP_WALK_MESH };
 void tp_walk_command(int cmd);
 /* fwd, strafe, turn in -1..1; look in radians; dt seconds (the app's tick) */
 void tp_walk_input(double fwd, double strafe, double turn, double look_yaw, double look_pitch, int run, double dt);

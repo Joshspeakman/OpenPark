@@ -5,6 +5,31 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, Visitor View original-pixel 3D study (Codex, separate branch
+`codex/visitor-3d-mockups`, as requested): concepts revised to preserve the
+chunky original pixels. Implemented a provisional source-textured shell
+renderer with depth, near clipping and live composite frames; P compares the
+original cards. Separate native study app, bundle identity, copied game/saves,
+and bounded headed capture runner are in place. Existing Nightly is untouched.
+
+**Not complete; visual quality gate failed.** Generic extrusion/lofting still
+stretches roofs, repeats back facades, flattens side views of open rides and
+fails to give the maze sufficient depth. The 65 source definitions and animation
+chains are inventoried, not 65 finished authored models. Per-asset surface and
+moving-part layouts are required to meet the approved concept.
+
+Sanitized synthetic checks pass in both render modes, including 17,808 view
+checks. Offline source-frame sweep: 3,918 nonempty frames / 11,754 views, no
+sanitizer failure. Local review gallery: 180 renders of 60 standalone source
+frames; five track rides require placed track/car review. Native headless
+TESTPARK ran with copied saves. Cocoa build/signature verification passed, but
+the headed launch aborts in macOS application registration before a window
+exists (exit -6; zero captures). No headed or overall visual pass is claimed.
+The user's explicit headed-test instruction overrides background-only testing
+for this study. `tools/Visitor Quality Check.command` is prepared for their GUI
+session; the dependency and detailed evidence are recorded in
+`docs/reports/2026-10-19-visitor-3d-concepts.md`.
+
 Played by the player daily on the Nightly app (their reports drive the dated sections below). Since the
 2026-10-16 milestone: SVGA 640x480; a zoomable widescreen view with native park passes; 128x128 sandbox parks
 (12,000 things, 10,000 visitors) with Endless and True Freeplay rules; Visitor View (experimental); the EXTRAS

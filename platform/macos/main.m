@@ -53,7 +53,8 @@ int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 
 static NSString *dataRoot(void) {
     NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
-    return env.length ? env : [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
+    NSString *bundled = [NSBundle.mainBundle objectForInfoDictionaryKey:@"TPDataRoot"];
+    return env.length ? env : bundled.length ? [bundled stringByExpandingTildeInPath] : [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
 }
 
 /* ---- keyboard: macOS virtual key -> PC scan code ---- */
@@ -636,6 +637,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     else if (kc == 0x0f) tp_walk_command(TP_WALK_RIDE);
     else if (kc == 0x09) tp_walk_command(TP_WALK_VIEW);
     else if (kc == 0x2d) tp_walk_command(TP_WALK_NOCLIP);
+    else if (kc == 0x23) tp_walk_command(TP_WALK_MESH); /* P: compare with original cards */
 }
 - (void)presentWalk {
     double t = CACurrentMediaTime(), dt = _walkLast ? t - _walkLast : 1.0 / 60; _walkLast = t;
@@ -646,7 +648,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     _lookDX = _lookDY = 0;
     /* drawn at a chunky size (the game's pixels are big too) and scaled up without smoothing */
     NSRect b = self.bounds; if (b.size.width < 8 || b.size.height < 8) return;
-    long rows = [NSUserDefaults.standardUserDefaults integerForKey:@"WalkRows"]; if (rows < 150 || rows > 1200) rows = 450;
+    long rows = [NSUserDefaults.standardUserDefaults integerForKey:@"WalkRows"]; if (rows < 150 || rows > 1200) rows = 240;
     int oh = (int)rows, ow = (int)lround(oh * b.size.width / b.size.height);
     if (!_walkPx || _walkW != ow || _walkH != oh) { free(_walkPx); _walkW = ow; _walkH = oh; _walkPx = calloc((size_t)ow * oh, 4); }
     if (!tp_walk_render(_walkPx, ow, oh)) for (int i = 0; i < ow * oh; i++) _walkPx[i] = 0xff000000u;   /* (the first picture is on its way) */
@@ -890,6 +892,7 @@ static void *game_thread(void *arg) {
 - (void)applicationDidFinishLaunching:(NSNotification *)n {
     app = self;
     NSString *root = dataRoot();
+    setenv("TP_DATA", root.fileSystemRepresentation, 1); /* launcher and ride videos share the isolated root */
     _game = [root stringByAppendingPathComponent:@"game"];
     _saves = [root stringByAppendingPathComponent:@"saves"];
     _image = [NSBundle.mainBundle pathForResource:@"MAIN" ofType:@"TPIMG"];
@@ -899,8 +902,9 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
+    NSNumber *studyMapSize = [NSBundle.mainBundle objectForInfoDictionaryKey:@"TPStudyMapSize"] ?: @64;
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"RideVideos": @1, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
+                          @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": studyMapSize, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
                           @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
@@ -924,7 +928,7 @@ static void *game_thread(void *arg) {
     _window = [[GameWindow alloc] initWithContentRect:frame
         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
-    _window.title = @"Theme Park";
+    _window.title = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: @"Theme Park";
     _window.delegate = self;
     if (![u boolForKey:@"Widescreen"]) _window.contentAspectRatio = NSMakeSize(4, 3);   /* widescreen: any shape, the park fills it */
     _window.contentMinSize = NSMakeSize(320, 240);
@@ -1188,6 +1192,12 @@ static uint32_t key_of_char(unichar c) {
             fprintf(stderr, "walkshot %s drawn=%d | %s\n", [line substringFromIndex:9].UTF8String, ok, st);
         }
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
+        else if ([op isEqual:@"windowinfo"] && p.count > 1) {
+            NSDictionary *info = @{@"window_id": @(_window.windowNumber), @"visible": @(_window.isVisible),
+                                   @"pid": @(NSProcessInfo.processInfo.processIdentifier)};
+            NSData *json = [NSJSONSerialization dataWithJSONObject:info options:0 error:nil];
+            [json writeToFile:[line substringFromIndex:11] atomically:YES];
+        }
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
         else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
     }

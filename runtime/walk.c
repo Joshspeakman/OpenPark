@@ -1,4 +1,4 @@
-/* Visitor View (experimental): walk through the park at a visitor's height, a pseudo-3D view
+/* Visitor View (experimental): walk through the park at a visitor's height, a reconstructed 3D view
  * drawn natively from the game's own state and art (docs/PLAN.md, "Visitor View").
  *
  * What it rests on (all from the native renderer, native_land.c, which is pixel-exact against
@@ -13,8 +13,8 @@
  *   1/256ths (bytes 6, 8): people are drawn at x + tw b6/256 + (tw/3) b8/256, y + th b8/256.
  * - Each thing is drawn by native_land.c into a picture of its own (tp_native_cell_things marks
  *   where each thing starts): that picture, the game's art with its animation, riders in their
- *   seats, carried items and thoughts, stands in the world as a card ("billboard") facing the
- *   camera, its foot on the ground where the thing is.
+ *   seats, carried items and thoughts, supplies the original palette texture for a fixed
+ *   reconstructed shell (walk_mesh.h). P selects the original camera-facing cards for comparison.
  * - One scale for everything: an art pixel is 1/tws of a cell across and aspect/tws up (320x200's
  *   pixels are 1.2 times as tall as wide on a 4:3 screen), so people, stalls and rides keep the
  *   sizes the artists gave them relative to each other and to the cells. The eye is at a
@@ -22,14 +22,15 @@
  * - Who rides what: a ride's riders are a chain through word 0x47 (class 4 rides, class 0x0e
  *   cars; class 0x0a holds one), a train's cars a chain through word 0x7a (class 0x12).
  *
- * Limits (explicit, see the plan): the art exists from one direction only, so rides and shops are
- * flat cards that turn to face you; the visitor AI is not reverse-engineered, so you cannot steer
+ * Limits (explicit, see the plan): the art exists from one direction only. Hidden surfaces are
+ * inferred by extrusion/lofting, not recovered or individually authored; people remain cards.
+ * The visitor AI is not reverse-engineered, so you cannot steer
  * a visitor, buy or queue yourself: you walk as an onlooker, or ride along with a real visitor
  * (follow, hop to another, join someone on a ride) and see what they do and buy. Rides are seen
  * from your seat (cars: from the car; other rides: turning with them); a video plays instead if
  * the app finds one for the ride (platform/macos/main.m).
  *
- * Threads: tp_walk_frame runs on the emulation thread at the game's per-frame render (view.c's
+ * Threads: tp_walk_frame runs on the native game thread at the game's per-frame render (view.c's
  * FRAME_RENDER hook) and makes a snapshot; the app thread moves the camera (tp_walk_input) and
  * draws (tp_walk_render) from the newest snapshot. The snapshot only reads game memory; the one
  * write is the game's camera, kept on the walker so the game's ride music and sounds are those
@@ -41,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "walk_mesh.h"
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
@@ -100,11 +102,11 @@ static int geom(Geom *g) {
 
 /* ---- the snapshot ---- */
 #define TMAX 32                     /* floor texels per cell, at most */
-#define MAXCARDS 4096
-#define POOL (3u << 20)             /* card pixels (16-bit: 0xffff transparent) */
+#define MAXCARDS 16384
+#define POOL (12u << 20)            /* source pixels (16-bit: 0xffff transparent), including large parks */
 #define MAXCONT 256
 #define SHR 8                       /* shadow samples per cell */
-typedef struct { float x, y, r; uint16_t w, h, ax, ay; uint32_t off; int16_t idx; uint8_t cls, big; } Card;   /* r: half the footprint (big things) */
+typedef struct { float x, y, r; uint16_t w, h, ax, ay; uint32_t off; int16_t idx, type; uint8_t cls, big, shape; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
@@ -126,7 +128,7 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 /* ---- the walker (app thread; under the lock) ---- */
 enum { MODE_STREET, MODE_DIORAMA };
 static struct {
-    int on, mode, noclip, follow, placed;
+    int on, mode, noclip, follow, placed, mesh;
     double x, y, yaw, pitch, head;  /* free walk: position (cells), heading; looking: pitch, head turn when following */
     double cam_x, cam_y, cam_z, cam_yaw, cam_pitch;   /* the camera as last moved */
     double fx, fy, fyaw, orbit, ride_t; uint32_t fserial; int have_f;   /* following: smoothed place and heading */
@@ -239,6 +241,22 @@ static void finish(Build *B) {
         c->x = (float)wx; c->y = (float)wy; c->w = (uint16_t)w; c->h = (uint16_t)h;
         double ax = fx - x0; c->ax = (uint16_t)(ax < 0 ? 0 : ax > w ? w : ax); c->ay = (uint16_t)(fy - y0);
         c->off = s->npix; c->idx = (int16_t)B->idx; c->cls = (uint8_t)(B->idx < 0 ? 0xff : B->cls); c->big = (uint8_t)big;
+        c->type = -1; c->shape = WM_SMALL;
+        if (t && B->cls == 4) {
+            int type = (uint16_t)r16((uint32_t)(t-M)+0x16)/0xc8;
+            if (type<29) c->type=(int16_t)type;
+            c->shape=WM_ROUND;
+            if(type==0 || type==1 || type==5 || type==6 || type==14 || (type>=22 && type<=25)) c->shape=WM_BOX;
+            if(type==2 || type==3 || type==10 || type==11 || type==12 || type==15 || type==17 || type==19 || type==21 || type==26 || type==28) c->shape=WM_OPEN;
+            if(type==4) c->shape=WM_GROUND;
+        } else if (B->cls==0xa || B->cls==0x14 || B->cls==6 || B->cls==0x1c) c->shape=WM_BOX;
+        else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;
+        else if (B->idx<0 || B->cls==0x18) c->shape=WM_TREE;
+        if(B->idx<0) {
+            int animation=(uint16_t)r16(0x1b44c1+(uint32_t)(-B->idx)*2);
+            if(animation==431) c->shape=WM_GROUND; /* lake */
+            if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
+        }
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {
@@ -487,6 +505,7 @@ int tp_walk_start(double wx, double wy) {
     memset(&W, 0, sizeof W);
     W.on = 1; W.x = wx < 0.5 ? 0.5 : wx > MAPE - 0.5 ? MAPE - 0.5 : wx; W.y = wy < 0.5 ? 0.5 : wy > MAPE - 0.5 ? MAPE - 0.5 : wy;
     W.yaw = ART_YAW; W.mode = getenv("TP_WALK_DIORAMA") ? MODE_DIORAMA : MODE_STREET;
+    W.mesh = !getenv("TP_WALK_MESH") || atoi(getenv("TP_WALK_MESH")) != 0;
     W.hscale = getenv("TP_WALK_SCALE") ? atof(getenv("TP_WALK_SCALE")) : 1; if (W.hscale < 0.25 || W.hscale > 4) W.hscale = 1;
     snaps[0].valid = snaps[1].valid = 0; last_snap = 0;     /* (front stays: the emulation thread may be swapping) */
     pthread_mutex_unlock(&lock);
@@ -518,7 +537,7 @@ static int nearest_visitor(const Snap *s, double x, double y, double yaw, double
     }
     return best;
 }
-enum { WALK_FOLLOW = 1, WALK_HOP, WALK_RIDE, WALK_VIEW, WALK_NOCLIP };
+enum { WALK_FOLLOW = 1, WALK_HOP, WALK_RIDE, WALK_VIEW, WALK_NOCLIP, WALK_MESH };
 void tp_walk_command(int cmd) {
     pthread_mutex_lock(&lock);
     const Snap *s = front >= 0 ? &snaps[front] : NULL;
@@ -551,6 +570,8 @@ void tp_walk_command(int cmd) {
         set_note(W.mode == MODE_STREET ? "Eye level" : "Diorama: above and behind");
     } else if (cmd == WALK_NOCLIP) {
         W.noclip = !W.noclip; set_note(W.noclip ? "Walking through everything" : "Rides and scenery block the way");
+    } else if (cmd == WALK_MESH) {
+        W.mesh=!W.mesh; set_note(W.mesh ? "Pixel 3D: original pixels on reconstructed surfaces" : "Original camera-facing sprites");
     }
     pthread_mutex_unlock(&lock);
 }
@@ -641,9 +662,9 @@ int tp_walk_status(char *buf, int n) {
     char what[96];
     if (W.follow && s && s->valid && s->f_cont) snprintf(what, sizeof what, "On %s with a visitor", s->f_name[0] ? s->f_name : "a ride");
     else if (W.follow) snprintf(what, sizeof what, "Following a visitor");
-    else snprintf(what, sizeof what, "Walking");
+    else snprintf(what, sizeof what, W.mesh ? "Pixel 3D study" : "Walking (original cards)");
     if (now() < note_until) snprintf(buf, (size_t)n, "%s   ·   %s", what, note);
-    else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  Space hop  R ride along  V view  Esc leave", what, (int)W.cam_x, (int)W.cam_y);
+    else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  R ride  V view  P compare  Esc leave", what, (int)W.cam_x, (int)W.cam_y);
     pthread_mutex_unlock(&lock);
     return 1;
 }
@@ -680,6 +701,14 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
     const Snap *s = front >= 0 ? &snaps[front] : NULL;
     if (!W.on || !s || !s->valid || ow < 8 || oh < 8) { pthread_mutex_unlock(&lock); return 0; }
     const Geom *g = &s->g; int T = s->T;
+    static float *depth; static size_t depth_n;
+    size_t pixels=(size_t)ow*oh;
+    if (W.mesh && pixels>depth_n) {
+        float *p=realloc(depth,pixels*sizeof *p);
+        if (!p) { pthread_mutex_unlock(&lock); return 0; }
+        depth=p; depth_n=pixels;
+    }
+    if (W.mesh) for (size_t i=0;i<pixels;i++) depth[i]=FLT_MAX;
     const uint8_t *ft = floor_tex[s->fi], *ot = off_tex[s->fi];
     double cx = W.cam_x, cy = W.cam_y, cz = W.cam_z * W.hscale, yaw = W.cam_yaw, pitch = W.cam_pitch;
     if (W.mode == MODE_DIORAMA) cz = W.cam_z;
@@ -705,6 +734,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             continue;
         }
         double t = -cz / dz;                                   /* distance along forward (view z) */
+        if (W.mesh) for (int x=0;x<ow;x++) depth[(size_t)y*ow+x]=(float)t;
         double gx = cx + t * hx, gy = cy + t * hy, sx = t * rx / f, sy = t * ry / f;
         gx += sx * (0.5 - ow / 2.0); gy += sy * (0.5 - ow / 2.0);
         double fog = (t - FOG0) / (FOG1 - FOG0);
@@ -712,7 +742,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
         /* far away a pixel covers many texels (most of all in depth): there, four samples across its footprint */
         double b2 = b - 0.5 / f, dz2 = fz + uz * b2, t2 = dz2 < -1e-6 ? -cz / dz2 : t * 4;
         double qx = cx + t2 * (fx + ux * b2) - (cx + t * hx), qy = cy + t2 * (fy + uy * b2) - (cy + t * hy);   /* half a row deeper */
-        if ((qx * qx + qy * qy) * T * T * 4 > 1 || (sx * sx + sy * sy) * T * T > 1) {
+        if (!W.mesh && ((qx * qx + qy * qy) * T * T * 4 > 1 || (sx * sx + sy * sy) * T * T > 1)) {
             for (int x = 0; x < ow; x++, gx += sx, gy += sy) {
                 uint32_t r = 0, gg = 0, bb = 0;
                 for (int k = 0; k < 4; k++) {
@@ -731,11 +761,47 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             int X = (int)floor(gx), Y = (int)floor(gy), u = (int)((gx - X) * T), v = (int)((gy - Y) * T);
             if (u >= T) u = T - 1; if (v >= T) v = T - 1;
             uint8_t c = X >= 0 && X < MAPE && Y >= 0 && Y < MAPE ? ft[(size_t)(Y * T + v) * MAPN * T + (size_t)X * T + u] : ot[v * T + u];
-            uint32_t col = darken(s->pal[c], shade_at(s, gx, gy));
-            o[x] = fog > 0 ? mix(col, fogc, fog) : col;
+            uint32_t col = W.mesh ? s->pal[c] : darken(s->pal[c], shade_at(s, gx, gy));
+            o[x] = fog > 0 && !W.mesh ? mix(col, fogc, fog) : col;
         }
     }
-    /* cards, far to near */
+    if (W.mesh) {
+        WMRender mr={.pixels=out,.depth=depth,.w=ow,.h=oh,.cx=cx,.cy=cy,.cz=cz,
+            .fx=fx,.fy=fy,.fz=fz,.rx=rx,.ry=ry,.ux=ux,.uy=uy,.uz=uz,.focal=f,.palette=s->pal};
+        float kx=(float)(W.hscale/g->tws),ky=(float)(W.hscale*g->aspect/g->tws);
+        int hide=W.mode==MODE_STREET ? W.follow:0, rendered=0;
+        double began=now();
+        for (int i=0;i<s->ncards;i++) {
+            const Card *c=&s->cards[i]; if (hide && c->idx==hide) continue;
+            float dx=c->x-cx,dy=c->y-cy,dist=sqrtf(dx*dx+dy*dy), radius=c->w*kx;
+            float forward=dx*cos(yaw)+dy*sin(yaw), lateral=dx*rx+dy*ry;
+            if (dist-radius>FOG1 || forward+radius<.08f || fabsf(lateral)>fmaxf(0,forward)*tan(fov/2)+radius) continue;
+            mr.texture=s->pix+c->off; mr.tw=c->w; mr.th=c->h;
+            /* Keep the original direction-dependent character animation on a
+             * camera-facing card; structures stay fixed in world space. */
+            int person=c->cls==2 || c->cls==8;
+            float angle=person ? (float)yaw : (float)ART_YAW;
+            float thick=c->r>0 ? c->r*.65f : fminf(.45f,c->w*kx*.25f);
+            if (c->shape==WM_TRACK) thick=fminf(.18f,c->w*kx*.08f);
+            if (c->shape==WM_OPEN) thick=fminf(.32f,c->w*kx*.12f);
+            if (person) thick=.025f;
+            if (c->cls==6 || c->cls==0x1c) thick=.10f;
+            float base=c->big ? fminf(c->h*ky*.22f,thick*.6f):0;
+            if(c->shape==WM_OPEN || c->shape==WM_TRACK) base=0;
+            if(c->shape==WM_GROUND) {thick=c->w*kx*.4f;base=c->type==4 ? .35f:0;}
+            WMShell shell={.x=c->x,.y=c->y,.kx=kx,.ky=ky,.depth=thick,.base=base,
+                .ax=c->ax,.ay=c->ay,.w=c->w,.h=c->h,.shape=c->shape,
+                .rx=-sinf(angle),.ry=cosf(angle),.dx=cosf(angle),.dy=sinf(angle)};
+            wm_shell(&mr,&shell,dist); rendered++;
+        }
+        if (getenv("TP_WALK_MESH_LOG")) {
+            static double last; if (now()-last>1) { last=now();
+                fprintf(stderr,"pixel mesh: %d objects, %u triangles, %u fragments, %.2f ms, %dx%d\n",
+                    rendered,mr.triangles,mr.fragments,(now()-began)*1000,ow,oh); }
+        }
+        pthread_mutex_unlock(&lock); return 1;
+    }
+    /* original cards, far to near (TP_WALK_MESH=0, for A/B checks) */
     static Vis vis[MAXCARDS]; int nv = 0;
     int hide = W.mode == MODE_STREET && W.follow ? W.follow : 0;
     for (int i = 0; i < s->ncards; i++) {
