@@ -346,7 +346,10 @@ double sb16_pump_stats(long *jumps, long *clipped) {
     pthread_mutex_lock(&lock); *clipped = clipped_samples; clipped_samples = 0; pthread_mutex_unlock(&lock);
     return w;
 }
+/* After a stall the card goes on from t without rendering the time in between (host.c card_tick). */
+void sb16_skip_to(double t) { pumped = t; }
 void sb16_pump(double t) {
+    if (pumped && t < pumped && pumped - t < 0.25) return;    /* (held: the card's clock waits at an overdue tick, host.c) */
     if (pumped == 0 || t < pumped || t - pumped > 0.25) { if (pumped && getenv("TP_RING_LOG")) fprintf(stderr, "sb16: stall of %.0f ms not replayed\n", (t - pumped) * 1e3); pumped = t; return; }   /* (a long stall is not replayed) */
     int frames = (int)((t - pumped) * 44100);
     if (frames < 16) return;
