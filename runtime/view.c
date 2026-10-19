@@ -1453,6 +1453,9 @@ void tp_view_enable(int main_game) {
     pthread_mutex_lock(&lock); enabled = main_game; if (!enabled) want = 0; pthread_mutex_unlock(&lock);
     if (!main_game) { for (int h = 0; h < 12; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
     active = 0; have_world = 0; in_frame = 0;
+    /* (a new game, also THEME.BAT's in-process restart: nothing of the last one's frame survives, issue #6) */
+    sentinel_on = 0; world_ok = 0; coherent = 0; ngrid = 0; rr = rr_done = 0; seen_cx = seen_cy = -999;
+    memset(date_box, 0, sizeof date_box); date_fixed = 0; memset(prev_overlay, 0, sizeof prev_overlay);
 }
 void tp_view_geometry(int *sw, int *sh, int *wh);
 int tp_view_set(int on, double cx, double cy, double zoom, double layout_w) {

@@ -202,6 +202,7 @@ void tp_bigmap_setup_done(void) { if (repair_due) { repair_due = 0; repair_borde
 /* At start-up, before the game allocates its blocks: the block's size; TP_MAP_W / TP_MAP_EXT force a layout
  * (development and tests: TP_MAP_ALLOC gives the block of another size, for the same memory layout). */
 void tp_bigmap_init(void) {
+    setup_open = armed = repair_due = 0;               /* (a new game, also the in-process restart: issue #6) */
     const char *w = getenv("TP_MAP_W"), *e = getenv("TP_MAP_EXT"), *a = getenv("TP_MAP_ALLOC");
     big_maps = getenv("TP_BIG_MAPS") && atoi(getenv("TP_BIG_MAPS")) > 0;
     int room = getenv("TP_BIG_ROOM") && atoi(getenv("TP_BIG_ROOM")) > 0;   /* (a saved 128x128 park exists: room to load it) */

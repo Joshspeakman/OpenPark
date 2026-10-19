@@ -722,12 +722,50 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 static AppDelegate *app;
 static volatile int game_done, game_result;
 
+/* The launcher's settings into the environment, where the C modules read them (qol.c, freemode.c, bigmap.c,
+ * view.c; a variable already set wins, for tests). On the main thread before the game thread starts: setenv is
+ * not safe against getenv on another thread (issue #3). They were read once anyway (the first value stays). */
+static void settings_to_env(AppDelegate *d) {
+    if (!getenv("TP_NATIVE_PASS") && ![NSUserDefaults.standardUserDefaults boolForKey:@"NativePasses"])
+        setenv("TP_NATIVE_PASS", "0", 1);            /* Launcher: Zoomed Drawing = The Game's */
+    {   /* Launcher: Tweaks and Free Mode (qol.c reads them; the environment wins, for tests) */
+        NSUserDefaults *u = NSUserDefaults.standardUserDefaults; char v[32];
+        #define QOL_ENV(name, value) do { if (!getenv(name)) { snprintf(v, sizeof v, "%ld", (long)(value)); setenv(name, v, 1); } } while (0)
+        QOL_ENV("TP_EW_GAP", [u integerForKey:@"GrossOutGap"]);
+        QOL_ENV("TP_CASH_GAP", [u integerForKey:@"PurchaseGap"]);
+        QOL_ENV("TP_GAME_SOUND_VOL", lround([u doubleForKey:@"GameSoundVolume"] * 100));   /* (qol.c: each effect by its kind) */
+        QOL_ENV("TP_EW_VOL", lround([u doubleForKey:@"EwVolume"] * 100));
+        QOL_ENV("TP_CASH_VOL", lround([u doubleForKey:@"PurchaseVolume"] * 100));
+        QOL_ENV("TP_SYSTEM_SOUND_VOL", lround([u doubleForKey:@"SystemSoundVolume"] * 100));
+        QOL_ENV("TP_RIDE_MUSIC", [u boolForKey:@"RideMusic"]);
+        QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
+        QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
+        QOL_ENV("TP_FREE_BUS", [u integerForKey:@"FreeBus"]);
+        QOL_ENV("TP_FREE_RULES", [u integerForKey:@"FreeRules"]);   /* (freemode.c: 0 sandbox, 1 endless, 2 true freeplay) */
+        QOL_ENV("TP_FREE_RAMP", [u integerForKey:@"FreeRamp"]);
+        QOL_ENV("TP_BIG_MAPS", [u integerForKey:@"FreeMapSize"] == 128);   /* (bigmap.c: room for 128x128 sandbox parks) */
+        {   /* a saved 128x128 park (its marker, <save>.big): room to load it whatever the setting */
+            BOOL big = NO;
+            for (NSString *f in [NSFileManager.defaultManager enumeratorAtPath:d->_saves]) if ([f hasSuffix:@".big"]) { big = YES; break; }
+            QOL_ENV("TP_BIG_ROOM", big);
+        }
+        if (![u boolForKey:@"SteadyPacing"] && !getenv("TP_PACING")) setenv("TP_PACING", "dosbox", 1);
+        #undef QOL_ENV
+        NSDictionary *tunes = [u dictionaryForKey:@"RideTunes"];
+        if (tunes.count && !getenv("TP_RIDE_TUNES")) {
+            NSMutableArray *parts = [NSMutableArray array];
+            for (NSString *k in tunes) [parts addObject:[NSString stringWithFormat:@"%@:%@", k, tunes[k]]];
+            setenv("TP_RIDE_TUNES", [parts componentsJoinedByString:@","].UTF8String, 1);
+        }
+    }
+}
+
 static void *game_thread(void *arg) {
     AppDelegate *d = (__bridge AppDelegate *)arg;
     pthread_setname_np("Theme Park game");
     /* THEME.BAT runs INTRO.EXE, then MAIN.EXE. */
     if (d->_intro) {
-        setenv("TP_IMAGE", d->_intro.fileSystemRepresentation, 1);
+        tp_host_set_image(d->_intro.fileSystemRepresentation);
         tp_select_code(intro_dispatch, intro_dispatch_init);
         tp_host_set_args("");
         if (!tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
@@ -737,7 +775,7 @@ static void *game_thread(void *arg) {
         }
         tp_select_code(tp_dispatch, tp_dispatch_init);
     }
-    setenv("TP_IMAGE", d->_image.fileSystemRepresentation, 1);
+    tp_host_set_image(d->_image.fileSystemRepresentation);
     {   /* the launcher's language: the game's own -l option (GOG's THEME.BAT passes -l0) */
         long lang = [NSUserDefaults.standardUserDefaults integerForKey:@"Language"];
         char args[16] = ""; if (lang > 0 && lang < 5) snprintf(args, sizeof args, " -l%ld", lang);
@@ -745,41 +783,9 @@ static void *game_thread(void *arg) {
     }
     for (;;) {
         tp_view_enable(1);                               /* the zoomable park view knows MAIN.EXE's code */
-        if (!getenv("TP_NATIVE_PASS") && ![NSUserDefaults.standardUserDefaults boolForKey:@"NativePasses"])
-            setenv("TP_NATIVE_PASS", "0", 1);            /* Launcher: Zoomed Drawing = The Game's */
         tp_view_request_hires([NSUserDefaults.standardUserDefaults boolForKey:@"StartHiRes"] || getenv("TP_START_HIRES"));
         if (tp_host_init(d->_game.fileSystemRepresentation, d->_saves.fileSystemRepresentation, 0, NULL)) {
             game_result = -1; break;
-        }
-        {   /* Launcher: Tweaks and Free Mode (qol.c reads them; the environment wins, for tests) */
-            NSUserDefaults *u = NSUserDefaults.standardUserDefaults; char v[32];
-            #define QOL_ENV(name, value) do { if (!getenv(name)) { snprintf(v, sizeof v, "%ld", (long)(value)); setenv(name, v, 1); } } while (0)
-            QOL_ENV("TP_EW_GAP", [u integerForKey:@"GrossOutGap"]);
-            QOL_ENV("TP_CASH_GAP", [u integerForKey:@"PurchaseGap"]);
-            QOL_ENV("TP_GAME_SOUND_VOL", lround([u doubleForKey:@"GameSoundVolume"] * 100));   /* (qol.c: each effect by its kind) */
-            QOL_ENV("TP_EW_VOL", lround([u doubleForKey:@"EwVolume"] * 100));
-            QOL_ENV("TP_CASH_VOL", lround([u doubleForKey:@"PurchaseVolume"] * 100));
-            QOL_ENV("TP_SYSTEM_SOUND_VOL", lround([u doubleForKey:@"SystemSoundVolume"] * 100));
-            QOL_ENV("TP_RIDE_MUSIC", [u boolForKey:@"RideMusic"]);
-            QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
-            QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
-            QOL_ENV("TP_FREE_BUS", [u integerForKey:@"FreeBus"]);
-            QOL_ENV("TP_FREE_RULES", [u integerForKey:@"FreeRules"]);   /* (freemode.c: 0 sandbox, 1 endless, 2 true freeplay) */
-            QOL_ENV("TP_FREE_RAMP", [u integerForKey:@"FreeRamp"]);
-            QOL_ENV("TP_BIG_MAPS", [u integerForKey:@"FreeMapSize"] == 128);   /* (bigmap.c: room for 128x128 sandbox parks) */
-            {   /* a saved 128x128 park (its marker, <save>.big): room to load it whatever the setting */
-                BOOL big = NO;
-                for (NSString *f in [NSFileManager.defaultManager enumeratorAtPath:d->_saves]) if ([f hasSuffix:@".big"]) { big = YES; break; }
-                QOL_ENV("TP_BIG_ROOM", big);
-            }
-            if (![u boolForKey:@"SteadyPacing"] && !getenv("TP_PACING")) setenv("TP_PACING", "dosbox", 1);
-            #undef QOL_ENV
-            NSDictionary *tunes = [u dictionaryForKey:@"RideTunes"];
-            if (tunes.count && !getenv("TP_RIDE_TUNES")) {
-                NSMutableArray *parts = [NSMutableArray array];
-                for (NSString *k in tunes) [parts addObject:[NSString stringWithFormat:@"%@:%@", k, tunes[k]]];
-                setenv("TP_RIDE_TUNES", [parts componentsJoinedByString:@","].UTF8String, 1);
-            }
         }
         tp_extras_get = extras_get; tp_extras_set = extras_set; tp_extras_getf = extras_getf; tp_extras_setf = extras_setf;
         tp_qol_init();                                   /* quality-of-life hooks (qol.c), MAIN.EXE's code */
@@ -788,7 +794,7 @@ static void *game_thread(void *arg) {
         do r = tp_host_run(4000, 0, 50); while (r == 0);
         game_result = r;
         /* THEME.BAT restarts the game when it exits with errorlevel >= 10. */
-        if (r == 1 && tp_host_exit_code() >= 10) continue;
+        if (r == 1 && tp_host_exit_code() >= 10) { tp_walk_stop(); continue; }   /* (Visitor View does not outlive its game, issue #6) */
         break;
     }
     game_done = 1;
@@ -865,6 +871,7 @@ static void *game_thread(void *arg) {
         if ([u boolForKey:@"Sound"] && tp_audio_start() == 0)
             tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
     }
+    settings_to_env(self);
     pthread_t t;
     pthread_attr_t attr; pthread_attr_init(&attr);
     pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);

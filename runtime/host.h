@@ -35,6 +35,7 @@ void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of 
 void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
 void tp_host_quit(void);
 void tp_host_pause(int on);
+void tp_host_set_image(const char *path);     /* the LE image tp_host_init loads (instead of TP_IMAGE) */
 void tp_host_set_args(const char *args);      /* the program's command tail, before tp_host_init (" -l1": German) */                   /* hold the game (window hidden or minimised) */
 void tp_host_set_realtime(void);
 /* Sound: the app attaches an output and pulls PCM; MIDI bytes go to tp_audio_midi (weak). */
