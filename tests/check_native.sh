@@ -4,11 +4,12 @@ cd "$(dirname "$0")/.."
 export DS_TEST=1 W32_AUDIO_MUTE=1 PYTHONDONTWRITEBYTECODE=1
 if [[ -n ${TP_PYTHON:-} ]]; then PYTHON=$TP_PYTHON                     # (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
 elif [[ -x .venv/bin/python3 ]]; then PYTHON=.venv/bin/python3
+elif [[ -x .venv/Scripts/python.exe ]]; then PYTHON=.venv/Scripts/python.exe   # (Windows: python.org's Python, py -m venv .venv)
 else PYTHON=python3; fi
 # Linux and Windows (MSYS2 CLANG64/UCRT64 bash) counterpart of tests/check_macos.sh: the same checks, with the
 # compiled code for this machine (x86-64 or ARM64) and its library names (tools/toolchain.py).
-SHLIB=$("$PYTHON" -c 'import sys; sys.path.insert(0, "tools"); import toolchain; print(toolchain.SHLIB)')
-EXE=$("$PYTHON" -c 'import sys; sys.path.insert(0, "tools"); import toolchain; print(toolchain.EXE)')
+SHLIB=$("$PYTHON" -c 'import sys; sys.path.insert(0, "tools"); import toolchain; print(toolchain.SHLIB, end="")')
+EXE=$("$PYTHON" -c 'import sys; sys.path.insert(0, "tools"); import toolchain; print(toolchain.EXE, end="")')
 if [[ $# -lt 2 || $# -gt 3 || ( $# -eq 3 && "${3:-}" != --park ) ]]; then
   echo 'usage: tests/check_native.sh owned-GAME/MAIN.EXE reference-checkout [--park]   (reference: vendor/freedom-force-recomp)' >&2
   exit 2
@@ -52,7 +53,7 @@ assert Path('work/check-native/native-frame.png').read_bytes()==Path('work/check
 print('PASS: native startup, scripted input, scheduling and matching framebuffer')
 PY
 if [[ "${3:-}" != --park ]]; then
-  verified_services=$("$PYTHON" -c 'import json; print(json.load(open("work/check-native/result.json"))["service_boundaries_compared"])')
+  verified_services=$("$PYTHON" -c 'import json; print(json.load(open("work/check-native/result.json"))["service_boundaries_compared"], end="")')
   native_args=(--services "$verified_services")
 fi
 "$PYTHON" -S tools/run_native.py "$1" --library work/check-native/game$SHLIB --out work/check-native-only \
