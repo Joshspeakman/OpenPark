@@ -13,6 +13,11 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, extras (tools/extras.py, config/extras.json: hashes only): the owner's Amiga CD32 bin/cue imports as CD-audio
+music, Launcher > Sound > Music Type (the Amiga game's own tune -> track table). Japanese CD, demo and PC CD are
+recognised (docs/reports/2026-10-19-other-editions.md). Checked in TESTPARK: Super Spinner tune 12 -> track 13 heard
+(output envelope correlation 0.96).
+
 2026-10-19, beta 1: the repository goes public (source only: no game code, data, art or built app in it or in the
 release). A clean clone built and ran to the title with the README's steps after two fixes (check_macos.sh makes the
 survey; build_app.sh survives no driver images under bash 3.2). Sound on a fresh build: tools/make_drivers.py (#9, run by

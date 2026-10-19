@@ -72,6 +72,24 @@ bash tools/build_app.sh                    # installs ~/Applications/Theme Park 
 - **Everything else stays local:** everything game-derived (extracted files, generated C, traces, driver
   images) stays in the ignored `work/` and `build/` folders.
 
+## Extras from your other Theme Park discs
+
+Like OpenRA's content installer, `tools/extras.py` takes extra content from other releases you own. It
+recognises a disc by checksums in [config/extras.json](config/extras.json); the repository holds no content.
+Imported files go to `~/Games/ThemeParkNative/extras/`.
+
+```sh
+python3 tools/extras.py "~/Discs/Theme Park (Europe) (En,Fr,De,It).cue"   # a .cue, .iso/.img, mounted disc or folder
+python3 tools/extras.py --list                                            # what is installed
+```
+
+| Disc | What it adds |
+|---|---|
+| **Amiga CD32** (Mindscape, 1995), a full bin/cue dump | Its CD-audio soundtrack: **Launcher > Sound > Music Type: Amiga CD32**. Each game tune plays the Amiga game's own track for it. |
+| Japanese PC CD | Recognised: Japanese and Chinese text are a later step |
+| PC demo floppy (1994) | Recognised: a pre-release build ([the editions report](docs/reports/2026-10-19-other-editions.md)) |
+| DOS PC CD | The same data as GOG's release |
+
 ## Known limitations (beta 1)
 
 - **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which

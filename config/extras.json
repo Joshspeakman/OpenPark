@@ -1,0 +1,98 @@
+{
+ "note": "Extra content the port can take from the owner's other Theme Park discs (tools/extras.py). Hashes only, never content: a source is recognised by its key file or data track, and imported files go to ~/Games/ThemeParkNative/extras/<pack>/. Track hashes are SHA-256 of a track's audio from its INDEX 01 (16-bit 44.1 kHz stereo, as a Redump bin/cue holds it).",
+ "packs": {
+  "amiga-cd32": {
+   "title": "Amiga CD32 (Mindscape, 1995)",
+   "gives": "CD-audio soundtrack (Launcher > Sound > Music Type: Amiga CD32)",
+   "data_track_sha256": "45046513d6f71d54a28d8ad16f3b1dcc87d50f87f7eb975cdff59095027e75d1",
+   "key_file": [
+    "main",
+    "50499280e4654a6079d01f34a9b9014d9e0311379d513dcfc1e5f348e27b7a9e"
+   ],
+   "audio_tracks": {
+    "2": "95e588be80b5a256cf89f4d6db29e704d06301d438693a1282edc1d07f096a0d",
+    "3": "e427fccdc09099efa671c25161a8b7eb9cd0a516243e5324ababfa7a7181aac9",
+    "4": "1b23afc90e4461497df53e75cd0a78233e816b51a53098b5090653527d9a0c0a",
+    "5": "ae95a043c10ef70c329b245be4acb005bc34d4974f0bcd8e00e59e026f9c4d2d",
+    "6": "2c63e42d3a17314ab4b79c829a10e8087b8264891e3b0560c2f275fe51a54918",
+    "7": "f09b2052f56b78805506a39c1d6d6981de30e5c6be0de70464f111624a4bf775",
+    "8": "2052cca54a4f7e1deb0ad47c8db6ff354ad5e0a2753b8b9d1870575d2842b1b0",
+    "9": "5b345ecb1b87900227b2cce66d5ee0f9ad9f3a3ec0131fa0223229d4582c709b",
+    "10": "bb4e171666fc8ca1fa39796e91526ff5b60c1e088160ba46dc9ae5294162d05d",
+    "11": "0f0c67727f490588a76f19431e1ff7bece6c07d66cf885d108c862383caae09f",
+    "12": "5cee459bc868c8bd07ebdb9b6a14533427c991457c2d677e3fc2b195dcbbb3ae",
+    "13": "038fd62cafef34ed07c8bbd4e9e7434046d89f8fa42a511d6a1ddca9d6a096da",
+    "14": "280bbbd3d1a1d124bf932db7630de82106e40f9137716aa6872db30a18ea0092",
+    "15": "ce7bd87db876a90636c4444d7cb19f4559fc7a60ece38de612bb9488f93b7df4",
+    "16": "c83e032de798442cbd8a81c0a3aa9eb8d1b39004f8530f6d07c4e3a9b84fe9c8",
+    "17": "2e6c78610ccdda320052e854c117221e8b95ed468febbd5cee14a4b65540d94e",
+    "18": "f0aaf63f99bc672dd6e2ea5d2d572b55382db102c31e6c56cd90c15bce1dc2c7",
+    "19": "fe7cef073deea31933f046abb5c3456b2e12fb1c416b61a142b07ad5b7a24ad8",
+    "20": "eb95e73ec13dfa249183c2e08c0c47c7bea7463f43005221c2eafb5d35e5e4dd",
+    "21": "2d5bfcfb4aa84b3e4b2ae12aa6646eb216268c936524429478b78c159c5a0f2e",
+    "22": "5a241bfcaee21c32001ba1a4fe3db2f7c21390f4cfed3dffef14d730df604a20",
+    "23": "6e7974017a9dc25938c8eae68a958ad81d941b3efd29fe168aee2a97e097558d",
+    "24": "4424684e42cd234ae1deaf85af604f58675063403cbd361e8e5c89375898ed4a",
+    "25": "b2e8c0eccf37101363d3b141f4aa6f5f90b57ef87ae8255b9056868cbb226610",
+    "26": "b02e4f2c0b04a4ce0b027a5473216268a2593b149754f3256514f3a4bb4a6aea"
+   },
+   "tune_tracks": [
+    0,
+    2,
+    17,
+    15,
+    7,
+    11,
+    25,
+    23,
+    24,
+    14,
+    5,
+    20,
+    13,
+    13,
+    14,
+    3,
+    16,
+    22,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    0,
+    0
+   ],
+   "tune_tracks_note": "The Amiga game's tune -> CD track table (main, code hunk 0: 0x4d712 reads it from data hunk 6 +0xcd72; tunes >= 30 play track tune-30). Tune numbers are the PC game's: 1-17 rides, 18 HRTBEAT, 19 FANFARE, 20 TOVER, 21 WIN2, 22 FUNERAL."
+  },
+  "japanese-cd": {
+   "title": "Japanese PC CD",
+   "gives": "nothing usable yet (Japanese and Chinese text need the Japanese edition's font renderer; docs/reports/2026-10-19-other-editions.md)",
+   "key_file": [
+    "GAME/MAINCH.EXE",
+    "fb2f64d3d921b71b65fc2886d5d395bd6eb09493b42a725835cbc5680623e19d"
+   ]
+  },
+  "demo-1994": {
+   "title": "PC demo floppy (March 1994)",
+   "gives": "nothing usable yet (pre-release build; docs/reports/2026-10-19-other-editions.md)",
+   "key_file": [
+    "GAME.EXE",
+    "8081ff18ee7ca9fb07af63ddeb389822b9124d25e22b67eae59e8632c2d97406"
+   ]
+  },
+  "pc-cd": {
+   "title": "PC CD (the DOS CD release)",
+   "gives": "nothing beyond GOG's release (the same data)",
+   "key_file": [
+    "GAME/MAIN.EXE",
+    "79d3e5734b11bb3a4d290fce9b5e87aae44940e01525b74ca23803af7707c85e"
+   ]
+  }
+ }
+}
