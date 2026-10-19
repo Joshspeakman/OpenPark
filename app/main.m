@@ -67,6 +67,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)zoomTo:(double)z at:(NSPoint)p;
 - (void)panBy:(double)dx :(double)dy;
 - (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b;
+- (BOOL)menuWide;
+- (uint32_t *)shownPicture:(int *)w :(int *)h;   /* (tests: the wide picture with a game window, RGBA, malloc'd; else NULL) */
 - (void)zoomIn:(id)sender;
 - (void)zoomOut:(id)sender;
 - (void)centerOn:(double)cx :(double)cy;
@@ -91,7 +93,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     /* The park view (runtime/view.c): on when zoomed, or when the window is wider
      * than 4:3 (widescreen: the park fills it, the interface stays in a centred
      * 4:3 column); off, the game draws its own view. */
-    BOOL _viewOn, _live, _viewMoved;
+    BOOL _viewOn, _live, _viewMoved, _menuWide;   /* _menuWide: a full-screen game window in the wide view (see present) */
     IOSurfaceRef _surf[2]; int _surfIdx;  /* the park view's pictures, shown in turn */    /* _viewMoved: pan or zoom since the last picture (compose now) */
     double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when the view last ended */
     uint32_t *_big; int _bigW, _bigH;
@@ -137,6 +139,13 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 }
 /* What the park view occupies, and its width in the game screen's pixels. */
 - (NSRect)viewRect { return [self wide] ? self.bounds : [self screenRect]; }
+/* The game's own screen inside the wide view: the column its interface takes there (the panel's). */
+- (NSRect)columnRect {
+    NSRect v = [self viewRect]; double lw = _lastLW > 0 ? _lastLW : [self layoutW];
+    CGFloat w = v.size.width * _sw / lw;
+    return NSMakeRect(v.origin.x + (v.size.width - w) / 2, v.origin.y, w, v.size.height);
+}
+- (NSRect)pointerRect { return _live ? [self viewRect] : _menuWide ? [self columnRect] : [self screenRect]; }
 - (double)layoutW {
     NSRect r = [self viewRect];
     return [self wide] ? _sw * (r.size.width / r.size.height) * 0.75 : _sw;
@@ -144,7 +153,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
 - (void)layout {
     [super layout];
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    _screen.frame = _live ? [self viewRect] : [self screenRect];
+    _screen.frame = _live || _menuWide ? [self viewRect] : [self screenRect];
     _scan.frame = _screen.frame;
     [CATransaction commit];
 }
@@ -192,7 +201,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         _bigW = ow; _bigH = oh;
         if (getenv("TP_PACE_DEBUG")) { static double l, worst, sum; static int n; double d = CACurrentMediaTime() - tc0; sum += d; n++; if (d > worst) worst = d;
             if (tc0 - l > 1) { fprintf(stderr, "compose %dx%d: avg %.2f ms, worst %.2f ms\n", _bigW, _bigH, sum / n * 1e3, worst * 1e3); l = tc0; worst = sum = 0; n = 0; } }
-        if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; [self setCursorHidden:NO]; }
+        if (live != _live || _menuWide) { _live = live; _menuWide = NO; [self setNeedsLayout:YES]; [self layout]; [self setCursorHidden:NO]; }
         [self updateGameCursor];
         [self updateScanlines:fh];
         [CATransaction begin]; [CATransaction setDisableActions:YES];
@@ -200,6 +209,46 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
         [CATransaction commit];
         return;
     }
+    /* A full-screen game window (the ride and shop catalogues, the research and bank screens) in the wide view:
+     * the game stops drawing the park, and the picture used to change to its 4:3 screen (stretched or boxed), a
+     * jump each way. The wide picture stays instead: the last park picture at the sides (the park is not drawn
+     * meanwhile), the game's screen in the column its interface takes in the park view, every frame. */
+    BOOL menuWide = !live && _viewOn && [self wide] && fw == _sw && _bigW > 0 && _bigH > 0 && _surf[_surfIdx]
+                    && (int)IOSurfaceGetWidth(_surf[_surfIdx]) == _bigW && (int)IOSurfaceGetHeight(_surf[_surfIdx]) == _bigH && !tp_view_debug_fps;
+    if (!live && getenv("TP_MENU_DEBUG")) { static double l; if (CACurrentMediaTime() - l > 1) { l = CACurrentMediaTime();
+        fprintf(stderr, "menu wide %d: viewOn %d wide %d fw %d sw %d big %dx%d surf %p\n", menuWide, _viewOn, [self wide], fw, _sw, _bigW, _bigH, _surf[_surfIdx]); } }
+    if (menuWide) {
+        IOSurfaceRef cur = _surf[_surfIdx], nx = _surf[_surfIdx ^ 1];
+        if (!nx || (int)IOSurfaceGetWidth(nx) != _bigW || (int)IOSurfaceGetHeight(nx) != _bigH) {
+            if (nx) CFRelease(nx);
+            NSDictionary *props = @{(id)kIOSurfaceWidth: @(_bigW), (id)kIOSurfaceHeight: @(_bigH), (id)kIOSurfaceBytesPerElement: @4,
+                                    (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA')};
+            nx = _surf[_surfIdx ^ 1] = IOSurfaceCreate((__bridge CFDictionaryRef)props);
+        }
+        IOSurfaceLock(cur, kIOSurfaceLockReadOnly, NULL); IOSurfaceLock(nx, 0, NULL);
+        size_t sp = IOSurfaceGetBytesPerRow(cur), dp = IOSurfaceGetBytesPerRow(nx);
+        uint8_t *src = IOSurfaceGetBaseAddress(cur), *dst = IOSurfaceGetBaseAddress(nx);
+        double lw = _lastLW > 0 ? _lastLW : [self layoutW];
+        int cw = (int)lround(_bigW * _sw / lw), cx0 = (_bigW - cw) / 2; if (cw > _bigW) cw = _bigW; if (cx0 < 0) cx0 = 0;
+        for (int y = 0; y < _bigH; y++) {
+            uint32_t *d = (uint32_t *)(dst + (size_t)y * dp);
+            if (!_menuWide) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* (entering: the park picture at the sides) */
+            else { memcpy(d, src + (size_t)y * sp, (size_t)cx0 * 4); memcpy(d + cx0 + cw, src + (size_t)y * sp + (size_t)(cx0 + cw) * 4, (size_t)(_bigW - cx0 - cw) * 4); }
+            const uint32_t *row = _pixels + (size_t)(y * fh / _bigH) * fw;
+            for (int x = 0; x < cw; x++) { uint32_t c = row[(size_t)x * fw / cw];   /* (RGBA in memory -> BGRA) */
+                d[cx0 + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
+        }
+        IOSurfaceUnlock(nx, 0, NULL); IOSurfaceUnlock(cur, kIOSurfaceLockReadOnly, NULL);
+        _surfIdx ^= 1;
+        if (!_menuWide || _live) { _menuWide = YES; _live = NO; [self setNeedsLayout:YES]; [self layout]; }
+        [self updateGameCursor];
+        [self updateScanlines:fh];
+        [CATransaction begin]; [CATransaction setDisableActions:YES];
+        _screen.contents = (__bridge id)nx;
+        [CATransaction commit];
+        return;
+    }
+    if (_menuWide) { _menuWide = NO; [self setNeedsLayout:YES]; [self layout]; }
     if (!live && tp_view_debug_fps) {                /* the frame-rate line over the game's own picture: drawn at 3x */
         int ow = fw * 3, oh = fh * 3;
         if (!_big || _bigW != ow || _bigH != oh) { free(_big); _bigW = ow; _bigH = oh; _big = malloc(sizeof *_big * _bigW * _bigH); }
@@ -258,7 +307,7 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     _mouse = p; _mouseIn = YES;
     if (_walkDrop || tp_walk_active()) { [self setCursorHidden:NO]; return; }   /* (the Visitor View takes the pointer) */
-    NSRect r = _live ? [self viewRect] : [self screenRect];
+    NSRect r = [self pointerRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
     /* The game's own screen draws its cursor: the Mac's hides over it. The park view shows the game's
@@ -308,8 +357,18 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     else if (_gameCursor) [self addCursorRect:[self viewRect] cursor:_gameCursor];
 }
 
+- (BOOL)menuWide { return _menuWide; }
+- (uint32_t *)shownPicture:(int *)w :(int *)h {
+    if (!_menuWide || !_surf[_surfIdx]) return NULL;
+    IOSurfaceRef sf = _surf[_surfIdx]; int W = (int)IOSurfaceGetWidth(sf), H = (int)IOSurfaceGetHeight(sf);
+    uint32_t *out = malloc(4 * (size_t)W * H); IOSurfaceLock(sf, kIOSurfaceLockReadOnly, NULL);
+    const uint8_t *b = IOSurfaceGetBaseAddress(sf); size_t bp = IOSurfaceGetBytesPerRow(sf);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) { uint32_t c = ((const uint32_t *)(b + (size_t)y * bp))[x]; out[(size_t)y * W + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
+    IOSurfaceUnlock(sf, kIOSurfaceLockReadOnly, NULL); *w = W; *h = H; return out;
+}
 /* A pointer from elsewhere (a game controller), in 0..1 of what is shown. */
 - (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b {
+    if (_menuWide) { NSRect v = [self viewRect], c = [self columnRect]; fx = (fx * v.size.width - (c.origin.x - v.origin.x)) / c.size.width; fx = fmin(fmax(fx, 0), 0.9999); }   /* (into the column) */
     if (_live) tp_view_mouse(fx, fy, b); else tp_host_mouse(fx, fy, b);
 }
 
@@ -835,8 +894,9 @@ static void *game_thread(void *arg) {
             tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
             NSRect vb = _view.bounds; int oh = 960, ow = 1280;
             if (tp_view_live() && vb.size.width * 3 > vb.size.height * 4 * 1.02) ow = (int)lround(oh * vb.size.width / vb.size.height);
-            uint32_t *big = malloc(4 * (size_t)ow * oh);
-            if (tp_view_live()) tp_view_compose(big, ow, oh, frame, fw, fh, 0);
+            uint32_t *big = [_view shownPicture:&ow :&oh];
+            if (big) {}                                  /* (a game window in the wide view: what is shown) */
+            else if ((big = malloc(4 * (size_t)ow * oh)) && tp_view_live()) tp_view_compose(big, ow, oh, frame, fw, fh, 0);
             else for (int i = 0; i < ow * oh; i++) big[i] = frame[(i / ow * fh / oh) * fw + (i % ow) * fw / ow];
             NSString *path = [[p subarrayWithRange:NSMakeRange(2, p.count - 2)] componentsJoinedByString:@":"];
             int tp_host_png_rgba(const char *, const uint32_t *, int, int);
@@ -893,15 +953,16 @@ static void *game_thread(void *arg) {
 static int vshot_size(int *ow, int *oh, NSView *v) {
     *oh = 960; *ow = 1280;
     NSRect vb = v.bounds;
-    if (tp_view_live() && vb.size.width * 3 > vb.size.height * 4 * 1.02) *ow = (int)lround(*oh * vb.size.width / vb.size.height);
+    if ((tp_view_live() || [(GameView *)v menuWide]) && vb.size.width * 3 > vb.size.height * 4 * 1.02) *ow = (int)lround(*oh * vb.size.width / vb.size.height);
     return 1;
 }
 - (void)vshot:(NSString *)path {
     static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
     tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
     int ow, oh; vshot_size(&ow, &oh, _view);
-    uint32_t *big = malloc(4 * (size_t)ow * oh);
-    if (tp_view_live()) tp_view_compose(big, ow, oh, frame, fw, fh, 0);
+    uint32_t *big = [_view shownPicture:&ow :&oh];       /* (a game window in the wide view: what is shown) */
+    if (big) {}
+    else if ((big = malloc(4 * (size_t)ow * oh)) && tp_view_live()) tp_view_compose(big, ow, oh, frame, fw, fh, 0);
     else for (int i = 0; i < ow * oh; i++) big[i] = frame[(i / ow * fh / oh) * fw + (i % ow) * fw / ow];
     int tp_host_png_rgba(const char *, const uint32_t *, int, int);
     tp_host_png_rgba(path.fileSystemRepresentation, big, ow, oh); free(big);
