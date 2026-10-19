@@ -278,8 +278,8 @@ static void pace_frame(void) {
         rt = 1; fprintf(stderr, "pace: real-time thread policy %s\n", tp_plat_realtime_thread(period) ? "set" : "refused"); } }
     {   /* a millisecond at a time, the sound card going on meanwhile (sb16.c: the HMI driver mixes just ahead of its
          * DMA position) */
-        void sb16_pump(double t);
-        while (target - now() > 0.0015) { tp_plat_sleep(0.001); sb16_pump(now()); }
+        void sb16_pump(double t); double tp_host_card_clock(void);
+        while (target - now() > 0.0015) { tp_plat_sleep(0.001); sb16_pump(tp_host_card_clock()); }   /* (held at the next tick: host.c) */
         double left = target - now();
         if (left > 0.0008) tp_plat_sleep(left - 0.0005);
     }

@@ -423,6 +423,8 @@ static void debug_stats(void) {
     lins = tp_insns; lrep = tp_rep; lio = io_cost;
     ltime = time_calls; lret = retrace_reads; lint = int_calls;
     { static uint32_t ls; float sb16_peak(void); fprintf(stderr, "sbirq/s=%u pend=%d peak=%.3f midi/s=%u ", sb_irqs_delivered - ls, sb_irq_pending, sb16_peak(), midi_bytes); ls = sb_irqs_delivered; midi_bytes = 0; }
+    { double sb16_pump_stats(long *jumps, long *clipped); long jumps, clipped; double worst = sb16_pump_stats(&jumps, &clipped);
+      fprintf(stderr, "card: step max %.1f ms, over 5 ms x%ld, full-scale samples %ld ", worst * 1e3, jumps, clipped); }
     fprintf(stderr, "t=%.1f irq/s=%u polls/s=%u Mblocks/s=%.1f pit=%u vec8=%x:%x mode=%x eip=%08x keys=%d cb=%d\n",
             t - rt_start, irq_count - lirq, poll_count - lpoll, (blocks - lblocks) / 1e6, pit_divisor,
             vec_sel[8], vec_pc[8], video_mode, G(EIP), nkeys, in_callback);
@@ -433,11 +435,25 @@ int tp_host_timer_behind(void) {
     if (deterministic || !timer_installed()) return 0;
     return emu_now() - timer_next > pit_divisor / 1193182.0;
 }
+/* The sound card's clock (sb16_pump): the wall clock, but never past the next timer tick not yet delivered.
+ * The HMI driver mixes only a few milliseconds ahead of the DMA position, in its 240 Hz timer handler; while
+ * this thread cannot deliver ticks (a pass or a native pass in the view's hook, the pacing wait, the governor's
+ * sleep) the card used to run on by the wall clock and, when the ticks resumed, had read past what was mixed:
+ * stale or unmixed buffer data, heard as a crackle or a broken effect whenever a frame ran long with a sound
+ * playing. Held at the tick instead and advanced in step with the ticks as they are delivered (realtime_events,
+ * one a quantum), it never reads unmixed data, and the output ring (sb16_play) covers the time. With IF clear no
+ * tick can be delivered: one period of grace, then the wall clock as before. Deterministic runs: unchanged. */
+double tp_host_card_clock(void) {
+    double t = now_s();
+    if (deterministic || !timer_installed() || timer_next <= 0) return t;
+    double period = pit_divisor / 1193182.0, limit = timer_next + ((G(EFLAGS) & 0x200) ? 0 : period);
+    return t < limit ? t : limit;
+}
 static void realtime_events(void) {
     debug_stats();
     tp_view_poll();
     if (in_callback && tp_watch_hit) in_callback = 0;
-    { void sb16_pump(double t); sb16_pump(now_s()); }   /* the card's DMA, in small steps in the game's time (sb16.c) */
+    { void sb16_pump(double t); sb16_pump(tp_host_card_clock()); }   /* the card's DMA, in small steps in the game's time (sb16.c) */
     if (!(G(EFLAGS) & 0x200)) return;
     double t = now_s(), te = emu_now();
     double period = pit_divisor / 1193182.0;

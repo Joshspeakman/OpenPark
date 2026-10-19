@@ -276,7 +276,7 @@ static int fetch(float *l, float *r) {
     return 0;
 }
 
-static float peak;
+static float peak; static long clipped_samples;
 float sb16_peak(void) { float p = peak; peak = 0; return p; }
 /* The output stage: the game's effects are 8-bit samples of 11 to 22 kHz that the HMI driver stretches to 44.1 kHz
  * by holding each value (harsh, gritty highs), and it clips where they add up. qol.c starts every effect at a quarter
@@ -315,6 +315,7 @@ void sb16_render(float *out, int frames, double out_rate) {
             double f = phase < 1.0 ? phase : 1.0;
             out[2 * i] = shape(prev_l + (hold_l - prev_l) * (float)f, 0); out[2 * i + 1] = shape(prev_r + (hold_r - prev_r) * (float)f, 1);
             if (hold_l > peak) peak = hold_l; else if (-hold_l > peak) peak = -hold_l;
+            if (hold_l >= 0.999f || hold_l <= -0.999f) clipped_samples++;   /* (the driver's own sum clipped) */
         } else out[2 * i] = out[2 * i + 1] = 0;
         if (!playing || paused) step = 0;
     }
@@ -330,12 +331,28 @@ void sb16_render(float *out, int frames, double out_rate) {
 static float ring[2 * RING]; static unsigned r_head, r_tail; static int primed;
 static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
 static double pumped;
-static long underruns;
+static long underruns, pump_jumps; static double pump_worst;
+/* How far the output runs behind the card (frames): the card is held while the game thread cannot deliver timer
+ * ticks (host.c tp_host_card_clock), for a frame's passes or its pacing wait, up to ~30 ms; the lead covers that.
+ * TP_AUDIO_LEAD=<ms> (default 60): latency against gaps. */
+static unsigned ring_lead(void) {
+    static unsigned lead; if (!lead) { const char *e = getenv("TP_AUDIO_LEAD"); double ms = e ? atof(e) : 60; if (ms < 10) ms = 10; if (ms > 300) ms = 300; lead = (unsigned)(ms * 44.1); }
+    return lead;
+}
+/* Development (TP_DEBUG): the largest step the card took in one pump, how many steps passed 5 ms (the driver's
+ * mix-ahead is of that order), and the card samples at full scale since the last call. */
+double sb16_pump_stats(long *jumps, long *clipped) {
+    double w = pump_worst; pump_worst = 0; *jumps = pump_jumps; pump_jumps = 0;
+    pthread_mutex_lock(&lock); *clipped = clipped_samples; clipped_samples = 0; pthread_mutex_unlock(&lock);
+    return w;
+}
 void sb16_pump(double t) {
     if (pumped == 0 || t < pumped || t - pumped > 0.25) { if (pumped && getenv("TP_RING_LOG")) fprintf(stderr, "sb16: stall of %.0f ms not replayed\n", (t - pumped) * 1e3); pumped = t; return; }   /* (a long stall is not replayed) */
     int frames = (int)((t - pumped) * 44100);
     if (frames < 16) return;
     if (frames > 4096) frames = 4096;
+    if (frames / 44100.0 > pump_worst) pump_worst = frames / 44100.0;
+    if (frames > 220) pump_jumps++;
     static float tmp[2 * 4096];
     sb16_render(tmp, frames, 44100);
     pumped += frames / 44100.0;
@@ -346,10 +363,10 @@ void sb16_pump(double t) {
 }
 void sb16_play(float *out, int frames) {
     pthread_mutex_lock(&ring_lock);
-    unsigned avail = r_head - r_tail;
-    if (!primed && avail >= 1024) primed = 1;
+    unsigned avail = r_head - r_tail, lead = ring_lead();
+    if (!primed && avail >= lead) primed = 1;
     static int rlog = -1; if (rlog < 0) rlog = getenv("TP_RING_LOG") != NULL;
-    if (primed && avail > 4096) { if (rlog) fprintf(stderr, "sb16: skipped ahead %u frames\n", avail - 1536); r_tail = r_head - 1536; }   /* (far behind, the game ran ahead of the device: catch up) */
+    if (primed && avail > 2 * lead + 1024) { if (rlog) fprintf(stderr, "sb16: skipped ahead %u frames\n", avail - lead); r_tail = r_head - lead; }   /* (far behind, the game ran ahead of the device: catch up) */
     int i = 0;
     if (primed) for (; i < frames && r_tail != r_head; i++, r_tail++) { out[2 * i] = ring[(r_tail % RING) * 2]; out[2 * i + 1] = ring[(r_tail % RING) * 2 + 1]; }
     if (i < frames) {                                    /* (ran dry: silence, and fill up again before playing on) */
