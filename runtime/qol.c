@@ -83,6 +83,7 @@ extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 
 
 static int log_sounds, ride_music = 1, park_tune, free_visitors, free_bus, arrive_x = 4;
 static double ew_gap, ew_last = -1e9, cash_gap, cash_last = -1e9;   /* (seconds between them; 0 every time, < 0 none) */
+#define HAMMER_DRAW_RET 0x11ebd0u   /* (the return from the ride draw's call that starts HAMMER) */
 #define CASH_RET 0x11ce6du                             /* (a shop's sale, from its drawing: CASH.RAW, bank 0 sample 16) */
 /* The same sample started again within this many seconds: dropped. The game starts some sounds from its
  * drawing (a ride object's, 0x11eba6: sample 22 while its counter is 0, so a waiting ride, or one held on
@@ -366,7 +367,10 @@ void tp_qol_hook(int nested) {
             if (cash_gap < 0 || t - cash_last < cash_gap) { if (log_sounds) fprintf(stderr, "sound: purchase skipped\n"); skip_call(); return; }
             cash_last = t;
         }
-        if (sfx_repeat > 0 && a1 < 4 && a2 < 64) {
+        /* (only the ride draw's HAMMER, restarted every frame drawn while a ride is built or held: 0x11eba6's call at
+         * 0x11ebcb. The player's own quick repeats, a path's DIG per tile or fast button clicks, play as the game
+         * plays them: gating every caller cut those, #11) */
+        if (sfx_repeat > 0 && ret == HAMMER_DRAW_RET && a1 < 4 && a2 < 64) {
             double t = now(), *last = &sfx_last[a1][a2];
             if (t - *last < sfx_repeat) { if (log_sounds) fprintf(stderr, "sound: repeat skipped\n"); skip_call(); return; }
             *last = t;
