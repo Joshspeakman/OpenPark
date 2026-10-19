@@ -279,17 +279,18 @@ static int fetch(float *l, float *r) {
 static float peak;
 float sb16_peak(void) { float p = peak; peak = 0; return p; }
 /* The output stage: the game's effects are 8-bit samples of 11 to 22 kHz that the HMI driver stretches to 44.1 kHz
- * by holding each value (harsh, gritty highs), and it clips where they add up. qol.c starts every effect at 0.6 of
- * its volume (headroom in the driver's sum); here that is given back, a gentle low-pass (2nd order, 9 kHz) takes the
- * stair-steps' edge off, and a soft limit replaces the hard clip. TP_SOUND_RAW=1: the card's output as it was. */
-#define OUT_GAIN (1.0f / 0.6f)
+ * by holding each value (harsh, gritty highs), and it clips where they add up. qol.c starts every effect at a quarter
+ * of its volume (four at full volume fit in the driver's 16-bit sum); here that is given back in floating point and
+ * a gentle low-pass (2nd order, 9 kHz) takes the stair-steps' edge off. Nothing clips here: whatever passes full
+ * scale meets the app's look-ahead peak limiter (audio.m). TP_SOUND_RAW=1: the card's output as it was. */
+#define OUT_GAIN 4.0f                   /* (qol.c starts every effect at a quarter: SFX_HEADROOM) */
 static int raw_out = -1; static double lp_rate; static float lp_b0, lp_b1, lp_b2, lp_a1, lp_a2, lp_x1[2], lp_x2[2], lp_y1[2], lp_y2[2];
 static float shape(float x, int ch) {
     if (raw_out) return x;
     x *= OUT_GAIN;
     float y = lp_b0 * x + lp_b1 * lp_x1[ch] + lp_b2 * lp_x2[ch] - lp_a1 * lp_y1[ch] - lp_a2 * lp_y2[ch];
     lp_x2[ch] = lp_x1[ch]; lp_x1[ch] = x; lp_y2[ch] = lp_y1[ch]; lp_y1[ch] = y;
-    return y > 0.6f || y < -0.6f ? tanhf(y) : y;    /* (below 0.6 tanh is within 7% of linear: leave it) */
+    return y;                                       /* (past full scale: the app's peak limiter, audio.m) */
 }
 static void shape_setup(double out_rate) {
     if (raw_out < 0) raw_out = getenv("TP_SOUND_RAW") != NULL;

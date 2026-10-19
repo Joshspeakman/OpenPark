@@ -668,6 +668,23 @@ smaller as well as larger with a slider, rail rides cannot be laid.
   zeros, full negative). sb16.c tp_sound_bank_read (from host.c's DOS read) gives every sample whose end is read
   a clean end: silence from the first full-scale step in its last 16 bytes, a 5 ms fade before it. 39 samples
   of SNDS0-2; the recorded BUTTON3 matches the cleaned data and now fades to silence. TP_SOUND_RAW=1: as before.
+- Audio overhaul (the player: no distortion or clipping at all): every effect starts at a quarter of its volume
+  (qol.c SFX_HEADROOM 0.25: four at full volume fit the driver's 16-bit sum), sb16.c gives it back in floating
+  point (no soft clip any more), and everything, effects and music, goes out through Apple's look-ahead peak
+  limiter (audio.m: AUPeakLimiter after the main mixer, 5 ms attack, 80 ms release, -1 dB in). TESTPARK, 58 s
+  with menus, a ride bought and placed, music: the driver's sum at most a third of its range, 48 samples past
+  full scale before the limiter, none after (peak 0.998; TP_AUDIO_REC_OUT records what goes out).
+- Purchase sounds (Tweaks > Purchase Sounds, PurchaseGap / TP_CASH_GAP, as the ew: every time, at most one per
+  5, 15, 30 s, off): CASH.RAW, bank 0 sample 16, started only at 0x11ce68 (return 0x11ce6d), a shop's drawing
+  (kind 26 in the switch at 0x11ca0f) when its +5 bit 0 is set. Not heard in 100 s of TESTPARK; gated the same
+  way as the ew.
+- EXTRAS: EW SOUNDS and PURCHASE SOUNDS are on/off (checked: as often as the launcher says; off: none). The old
+  FEWER EW SOUNDS was checked for any gap, so a player on Every 30 s who clicked it got every time; gating itself
+  was right (TESTPARK, gap 30: 2 played, 4 skipped in a minute).
+- New parks open on the entrance (freemode.c, first frame of a new park): camera = entrance cell (park record
+  +0x63f) less (6, 7); the landscape is marked for redrawing for 8 more ticks, as the first frame's own clears
+  it. Checked in new 64x64 and 128x128 parks. TP_GAME_CAMERA=1 keeps the game's (the golden first-park check).
+- Panel Size defaults to 0.75x.
 - Ride placement stall: not seen in TESTPARK (Big Dipper placed, 60 frames a second throughout, one 50 ms frame).
 - Exploding rides: wear is ride thing +0x2e, added at each cycle's end (0x131ed3, +0x3a cycles); past twice the
   ride type's +0xa8 the ride explodes (0x16662d, EXPLOD3 from 0x166674). Forced in TESTPARK (poke +0x2e to

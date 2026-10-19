@@ -159,7 +159,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[6], _tweaks[6], _free[5];
+    Setting _display[7], _sound[6], _tweaks[7], _free[5];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -204,7 +204,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"The park fills the window; the panel stays centred", @"The game's 4:3 picture, as on a CRT"]);
         _display[6] = setting(@"Zoomed Drawing", @"NativePasses", @[@YES, @NO], @[@"Native", @"The Game's"],
                               @[@"Zoomed-out views drawn by the new engine: faster", @"Zoomed-out views drawn by the game's own code"]);
-        _tweaks[5] = slider(@"Panel Size", @"PanelScale", @[@0.5, @0.75, @1.0, @1.25, @1.5, @1.75, @2.0], @[@"0.5×", @"0.75×", @"The Game's", @"1.25×", @"1.5×", @"1.75×", @"2×"],
+        _tweaks[6] = slider(@"Panel Size", @"PanelScale", @[@0.5, @0.75, @1.0, @1.25, @1.5, @1.75, @2.0], @[@"0.5×", @"0.75×", @"The Game's", @"1.25×", @"1.5×", @"1.75×", @"2×"],
                               @[@"The panel and the advisor half size, more park in view (wide windows)", @"The panel and the advisor three quarters size (wide windows)",
                                 @"The panel and the advisor as drawn in 1994", @"The panel and the advisor a quarter larger (wide windows)",
                                 @"The panel and the advisor half as large again (wide windows)", @"The panel and the advisor 1.75 times as large (wide windows)",
@@ -218,11 +218,14 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _tweaks[0] = setting(@"Grossed-Out Sounds", @"GrossOutGap", @[@0, @5, @15, @30, @-1], @[@"Every Time", @"Every 5 s", @"Every 15 s", @"Every 30 s", @"Off"],
                              @[@"The \"ew\" each time a visitor sees a mess, as in 1994", @"At most one \"ew\" every 5 seconds",
                                @"At most one \"ew\" every 15 seconds", @"At most one \"ew\" every 30 seconds", @"Visitors keep their disgust to themselves"]);
-        _tweaks[1] = setting(@"Ride Music", @"RideMusic", @[@YES, @NO], @[@"On", @"Off"],
+        _tweaks[1] = setting(@"Purchase Sounds", @"PurchaseGap", @[@0, @5, @15, @30, @-1], @[@"Every Time", @"Every 5 s", @"Every 15 s", @"Every 30 s", @"Off"],
+                             @[@"The till rings for every purchase on screen", @"At most one till every 5 seconds",
+                               @"At most one till every 15 seconds", @"At most one till every 30 seconds", @"Visitors pay quietly"]);
+        _tweaks[2] = setting(@"Ride Music", @"RideMusic", @[@YES, @NO], @[@"On", @"Off"],
                              @[@"Running rides on screen play their tunes", @"No ride tunes (the game's fanfares still play)"]);
-        _tweaks[2] = setting(@"Ride Tunes", @"RideTunes", @[@""], @[@"The Game's"], @[@"Each ride plays its own tune; → chooses per ride"]);
-        _tweaks[3] = setting(@"Park Music", @"ParkTune", tunes, tuneL, tuneN);
-        _tweaks[4] = setting(@"Frame Pacing", @"SteadyPacing", @[@YES, @NO], @[@"Steady", @"Like DOSBox"],
+        _tweaks[3] = setting(@"Ride Tunes", @"RideTunes", @[@""], @[@"The Game's"], @[@"Each ride plays its own tune; → chooses per ride"]);
+        _tweaks[4] = setting(@"Park Music", @"ParkTune", tunes, tuneL, tuneN);
+        _tweaks[5] = setting(@"Frame Pacing", @"SteadyPacing", @[@YES, @NO], @[@"Steady", @"Like DOSBox"],
                              @[@"Every frame the same length, in step with the display", @"The game's speed follows how busy the screen is, as in 1994"]);
         _free[0] = setting(@"Rules", @"FreeRules", @[@0, @1, @2], @[@"Sandbox", @"Endless", @"True Freeplay"],
                            @[@"The game's sandbox, at the settings you choose", @"Starts as easy as the first parks and grows to the hardest; research as normal",
@@ -255,7 +258,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 6 : self.open == 4 ? 6 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 6 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -489,7 +492,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     if (g == 0) return [NSString stringWithFormat:@"%@ · %@ · %@", [self valueOf:&_display[0]], [self valueOf:&_display[1]], [self valueOf:&_display[2]]];
     if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@ · Game %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[4]], [self valueOf:&_sound[2]]];
     if (g == 2) return @"Mouse and keyboard";
-    if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]]];
+    if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Till %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]], [self valueOf:&_tweaks[2]]];
     if (g == 5) return [NSString stringWithFormat:@"%@ · %@ visitors · %@", [self valueOf:&_free[0]], [self valueOf:&_free[2]], [self valueOf:&_free[4]]];
     return @"Saved parks, in the Finder";
 }
