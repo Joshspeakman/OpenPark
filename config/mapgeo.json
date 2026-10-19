@@ -1,5 +1,5 @@
 {
-"note": "Instructions that encode the 64x64 park map (docs/PLAN.md, Larger maps). W = tp_map_w (row stride), E = tp_map_ext (playable size). Also what grows with a 128x128 park: the things pool (tp_things_*) and how long visitors stay (tp_stay_*).",
+"note": "Instructions that encode the 64x64 park map (docs/PLAN.md, Larger maps). W = tp_map_w (row stride), E = tp_map_ext (playable size). Also what grows with a 128x128 park: the things pool (tp_things_*) and how long visitors stay (tp_stay_*). And the top menu bar's list (tp_menu_bar: qol.c adds the EXTRAS menu).",
 "sites": {
 "1107fe": {
 "new": "tp_things_alloc"
@@ -2019,6 +2019,12 @@
 "asm": "shl edx, 6",
 "old": "n = 6u",
 "new": "n = tp_map_shift"
+},
+"14fdf2": {
+"new": "tp_menu_bar"
+},
+"150723": {
+"new": "tp_menu_bar"
 },
 "1511f1": {
 "new": "((tp_map_ext+1u)*tp_map_w*4u)"

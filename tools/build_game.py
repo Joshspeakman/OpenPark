@@ -296,7 +296,7 @@ def main():
                 sources[i] = (a, '\n'.join(lines), name, data)
         for v, val in (('tp_map_w', 64), ('tp_map_shift', 6), ('tp_map_ext', 64), ('tp_map_bytes', 0x4000),
                        ('tp_things_alloc', 1200), ('tp_things_n', 1200), ('tp_things_bytes', 0x3a980), ('tp_things_spare', 0x4e20),
-                       ('tp_stay_ticks', 0xfa0), ('tp_stay_tired', 0x1f40)):
+                       ('tp_stay_ticks', 0xfa0), ('tp_stay_tired', 0x1f40), ('tp_menu_bar', 0x1b53b6)):
             applied[v] = val
         print('map geometry: %d of %d sites applied, %d not matched %s, %d not in the build' % (
             len(done), len(geo), len(failed - done), ' '.join('%x' % x for x in sorted(failed - done))[:300],

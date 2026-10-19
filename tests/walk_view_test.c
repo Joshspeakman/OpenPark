@@ -18,7 +18,7 @@ int64_t tp_host_guest_call(uint32_t fn, const uint32_t *a, int n, uint32_t m) { 
 void tp_host_key(uint32_t k) { (void)k; }
 void tp_host_key_raw(uint8_t s, int d) { (void)s; (void)d; }
 uint32_t tp_get(unsigned i) { (void)i; return 0; }
-uint32_t tp_hook_pcs[24]; int tp_hook_which; uint64_t tp_insns, tp_rep;
+uint32_t tp_hook_pcs[32]; int tp_hook_which; uint64_t tp_insns, tp_rep;
 uint32_t tp_map_w = 64, tp_map_ext = 64;   /* (the game's park size; bigmap.c) */
 void tp_bigmap_setup_done(void) {}
 void tp_free_park_shown(void) {} int tp_free_waiting(void) { return 0; }
