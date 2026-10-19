@@ -2,7 +2,7 @@
 
 - Use only the user's owned Theme Park package. Downloads and installed games are read-only.
 - Final product: native Apple Silicon code, no DOSBox, Wine, Rosetta or CPU interpreter at runtime. Unicorn is permitted as a development-only differential oracle.
-- Keep package contents, executables, generated C, screenshots, saves and traces under ignored work/ or build/. Never commit game-derived material. Stage explicit paths only.
+- Keep package contents, executables, generated C, screenshots, saves and traces under ignored work/ or build/. Never commit game-derived material. Stage explicit paths only. Exception (the user's say, 2026-10-19): the README's in-game screenshots in docs/screenshots/.
 - Work locally on nightly. Do not change main, rewrite history, create a remote repository, publish, or install an app without the user's instruction.
 - Follow the user's commit identity: Joshspeakman <44591690+Joshspeakman@users.noreply.github.com>. Identify Codex truthfully in commit messages.
 - Automated game runs must be bounded, background-only, muted, and use scratch profiles (DS_TEST=1 W32_AUDIO_MUTE=1). Stop only owned test processes. No router, lobby or public-server operations.

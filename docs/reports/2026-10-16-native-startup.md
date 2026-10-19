@@ -1,6 +1,6 @@
 # Theme Park native first-park report — 2026-10-16
 
-The project is `/Users/joshuaspeakman/Projects/theme-park-macos`, on local
+The project is this repository (`theme-park-macos`), on local
 `nightly`. Freedom Force is a pinned, read-only tool reference. No launcher from
 another project was opened. No remote, upload, installation or publication was
 created. Downloaded originals and game data remain outside git.
