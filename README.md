@@ -7,7 +7,7 @@ services. DOSBox, Wine and Rosetta are not part of the intended runtime.
 **Status:** `Theme Park Nightly.app` runs the intro and the game as native
 ARM64 code with a launch window, keyboard and mouse, Sound Blaster 16 sound
 effects and General MIDI music, paced like GOG's DOSBox configuration. Saving
-and continuing work. The game's HMI sound drivers are compiled ahead of time
+and loading are verified, including 128x128 parks. The game's HMI sound drivers are compiled ahead of time
 like the rest of the code. The scripted first-park run and long random-play
 runs match the x86 original; see [the plan](docs/PLAN.md) for what is
 verified and what is not.
@@ -15,18 +15,23 @@ verified and what is not.
 ## Build and install the app
 
 ```sh
-export TP_PYTHON="$HOME/Projects/freedom-force-macos/recomp/.venv/bin/python3"
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # once (Capstone, Unicorn)
 bash tests/check_macos.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  "$HOME/Projects/freedom-force-macos" --park     # verified trace the build uses
+  vendor/freedom-force-recomp --park              # verified trace the build uses
 bash tools/build_app.sh                            # installs ~/Applications/Theme Park Nightly.app
 ```
+
+The scripts use `TP_PYTHON` if set, else `.venv/bin/python3`, else `python3`. The shared static lifter and its
+runtime headers are vendored in `vendor/freedom-force-recomp` at the commit `config/reference.json` pins, and
+their hashes are checked before use, so a clone of this repository plus the owned package is enough.
 
 Game files are copied from the verified extraction to
 `~/Games/ThemeParkNative/game` (DOS executables excluded); saves and changed
 files go to `~/Games/ThemeParkNative/saves`; the log is
 `~/Games/ThemeParkNative/theme-park.log`. `TP_CYCLES` sets the emulated CPU
-speed in thousands of instructions per second (default 10000, as in GOG's
-DOSBox configuration). Control-click is the right mouse button. Zoom the park
+speed in thousands of instructions per second: 10000 is GOG's DOSBox configuration and the headless
+default; the app's Game Speed starts at 15000 (1.5x) on a fresh install, because the player found the
+original pace about a fifth slow; the Launcher's "Original" is 10000. Control-click is the right mouse button. Zoom the park
 with a pinch or ⌘-scroll (⌘= / ⌘- / ⌘0 in the View menu), move around with
 scroll or the arrow keys while zoomed; R in the park switches the game to its
 640x480 mode (runtime/view.c, docs/PLAN.md "Engine rebuild"). View > Visitor View (⇧⌘V, experimental)
@@ -50,12 +55,9 @@ See [the plan and findings](docs/PLAN.md) and [reference provenance](docs/PROVEN
 
 Run from this directory. Python 3.9+, Apple's command-line tools, `xar` and `tar`
 are required. The survey uses Capstone; the development oracle uses Unicorn.
-Versions are recorded in `requirements.txt`. This machine already has them in
-the Freedom Force development environment, which these commands read without
-modifying that checkout:
+Versions are recorded in `requirements.txt` (a `.venv` as above):
 
 ```sh
-export TP_PYTHON="$HOME/Projects/freedom-force-macos/recomp/.venv/bin/python3"
 python3 tools/prepare.py "$HOME/Downloads/theme_park_enUS_1_0_33010.pkg"
 "$TP_PYTHON" tools/survey.py \
   work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
@@ -63,16 +65,16 @@ python3 tools/prepare.py "$HOME/Downloads/theme_park_enUS_1_0_33010.pkg"
 bash tests/check.sh
 bash tests/check.sh \
   work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  "$HOME/Projects/freedom-force-macos"
+  vendor/freedom-force-recomp
 bash tests/check_macos.sh \
   work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  "$HOME/Projects/freedom-force-macos"
+  vendor/freedom-force-recomp
 ```
 
 `prepare.py` verifies the package and executable hashes, extracts only the game
 payload into `work/`, and never runs the installer or its postinstall script.
 The native proof verifies hashes of the reused lifter/header files before using
-them. A future standalone build will vendor the reviewed shared components.
+them (the vendored copies; docs/PROVENANCE.md records what is reused).
 
 `tests/check.sh` without arguments uses synthetic fixtures and needs no game.
 With both arguments it also generates, compiles and runs the native differential
@@ -80,7 +82,7 @@ proof. Generated code, binaries, extracted files and reports remain ignored in
 `work/`. The proof library links only `libSystem`; Unicorn is used by the Python
 test harness, not by the generated ARM64 routines.
 
-`check_macos.sh` runs 17 parser/host tests, 124 synthetic instruction cases,
+`check_macos.sh` runs 18 parser/host tests, 124 synthetic instruction cases,
 the 2,000 routine comparisons, and scripted startup through nickname entry and
 the menu. It compares CPU-written pages at every service boundary, all 64 MiB
 periodically and at completion, register/segment state, port traffic and the

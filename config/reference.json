@@ -6,6 +6,8 @@
     "recomp/tools/pe.py": "9d9b677a531f0c5eddd3253a93e5cff815a7c3fd5f760413bc646ebc27eedc40",
     "recomp/tools/sse.py": "186da7938732f9e8defe9ee68c2f356c59b5a6de76ecb8a2bbe777675ffc4c0b",
     "recomp/runtime/rt.h": "6eb332cedbf2b58068984c5ec6687586fd3593f8406235c4d61c0d0720099f83",
-    "recomp/runtime/rt_sse.h": "3195d403ad73b401d9024ff3ec60cf935be09cd6ded26def1f50fd3422a8bcde"
-  }
+    "recomp/runtime/rt_sse.h": "3195d403ad73b401d9024ff3ec60cf935be09cd6ded26def1f50fd3422a8bcde",
+    "recomp/tools/flow_targets.py": "f225ff8acc81cb790b4f906c93abfabb74db7e87376a80c60dd5ce452899c582"
+  },
+  "vendored": "vendor/freedom-force-recomp (copies of these files at this commit; tools/lift_dos.py checks the hashes)"
 }

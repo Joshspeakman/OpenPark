@@ -1,14 +1,17 @@
 #!/bin/bash
 # Build "Theme Park Nightly.app" from the owned package and install it locally.
-#   tools/build_app.sh [package.pkg] [reference-checkout]
+#   tools/build_app.sh [package.pkg] [reference-checkout (default: the vendored copy)]
 # Game files are copied from the verified extraction into ~/Games/ThemeParkNative/game
 # (never into git); saves live in ~/Games/ThemeParkNative/saves. An existing app is
 # moved to the Trash before the new one is installed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PKG=${1:-$HOME/Downloads/theme_park_enUS_1_0_33010.pkg}
-REF=${2:-$HOME/Projects/freedom-force-macos}
-PYTHON=${TP_PYTHON:-$HOME/Projects/freedom-force-macos/recomp/.venv/bin/python3}
+REF=${2:-vendor/freedom-force-recomp}            # (the pinned lifter, vendored; config/reference.json checks it)
+if [[ -n ${TP_PYTHON:-} ]]; then PYTHON=$TP_PYTHON                     # (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
+elif [[ -x .venv/bin/python3 ]]; then PYTHON=.venv/bin/python3
+elif [[ -x $HOME/Projects/freedom-force-macos/recomp/.venv/bin/python3 ]]; then PYTHON=$HOME/Projects/freedom-force-macos/recomp/.venv/bin/python3
+else PYTHON=python3; fi
 DATA=${TP_DATA:-$HOME/Games/ThemeParkNative}
 DEST=${TP_INSTALL_DIR:-$HOME/Applications}
 NAME="Theme Park Nightly"
