@@ -56,13 +56,13 @@ uint32_t tp_get(unsigned i);
 void tp_set(unsigned i, uint32_t v);
 uint8_t *tp_host_memory(void);
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
-extern uint32_t tp_hook_pcs[24];
+extern uint32_t tp_hook_pcs[32];
 extern int tp_hook_which;
 void tp_hooks_changed(void);
 
 #define QOL0 12
-enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, NHOOK };
-static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc};   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
+enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, H_OPTIONS, NHOOK };
+static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc, 0x150ccd};   /* (H_OPTIONS: the menus' options function, called with its item's word) */   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
 #define BIG_VISITORS 10000                /* a 128x128 park's most (its 12,000 things, bigmap.c) */
 extern uint32_t tp_things_n;              /* the things pool (bigmap.c): 1200, more in a 128x128 park */
 extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 800) */
@@ -90,6 +90,7 @@ static int8_t type_tune[NTYPES];          /* -1: the game's */
 static uint32_t r32(const uint8_t *m, uint32_t a) { uint32_t v; memcpy(&v, m + a, 4); return v; }
 static uint16_t r16(const uint8_t *m, uint32_t a) { uint16_t v; memcpy(&v, m + a, 2); return v; }
 static void w16(uint8_t *m, uint32_t a, uint16_t v) { memcpy(m + a, &v, 2); }
+static void w32(uint8_t *m, uint32_t a, uint32_t v) { memcpy(m + a, &v, 4); }
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 
 void tp_qol_init(void) {
@@ -135,13 +136,99 @@ static void play(uint32_t tune) {
     uint32_t v = 100; tp_host_guest_call(SET_MUSIC_VOL, &v, 1, 2000000);
 }
 
+/* ---- EXTRAS: this port's options in the game's own top bar ----
+ * The bar is data: a list of {drop-down, text} words ([tp_menu_bar], the game's at 0x1b53b6, ended by text -1; a
+ * build site, config/mapgeo.json), each drop-down 0x354 bytes at 0x1b53c6 + n * 0x354 (its rectangle, +0xa the item
+ * under the pointer, from +0xc items of 0x15 bytes: submenu or -1, text, kind (bit 0 a tick from the byte at +5,
+ * bit 1 a line under it), +5 the tick's byte, +9 another, +0xd a function and +0x11 its word, called by the main
+ * loop after the click (0x1122b2), or +0x13/+0x14 a key pressed instead). Texts are words into the string table
+ * [0x1d7bcc]. The game's list is copied with an EXTRAS entry into a hole of memory the game is never given
+ * (host.c), with the drop-down there (n = 32666) and a copy of the string table with these texts at its end
+ * (re-made if the game loads another). Each item calls the options function 0x150ccd with a word of 0x7700 up
+ * (its switch has 0..13, nothing else: unhooked, they do nothing); H_OPTIONS takes them. Only what takes effect
+ * at once: the ride and park music, the grossed-out sounds, frame pacing, and the app's pixels and pointer. */
+#define X_AREA   0x1c40000u
+#define X_LIST   (X_AREA + 0x0)
+#define X_DROP   0x1c4004eu                         /* (0x1b53c6 + 32666 * 0x354) */
+#define X_DROP_N 32666
+#define X_FLAGS  (X_AREA + 0x400)
+#define X_TEXT   (X_AREA + 0x500)
+#define X_TAB    (X_AREA + 0x1000)
+#define X_TAB_MAX ((0x10000 - 0x1000) / 4)
+#define X_ARG    0x7700
+long (*tp_extras_get)(const char *key);              /* (main.m: the app's settings) */
+void (*tp_extras_set)(const char *key, long value);
+extern uint32_t tp_menu_bar;
+void tp_view_set_pacing(int on); int tp_view_pacing(void);
+static const char *x_title = "EXTRAS";
+static const struct { const char *text; int line; } x_items[] = {
+    {"RIDE MUSIC", 0}, {"PARK MUSIC", 0}, {"FEWER EW SOUNDS", 1},
+    {"STEADY FRAME PACING", 1}, {"SMOOTH PIXELS", 0}, {"CRT LINES", 0}, {"MAC POINTER", 0}};
+#define X_N (int)(sizeof x_items / sizeof x_items[0])
+static uint32_t x_game_tab; static int x_on = -1, x_tick;
+static long x_get(const char *k, long d) { return tp_extras_get ? tp_extras_get(k) : d; }
+static void x_set(const char *k, long v) { if (tp_extras_set) tp_extras_set(k, v); }
+static void x_flags(uint8_t *m) {
+    long px = x_get("SmoothPixels", 0);
+    uint8_t f[X_N] = {(uint8_t)(ride_music != 0), (uint8_t)(park_tune != 0), (uint8_t)(ew_gap != 0), (uint8_t)(tp_view_pacing() != 0),
+                      (uint8_t)(px == 1), (uint8_t)(px == 2), (uint8_t)(x_get("ShowMacCursor", 0) != 0)};
+    memcpy(m + X_FLAGS, f, X_N);
+}
+static void x_build(uint8_t *m) {                    /* the menu, the bar's list, the texts (once the game's table exists) */
+    uint32_t tab = r32(m, 0x1d7bcc);
+    if (!tab || tab == X_TAB || tab >= 0x4000000u) return;
+    int n = 0; uint32_t lo = 0xffffffffu, hi = 0;
+    for (; n < 8000; n++) { uint32_t p = r32(m, tab + (uint32_t)n * 4); if (p < 0x100000u || p >= 0x4000000u) break; if (p < lo) lo = p; if (p > hi) hi = p; if (hi - lo > 0x40000) break; }
+    if (n < 64 || n + X_N + 1 > X_TAB_MAX) { fprintf(stderr, "extras: the string table at %#x was not understood (%d)\n", tab, n); x_on = 0; return; }
+    memcpy(m + X_TAB, m + tab, (size_t)n * 4);
+    uint32_t at = X_TEXT; int id0 = n;
+    for (int k = 0; k <= X_N; k++) { const char *t = k ? x_items[k - 1].text : x_title; w32(m, X_TAB + (uint32_t)(n + k) * 4, at); memcpy(m + at, t, strlen(t) + 1); at += (uint32_t)strlen(t) + 1; }
+    uint32_t d = X_DROP; memset(m + d, 0, 0x354); w16(m, d + 0xa, 0xffff);
+    for (int k = 0; k < X_N; k++) { uint32_t it = d + 0xc + (uint32_t)k * 0x15;
+        w16(m, it, 0xffff); w16(m, it + 2, (uint16_t)(id0 + 1 + k)); m[it + 4] = (uint8_t)(1 | (x_items[k].line ? 2 : 0));
+        w32(m, it + 5, X_FLAGS + (uint32_t)k); w32(m, it + 9, 0); w32(m, it + 0xd, 0x150ccd); w16(m, it + 0x11, (uint16_t)(X_ARG + k)); m[it + 0x13] = m[it + 0x14] = 0; }
+    w16(m, d + 0xc + (uint32_t)X_N * 0x15 + 2, 0xffff);   /* (the end: text -1) */
+    int e = 0; for (uint32_t a = 0x1b53b6; e < 12 && (int16_t)r16(m, a + 2) != -1; a += 4, e++) w32(m, X_LIST + (uint32_t)e * 4, r32(m, a));
+    w16(m, X_LIST + (uint32_t)e * 4, X_DROP_N); w16(m, X_LIST + (uint32_t)e * 4 + 2, (uint16_t)id0); e++;
+    w16(m, X_LIST + (uint32_t)e * 4, 0); w16(m, X_LIST + (uint32_t)e * 4 + 2, 0xffff);
+    x_flags(m);
+    x_game_tab = tab; w32(m, 0x1d7bcc, X_TAB); tp_menu_bar = X_LIST;
+    fprintf(stderr, "extras: in the top bar (%d game texts, the menu's from %d)\n", n, id0);
+}
+static void x_frame(uint8_t *m) {
+    if (x_on < 0) x_on = !getenv("TP_NO_EXTRAS");
+    if (!x_on) return;
+    if (r32(m, 0x1d7bcc) != X_TAB) x_build(m);
+    if (++x_tick % 8 == 0) x_flags(m);
+}
+static void x_choose(uint8_t *m, int k) {
+    switch (k) {
+    case 0: ride_music = !ride_music; x_set("RideMusic", ride_music); break;
+    case 1: { static int last = 1; if (park_tune) { last = park_tune; park_tune = 0; } else park_tune = last > 0 ? last : 1; x_set("ParkTune", park_tune);
+              if (!park_tune && !(int16_t)r16(m, CUR_TUNE)) {} break; }
+    case 2: { static double last = 30; if (ew_gap) { last = ew_gap; ew_gap = 0; } else ew_gap = last > 0 ? last : 30; x_set("GrossOutGap", (long)ew_gap); break; }
+    case 3: { int on = !tp_view_pacing(); tp_view_set_pacing(on); x_set("SteadyPacing", on); break; }
+    case 4: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 1 ? 0 : 1); break;
+    case 5: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 2 ? 0 : 2); break;
+    case 6: x_set("ShowMacCursor", !x_get("ShowMacCursor", 0)); break;
+    }
+    x_flags(m);
+    if (log_sounds || getenv("TP_EXTRAS_LOG")) fprintf(stderr, "extras: %s chosen\n", x_items[k].text);
+}
+
 void tp_qol_hook(int nested) {
     uint8_t *m = tp_host_memory();
     uint32_t pc = tp_get(9), sp = tp_get(4);
     int k = tp_hook_which - QOL0;
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
+    if (k == H_OPTIONS) {                             /* (an EXTRAS item: its word) */
+        uint32_t a = r32(m, sp + 4) & 0xffff;
+        if (!nested && a >= X_ARG && a < X_ARG + (uint32_t)X_N) { x_choose(m, (int)(a - X_ARG)); skip_call(); }
+        return;
+    }
     if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
+        if (!nested) x_frame(m);
         if (!nested) { void tp_free_frame(void); tp_free_frame(); }
         if (!nested && getenv("TP_STALL_PROFILE")) {      /* development: the blocks of the first park tick over 200 ms, 15 s in */
             extern uint32_t *tp_trace_buf; extern uint32_t tp_trace_cap, tp_trace_n; static double l, t0; static int done; double t = now();

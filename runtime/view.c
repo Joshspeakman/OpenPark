@@ -51,7 +51,7 @@ void tp_host_palette_rgba(uint32_t pal[256]);
 int tp_host_png_rgba(const char *path, const uint32_t *px, int w, int h);
 void tp_host_mouse(double fx, double fy, uint32_t buttons);
 void tp_host_mouse_pos(int *x, int *y);
-extern uint32_t tp_hook_pcs[24];
+extern uint32_t tp_hook_pcs[32];
 void tp_hooks_changed(void);
 extern int tp_hook_which;
 extern uint64_t tp_insns, tp_rep;
@@ -255,6 +255,7 @@ int tp_view_frame_due(void) {
     pthread_mutex_unlock(&lock);
     return due;
 }
+int tp_view_pacing(void) { return pacing; }
 void tp_view_set_pacing(int on) { pacing = on; if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); } }
 void tp_view_pacing_init(void) { const char *e = getenv("TP_PACING"); tp_view_set_pacing(!(e && !strcmp(e, "dosbox"))); }   /* (qol.c, at the game's start) */
 int tp_host_timer_behind(void);
@@ -1254,7 +1255,9 @@ void tp_view_hook(void) {
             if (++fr % 300 == 0) { fprintf(stderr, "view hist: unused:"); for (int c = 0; c < 256; c++) if (!h[c]) fprintf(stderr, " %02x", c); fprintf(stderr, "\n"); } }
         if (topbar) for (int i = 0; i < SW * TOPBAR_H; i++) pub_overlay[i] = bb[i];   /* the top bar is drawn with the park: all interface */
         if (menu_open()) {                                /* the open drop-down's rectangle (0x1b571a: x0, y0, x1, y1, mouse units) */
-            int k = G.s == 1 ? 2 : 1, x0 = r16(0x1b571a) / k, y0 = r16(0x1b571c) / k, x1 = r16(0x1b571e) / k + 1, y1 = r16(0x1b5720) / k + 1;
+            uint32_t dd = 0x1b53c6u + (uint32_t)(int16_t)r16(0x1b14d4) * 0x354u;   /* (the open one: [0x1b14d4]; qol.c's EXTRAS too) */
+            if ((int16_t)r16(0x1b14d4) < 0) dd = 0x1b571a;
+            int k = G.s == 1 ? 2 : 1, x0 = r16(dd) / k, y0 = r16(dd + 2) / k, x1 = r16(dd + 4) / k + 1, y1 = r16(dd + 6) / k + 1;
             if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > SW) x1 = SW; if (y1 > WORLD_H) y1 = WORLD_H;
             for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) pub_overlay[y * SW + x] = bb[y * SW + x];
         }

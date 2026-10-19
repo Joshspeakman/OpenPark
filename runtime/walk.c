@@ -44,7 +44,7 @@
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
-extern uint32_t tp_hook_pcs[24];
+extern uint32_t tp_hook_pcs[32];
 void tp_hooks_changed(void);
 typedef void (*DrawLog)(int kind, int a, int b, int c, uint32_t d, int e, void *ctx);
 int tp_native_cell_ground(const uint8_t *mem, int cx, int cy, int gx, int gy, uint8_t *buf, int pitch, int w, int h);

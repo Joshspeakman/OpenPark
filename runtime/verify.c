@@ -121,13 +121,13 @@ volatile int tp_watch_hit;
 /* The host's hooks: tp_run returns -3 on arriving at one of tp_hook_pcs (once
  * per arrival, tp_hook_which says which; resuming runs the block), e.g. the
  * native park view (view.c) around the game's per-frame render. */
-uint32_t tp_hook_pcs[24];   /* 0..11 view.c, 12..23 qol.c; all 0xffffffff until set (tp_hooks_init) */
+uint32_t tp_hook_pcs[32];   /* 0..11 view.c, 12..31 qol.c; all 0xffffffff until set (tp_hooks_init) */
 static int hook_lo = 0x7fffffff, hook_hi = -1;
-__attribute__((constructor)) static void tp_hooks_init(void) { for (int h = 0; h < 24; h++) tp_hook_pcs[h] = 0xffffffffu; }   /* hooks lie in [lo, hi]: one compare in the common case */
+__attribute__((constructor)) static void tp_hooks_init(void) { for (int h = 0; h < 32; h++) tp_hook_pcs[h] = 0xffffffffu; }   /* hooks lie in [lo, hi]: one compare in the common case */
 static uint8_t hook_bits[4096];                   /* a hook may be at addresses with these low 12 bits */
 void tp_hooks_changed(void) {
     hook_lo = 0x7fffffff; hook_hi = -1; memset(hook_bits, 0, sizeof hook_bits);
-    for (int h = 0; h < 24; h++) if (tp_hook_pcs[h] != 0xffffffffu) {
+    for (int h = 0; h < 32; h++) if (tp_hook_pcs[h] != 0xffffffffu) {
         hook_bits[tp_hook_pcs[h] & 4095] = 1;
         if ((int)tp_hook_pcs[h] < hook_lo) hook_lo = (int)tp_hook_pcs[h];
         if ((int)tp_hook_pcs[h] > hook_hi) hook_hi = (int)tp_hook_pcs[h];
@@ -142,7 +142,7 @@ int tp_run(uint32_t budget) {
     while (budget--) {
         int hooked = 0;
         if (hook_bits[state.tc & 4095] && (int)state.tc >= hook_lo && (int)state.tc <= hook_hi)
-            for (int h = 0; h < 24; h++) if (state.tc == tp_hook_pcs[h]) { hooked = 1; tp_hook_which = h; }
+            for (int h = 0; h < 32; h++) if (state.tc == tp_hook_pcs[h]) { hooked = 1; tp_hook_which = h; }
         if (hooked) { if (tp_hook_armed) { tp_hook_armed = 0; return -3; } }
         else tp_hook_armed = 1;
         if (state.tc == tp_watch_pc) tp_watch_hit = 1;

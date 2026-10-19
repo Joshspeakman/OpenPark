@@ -67,7 +67,7 @@ void tp_free_init(void) {
 }
 /* A new park's rules (or a loaded one's) are settled at its first frame (view.c's FRAME_RENDER, kept
  * on meanwhile), when the setting-up screens are done and the sim level is known. */
-extern uint32_t tp_hook_pcs[24]; void tp_hooks_changed(void);
+extern uint32_t tp_hook_pcs[32]; void tp_hooks_changed(void);
 static void want_frame(void) { tp_hook_pcs[0] = 0x113b9au; tp_hooks_changed(); }
 int tp_free_waiting(void) { return pending != 0; }
 void tp_free_new_park(void) { give_back_settings(); rules = 0; pending = 1; loaded_rules = -1; want_frame(); }

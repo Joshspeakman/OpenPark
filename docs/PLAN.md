@@ -632,6 +632,32 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## EXTRAS: this port's options in the game's own top bar (2026-10-18)
+
+The player asked for the new options that make sense mid-game in the top menu, in a section of their own,
+in the game's own bar. The bar is data (survey of 0x14fd85 update, 0x150723 draw, 0x150092 click):
+- the list of top menus, {drop-down, text} words at 0x1b53b6 ended by text -1 (it sits just before the
+  first drop-down, so it cannot grow in place: its two uses, 0x14fdf2 and 0x150723, read tp_menu_bar, a
+  build site);
+- drop-downs of 0x354 bytes at 0x1b53c6 + n * 0x354 (the array is full: 3 and 4 are Load and Save, 5 an
+  OPTIONS submenu, then other data): rectangle, +0xa the item under the pointer, from +0xc items of 0x15
+  bytes: submenu (-1), text, kind (bit 0 a tick from the byte at +5, bit 1 a line under it), +5 tick byte,
+  +9 another, +0xd function and +0x11 its word (set into 0x1d3828 / 0x1d6622, called by the main loop at
+  0x1122b2), or +0x13 / +0x14 a key pressed instead (0x113bf3); 0x1b14d4 the open drop-down;
+- texts: words into the table [0x1d7bcc] (239 entries, made once by 0x12e3f9 and never freed).
+Done (qol.c, host.c): the linear arena keeps a 64 KiB hole at 0x1c40000 (n must be a signed word: below
+~0x1c55000); there qol.c builds, at the park's first tick, the game's list plus EXTRAS, its drop-down
+(n = 32666, at 0x1c4004e) and a copy of the string table with the new texts after the game's (re-made if
+the game ever makes another). Items call the options function 0x150ccd with 0x7700 + k (its switch has
+0..13; anything else does nothing), taken by a hook (H_OPTIONS; the hook table is now 32). Items, all
+taking effect at once: Ride Music, Park Music, Fewer Ew Sounds | Steady Frame Pacing | Smooth Pixels,
+CRT Lines, Mac Pointer; their ticks follow the settings every 8 ticks; choices are saved to the app's
+settings (main.m bridge), except in test runs (DS_TEST: in memory; a test once switched the player's
+Park Music on through the shared settings domain, put back). view.c's open drop-down rectangle now
+follows 0x1b14d4. Checked in the player's park: EXTRAS beside DISPLAY in the game's style, ticks right,
+choosing toggles (park music on, ride music off), check suite and view tests pass. TP_NO_EXTRAS=1 leaves
+the bar as the game's.
+
 ## Game windows stay widescreen (2026-10-18)
 
 The player: opening the ride or shop catalogue switched the picture from widescreen to 4:3 (a jerk each

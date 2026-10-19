@@ -37,6 +37,8 @@ extern uint64_t tp_insns;
 
 enum { EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI, EFLAGS, EIP, CS, DS, ES, SS, FS, GS };
 #define MEMORY (64u * 1024u * 1024u)
+#define TP_EXTRAS_AREA 0x1c40000u   /* (qol.c) */
+#define TP_EXTRAS_SIZE 0x10000u
 #define GDT 0x1000u
 #define PSP 0x2000u
 #define ENV 0x3000u
@@ -1039,6 +1041,11 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     tp_audio_midi_reset();
     stopped = 0; exit_code = -1; mpu_n = 0; sb16_reset(); sb_irq_pending = 0;
     arena_init(&linear_arena, 0x400000, MEMORY, 4096);
+    /* (a hole the game is never given: qol.c's EXTRAS menu lives there. Its drop-down is found as 0x1b53c6 +
+     * n * 0x354 with n a signed word, so it must lie below ~0x1c55000) */
+    linear_arena.free[0] = (Span){0x400000, TP_EXTRAS_AREA - 0x400000};
+    linear_arena.free[1] = (Span){TP_EXTRAS_AREA + TP_EXTRAS_SIZE, MEMORY - (TP_EXTRAS_AREA + TP_EXTRAS_SIZE)}; linear_arena.nfree = 2;
+    memset(mem + TP_EXTRAS_AREA, 0, TP_EXTRAS_SIZE);
     arena_init(&conventional, 0x40000, 0x90000, 16);
     next_selector = 0x100; heap = 0x400000;
     vec_sel[8] = 8; vec_pc[8] = 0xf000; vec_set[8] = 1;
