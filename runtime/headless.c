@@ -2,6 +2,7 @@
 /* Headless native runner: the deterministic scripted scenario through the C
  * host, for comparison with config/milestones.json. Bounded and muted. */
 #include "host.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,12 +34,14 @@ static void saved(const char *rel, const char *hex, void *ctx) {
 #include <math.h>
 extern uint8_t *G_MEM;
 uint32_t tp_get(unsigned i);
+#ifndef _WIN32
 static void on_fault(int sig, siginfo_t *si, void *uc) {
     (void)uc;
     fprintf(stderr, "signal %d at host %p (guest offset %#llx), guest block %08x esp %08x\n", sig, si->si_addr,
             (unsigned long long)((uint8_t *)si->si_addr - G_MEM), tp_get(9), tp_get(4));
     _exit(3);
 }
+#endif
 
 #ifdef WITH_INTRO
 struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
@@ -49,8 +52,10 @@ struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 static double hl_wide = 1;   /* the z step's widescreen factor (s steps compose at it) */
 int main(int argc, char **argv) {
+#ifndef _WIN32
     struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
+#endif
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
     uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
     double fuzz = 0; int intro = 0;            /* after the deterministic part: seconds of random clicks in real time */
@@ -89,12 +94,14 @@ int main(int argc, char **argv) {
         if (*e == ':') s.block_clicks[i].buttons = (uint32_t)strtoul(e + 1, &e, 10);
         q = *e ? e + 1 : e;
     }
-    mkdir(out, 0755);
+    tp_mkdir(out);
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));
     if (tp_host_init(game, overlay, !realtime || getenv("TP_PREFIX_BLOCKS"), &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
+#ifdef __APPLE__
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);    /* (as the app's game thread) */
+#endif
     if (!intro) { void tp_qol_init(void); tp_qol_init(); }            /* quality-of-life hooks (qol.c) */
     if (!intro && getenv("TP_COUNT_FRAMES")) { void tp_view_count_game_frames(int); tp_view_count_game_frames(1); }   /* (development: frames counted with the view off) */
     if (getenv("TP_START_HIRES")) tp_view_request_hires(1);          /* as the app's Start In 640x480 */

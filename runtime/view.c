@@ -40,10 +40,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef __APPLE__
 #include <mach/mach_time.h>
 #include <dispatch/dispatch.h>
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
+#else
+#include "platform.h"
+#endif
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -277,6 +281,7 @@ static void pace_frame(void) {
     double wait = target - now();
     if (getenv("TP_PACE_DEBUG")) { static double l3, late; if (-wait > late) late = -wait; if (t - l3 > 1) { fprintf(stderr, "pace late max %.2f ms\n", late * 1e3); late = 0; l3 = t; } }
     if (getenv("TP_PACE_DEBUG")) { static double l; static int n, sl; n++; if (wait > 0) sl++; if (t - l > 1) { fprintf(stderr, "pace: %d frames, %d waited, fps %.0f, last wait %.2f ms\n", n, sl, fps, wait * 1e3); n = sl = 0; l = t; } }
+#ifdef __APPLE__
     static mach_timebase_info_data_t tb; if (!tb.denom) mach_timebase_info(&tb);
     { static int rt; if (!rt) {                           /* the game thread as a real-time thread: timers not coalesced, woken on time */
         rt = 1; thread_time_constraint_policy_data_t pol;
@@ -293,6 +298,17 @@ static void pace_frame(void) {
         double left = target - now();
         if (left > 0.0008) mach_wait_until(mach_absolute_time() + (uint64_t)((left - 0.0005) * 1e9 * tb.denom / tb.numer));
     }
+#else
+    { static int rt; if (!rt) {                           /* the game thread as a real-time thread where the system allows it */
+        rt = 1; fprintf(stderr, "pace: real-time thread policy %s\n", tp_platform_thread_realtime(period, 0.004) ? "set" : "refused"); } }
+    {   /* a millisecond at a time, the sound card going on meanwhile (sb16.c: the HMI driver mixes just ahead of its
+         * DMA position) */
+        void sb16_pump(double t);
+        while (target - now() > 0.0015) { tp_platform_wait_until(now() + 0.001); sb16_pump(now()); }
+        double left = target - now();
+        if (left > 0.0008) tp_platform_wait_until(target - 0.0005);
+    }
+#endif
     while (now() < target) ;                              /* (the last half millisecond, exactly) */
     tp_frame_paced_at = now();
     if (getenv("TP_PACE_TRACE")) { static int n; static double lt, la; if (n++ < 400 && n > 300) fprintf(stderr, "pt target+%.2f actual+%.2f wait %.2f over %.3f\n", (target - lt) * 1e3, (tp_frame_paced_at - la) * 1e3, wait * 1e3, (tp_frame_paced_at - target) * 1e3); lt = target; la = tp_frame_paced_at; }
@@ -1652,7 +1668,11 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
     double kk = ui_scale; if (kk * g.sw > lw) kk = lw / g.sw;   /* (no wider than the view) */
     ComposeJob job = {out, ow, oh, smooth, g, z, vx, vy, lw, col, lpx, lpy, sx, sy, ss, pal, stride, kk};
     dbg_stride = stride;
+#ifdef __APPLE__
     dispatch_apply_f((size_t)((oh + 31) / 32), DISPATCH_APPLY_AUTO, &job, compose_band);   /* bands of 32 rows across the cores */
+#else
+    tp_platform_parallel_for((size_t)((oh + 31) / 32), &job, compose_band);
+#endif
     st_comp++; stats_tick();
     if (getenv("TP_VIEW_FPS")) tp_view_debug_fps = 1;
     if (getenv("TP_VIEW_GRID")) tp_view_debug_grid = 1;

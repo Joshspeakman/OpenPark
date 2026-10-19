@@ -29,6 +29,7 @@ import subprocess
 import sys
 import zlib
 from pathlib import Path
+import toolchain
 
 ROOT = Path(__file__).resolve().parent.parent
 # (load address, entered as, name, file, offset, length): where the game loads each driver with GOG's
@@ -53,7 +54,7 @@ PARK = ['--quantum', '1000', '--blocks', '8000000',
         '--clicks', '180:564:316,220:280:90',
         '--block-clicks', '2450000:72:310,2650000:568:316,2800000:604:380']
 RUNTIME = ['host.c', 'sb16.c', 'headless.c', 'verify.c', 'view.c', 'native_land.c', 'native_draw.c', 'qol.c',
-           'walk.c', 'bigmap.c', 'freemode.c']
+           'walk.c', 'bigmap.c', 'freemode.c', 'platform.c']
 
 
 def checkpoint_memory(path):
@@ -127,9 +128,8 @@ def main():
         subprocess.run([python, str(ROOT / 'tools/build_game.py'), str(args.exe), '--reference', str(args.reference),
                         '--trace', str(args.trace), '--survey', str(args.survey), '--out', str(build), '--opt=-O1',
                         '--drivers', str(imgdir)], check=True, stdout=subprocess.DEVNULL)
-        runner = work / 'tp-headless'
-        subprocess.run(['clang', '-arch', 'arm64', '-O2', '-w', '-I', str(inc), '-I', str(ROOT / 'runtime')]
-                       + [str(ROOT / 'runtime' / f) for f in RUNTIME] + [str(build / 'game.a'), '-lz', '-o', str(runner)], check=True)
+        runner = work / ('tp-headless' + toolchain.EXE)
+        subprocess.run(toolchain.executable([ROOT / 'runtime' / f for f in RUNTIME] + [build / 'game.a'], runner, '-O2', [inc, ROOT / 'runtime']), check=True)
         if overlay.exists():
             shutil.rmtree(overlay)
         overlay.mkdir()

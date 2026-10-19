@@ -17,7 +17,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <zlib.h>
-#include <CommonCrypto/CommonDigest.h>
+#include "platform.h"
 
 /* compiled-code runtime (runtime/verify.c) */
 void *tp_memory(void);
@@ -165,7 +165,7 @@ static int save_trailer_read(int fd, SaveTrailer *tr) {
     struct stat st; uint8_t t[TRAILER_N];   /* (fstat, not lseek: the game's position in the file stays) */
     if (fstat(fd, &st)) return 0;
     off_t end = st.st_size;
-    if (end < TRAILER_N || pread(fd, t, TRAILER_N, end - TRAILER_N) != TRAILER_N || memcmp(t + 16, "TPX1", 4)) return 0;
+    if (end < TRAILER_N || tp_pread(fd, t, TRAILER_N, end - TRAILER_N) != TRAILER_N || memcmp(t + 16, "TPX1", 4)) return 0;
     tr->w = (uint16_t)(t[0] | t[1] << 8); memcpy(&tr->things, t + 2, 4); tr->rules = (int8_t)t[6];
     tr->months = (uint16_t)(t[8] | t[9] << 8); tr->ramp = (uint16_t)(t[10] | t[11] << 8);
     return (tr->w == 64 || tr->w == 128) && tr->rules >= 0 && tr->rules <= 2;
@@ -567,7 +567,7 @@ static int resolve(const char *name, char *out, size_t size) {
 static void mkparents(const char *path) {
     char buf[1024]; snprintf(buf, sizeof buf, "%s", path);
     for (char *p = buf + strlen(overlay_root) + 1; *p; p++)
-        if (*p == '/') { *p = 0; mkdir(buf, 0755); *p = '/'; }
+        if (*p == '/') { *p = 0; tp_mkdir(buf); *p = '/'; }
 }
 static void overlay_path(const char *name, char *out, size_t size) {
     char parts[16][64]; int n = dos_parts(name, parts);
@@ -1066,7 +1066,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     if (s) script = *s;
     snprintf(game_root, sizeof game_root, "%s", game_dir);
     snprintf(overlay_root, sizeof overlay_root, "%s", overlay_dir);
-    mkdir(overlay_root, 0755);
+    tp_mkdir(overlay_root);
     for (int i = 0; i < 20; i++) { if (handles_fd[i] >= 0) close(handles_fd[i]); handles_fd[i] = -1; }
     /* Full reset: the app restarts the game in-process (THEME.BAT errorlevel >= 10). */
     memset(bases, 0, sizeof bases); memset(has_base, 0, sizeof has_base);
@@ -1269,7 +1269,7 @@ int tp_host_png(const char *path, char hex[65]) {
     if (hex) {
         FILE *g = fopen(path, "rb"); fseek(g, 0, SEEK_END); long len = ftell(g); fseek(g, 0, SEEK_SET);
         uint8_t *buf = malloc(len); fread(buf, 1, len, g); fclose(g);
-        uint8_t md[32]; CC_SHA256(buf, (CC_LONG)len, md); free(buf);
+        uint8_t md[32]; tp_sha256(buf, (size_t)len, md); free(buf);
         for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", md[i]);
     }
     return 1;
@@ -1353,10 +1353,10 @@ static void list_dir(const char *dir, const char *rel, void (*fn)(const char *, 
         snprintf(r, sizeof r, "%s%s%s", rel, *rel ? "/" : "", names[i]);
         if (is_dir(full)) { list_dir(full, r, fn, ctx); continue; }
         FILE *f = fopen(full, "rb"); if (!f) continue;
-        CC_SHA256_CTX h; CC_SHA256_Init(&h); uint8_t buf[65536]; size_t k;
-        while ((k = fread(buf, 1, sizeof buf, f))) CC_SHA256_Update(&h, buf, (CC_LONG)k);
+        TpSha256 h; tp_sha256_init(&h); uint8_t buf[65536]; size_t k;
+        while ((k = fread(buf, 1, sizeof buf, f))) tp_sha256_update(&h, buf, k);
         fclose(f);
-        uint8_t md[32]; CC_SHA256_Final(md, &h); char hex[65];
+        uint8_t md[32]; tp_sha256_final(&h, md); char hex[65];
         for (int j = 0; j < 32; j++) sprintf(hex + j * 2, "%02x", md[j]);
         fn(r, hex, ctx);
     }

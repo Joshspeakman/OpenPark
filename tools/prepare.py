@@ -3,8 +3,10 @@
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
+import pkgextract
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,12 +37,20 @@ def main():
         # bundled launcher or DOSBox executable is executed.
         archive.mkdir(parents=True, exist_ok=True)
         scripts = archive / 'package.pkg/Scripts'
+        # (macOS: Apple's xar and tar; elsewhere tools/pkgextract.py reads the same archives)
+        native = shutil.which('xar') is not None
         if not scripts.exists():
-            subprocess.run(['xar', '-xf', str(package), '-C', str(archive), 'package.pkg/Scripts'], check=True)
+            if native:
+                subprocess.run(['xar', '-xf', str(package), '-C', str(archive), 'package.pkg/Scripts'], check=True)
+            else:
+                pkgextract.xar_extract(package, 'package.pkg/Scripts', archive)
         if digest(scripts) != pins['package']['scripts_sha256']:
             raise SystemExit('cached package Scripts changed; preserve it and investigate')
         extracted.mkdir(parents=True, exist_ok=True)
-        subprocess.run(['tar', '-xf', str(scripts), '-C', str(extracted), './payload/Contents/Resources/game'], check=True)
+        if native:
+            subprocess.run(['tar', '-xf', str(scripts), '-C', str(extracted), './payload/Contents/Resources/game'], check=True)
+        else:
+            pkgextract.cpio_extract(scripts, extracted, './payload/Contents/Resources/game')
     for name, expected in pins['executables'].items():
         path = source / name
         if path.stat().st_size != expected['size'] or digest(path) != expected['sha256']:

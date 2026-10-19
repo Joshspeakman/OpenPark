@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from dos import DOS, Stop, load_image, scratch_profile
 from native_host import Native
+import toolchain
 
 
 def main():
@@ -70,7 +71,7 @@ def main():
     host.close()
     result={'status':status,'services':count,'elapsed_seconds':round(time.monotonic()-start,3),
             'pc':m.get('eip'),'frame':frame,'polls':host.poll_count,'timer_irqs':host.irq_count,
-            'cpu':'statically compiled arm64','oracle_imported':'unicorn' in sys.modules,
+            'cpu':'statically compiled '+toolchain.architecture(),'oracle_imported':'unicorn' in sys.modules,
             'disassembler_imported':'capstone' in sys.modules,'io_errors':errors}
     result['scratch'],result['saved_files']=str(host.scratch),host.saved_files()
     result['executed_blocks'],result['mouse_events']=host.blocks,host.mouse_events
