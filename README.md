@@ -66,14 +66,14 @@ bash tools/build_app.sh                    # installs ~/Applications/Theme Park 
 - **Launch-window art:** the launch window and icon use Theme Park's store art, downloaded once from GOG's public
   store API into `~/Games/ThemeParkNative/art`. It is never part of this repository. `TP_NO_DOWNLOADS=1` skips the
   download; the app then uses the game's title screen.
+- **Sound:** the first build makes the HMI sound driver images from your package
+  ([tools/make_drivers.py](tools/make_drivers.py), a few minutes; how it works: [tools/dump_drivers.md](tools/dump_drivers.md)).
+  `TP_NO_SOUND=1` builds without them.
 - **Everything else stays local:** everything game-derived (extracted files, generated C, traces, driver
   images) stays in the ignored `work/` and `build/` folders.
 
 ## Known limitations (beta 1)
 
-- **Sound on a fresh build needs a manual step.** The HMI driver images are dumped from a run of the game by
-  hand ([tools/dump_drivers.md](tools/dump_drivers.md)); this step isn't scripted yet. Without them the build
-  warns, and the app runs with sound off.
 - **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which
   `THEME.BAT` reruns) is fixed by reading the code, but not yet tested (#6).
 - **Ride videos:** during a ride video, the widescreen side strips keep the last park picture.
