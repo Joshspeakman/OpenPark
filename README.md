@@ -72,6 +72,36 @@ bash tools/build_app.sh                    # installs ~/Applications/Theme Park 
 - **Everything else stays local:** everything game-derived (extracted files, generated C, traces, driver
   images) stays in the ignored `work/` and `build/` folders.
 
+## Windows (this branch, not yet played)
+
+This branch builds the same recompiled game for Windows (x86-64; ARM64 should follow with CLANGARM64) with an
+SDL2 window instead of the Mac app. It has been cross-compiled and smoke-tested, not yet run on Windows with the
+real game: see [the plan](docs/PLAN.md) ("Linux and Windows ports") for what is verified.
+
+1. Install [MSYS2](https://www.msys2.org) and, in its **CLANG64** shell:
+   `pacman -S git mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-SDL2 mingw-w64-clang-x86_64-zlib mingw-w64-clang-x86_64-pkgconf`
+2. Install Python 3 from [python.org](https://www.python.org) (the tools need Unicorn and Capstone, which install
+   from wheels there), then in the repository: `py -3 -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements.txt`
+3. In the CLANG64 shell, in the repository:
+
+```sh
+.venv/Scripts/python.exe tools/prepare.py "$(cygpath -w ~/Downloads/theme_park_enUS_1_0_33010.pkg)"
+bash tests/check_native.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
+  vendor/freedom-force-recomp --park      # checks the recompiler against the x86 original; the build uses its trace
+bash tools/build_windows.sh                # installs %LOCALAPPDATA%\Programs\ThemeParkNative and a Start menu entry
+```
+
+- **Your copy of the game:** GOG's Mac package, as above (GOG offers it to every owner, whatever their system).
+  `prepare.py` reads it without Apple's tools.
+- **Where things go:** data (game files, saves, `settings.ini`, the log) in `%LOCALAPPDATA%\ThemeParkNative`;
+  `TP_DATA` and `TP_INSTALL_DIR` change them.
+- **Settings:** `settings.ini` (written on the first start, every setting explained) instead of a launch window;
+  the game's EXTRAS menu works as on the Mac.
+- **Music:** Windows' own General MIDI synthesizer; `TP_FLUIDSYNTH=1` at build time uses FluidSynth and a
+  SoundFont of yours (`SoundBank` in settings.ini) instead.
+- **Keys:** Ctrl where the Mac uses Command (Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+Shift+V Visitor View, Ctrl+E park
+  picture into `pictures\`), F11 or Alt+Enter full screen, Ctrl+wheel zooms, the middle button drags the park.
+
 ## Known limitations (beta 1)
 
 - **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which

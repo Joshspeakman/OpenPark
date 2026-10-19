@@ -31,6 +31,58 @@ TESTPARK with effects and music for 65 s (output peak 0.98, no guarded-block sto
   intro uses a 120 Hz driver timer event instead and was already at speed (measured). Open: the widescreen side
   strips show the last park picture during a video.
 
+## Linux and Windows ports — 2026-10-19 (branches `linux` and `windows`)
+
+Decision (the player's, 2026-10-19): Linux and Windows builds on their own branches. This widens the target from
+"native Apple Silicon" to native code for each system (x86-64 or ARM64): the same rule otherwise holds (no DOSBox,
+Wine, Rosetta or CPU interpreter at run time). Both branches share two commits; only the build script (on Windows, also a manifest) and these
+notes differ. Recommendation: merge them into one tree once they are proven, as the shared commits are most of it.
+
+What changed (shared):
+- `runtime/platform.c`: SHA-256 in C (CommonCrypto was Apple's), a timed wait, an optional real-time game thread
+  and a thread pool for the park view's compositor; macOS keeps its Mach timing and libdispatch paths in view.c.
+  `verify.c` reserves the 4 GiB guest space on Windows with commit-on-touch (a vectored exception handler), as
+  `mmap(MAP_NORESERVE)` gives elsewhere. MinGW: binary file mode, `mkdir`, `pread`, `setenv`.
+- `tools/toolchain.py`: compiler, flags and library names per system; every tool that compiles lifted code uses
+  it (the macOS command lines are unchanged). `tools/pkgextract.py` reads the pinned .pkg (XAR, cpio) without
+  Apple's `xar`; the pinned hashes still decide. `tests/check_native.sh`: tests/check_macos.sh for Linux/Windows.
+- `app-sdl/`: an SDL2 frontend that mirrors app/main.m (picture, widescreen park view, pointer mapping, game
+  cursor, Tab fast forward, full screen, Visitor View, game controller, EXTRAS, TP_TEST/TP_CONTROL). Settings are
+  `<data>/settings.ini` with the Mac app's keys and defaults. Sound: SDL audio, a 5 ms look-ahead limiter in
+  place of AUPeakLimiter, General MIDI through FluidSynth (Linux) or Windows' own synthesizer.
+
+Verified (in a Linux x86-64 container, no game files):
+- `tests/check.sh`: 25 synthetic tests, including SHA-256 against hashlib, the thread pool, the package reader
+  against archives written by bsdtar, and the icon converter against ImageMagick.
+- `tools/check_cpu.py`: 124 lifted-code cases compiled for x86-64, 0 mismatches against Unicorn.
+- The runtime and the frontend compile clean (`-Wall -Wextra`) with clang on Linux and MinGW-w64 for Windows,
+  and link against stub game code. The app starts, opens its renderer (OpenGL; Direct3D under Wine) and synth,
+  runs the game thread and reports a bad image cleanly.
+- Windows guest memory under Wine (development only): reads give zeros and writes stick across the 4 GiB, a
+  `TP_GUARD` access faults, longjmp out of deep frames works.
+- The limiter on synthetic audio: quiet input passes bit-exact (5 ms late), +8 dB bursts peak at 0.987.
+
+Not verified yet (the next steps, in order):
+1. `tests/check_native.sh <MAIN.EXE> vendor/freedom-force-recomp --park` with the owned package on Linux: the
+   oracle comparison and the golden first-park frame and profile on x86-64. Until it passes, nothing here says
+   the game runs on these systems.
+2. A played session on each system: input, pacing, sound and music levels by ear (FluidSynth's gain is a guess).
+3. `tests/check_macos.sh ... --park` on the Mac: the shared runtime changed (SHA-256, platform.c in the link).
+4. Not ported: the launch window (settings.ini instead), ride videos in the Visitor View, its status line (in
+   the window title instead), the Save Park Picture dialog (pictures go to `<data>/pictures`).
+
+Keys: Ctrl takes the Mac's Command (Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+] / Ctrl+[ panel, Ctrl+Shift+V Visitor
+View, Ctrl+E park picture, Ctrl+Q quit); F11 or Alt+Enter full screen; Ctrl+Alt+F / G the debug overlays;
+Ctrl+wheel or Alt+wheel zooms, the middle button or Alt-drag pans.
+
+This branch (`windows`): `tools/build_windows.sh`, in MSYS2's CLANG64 shell with python.org's Python for the
+tools (Unicorn and Capstone install from wheels there), builds one static `ThemePark.exe` with GOG's icon and a
+manifest (UTF-8 file APIs, long paths, per-monitor DPI) and installs it in `%LOCALAPPDATA%\Programs\ThemeParkNative`
+with a Start menu entry; data in `%LOCALAPPDATA%\ThemeParkNative`. Checked only by cross-compiling with MinGW-w64
+and running under Wine (no game): the script itself has not run in MSYS2 or on Windows, and the program has not
+run on Windows. Music uses Windows' General MIDI synthesizer (winmm; the music volume scales each channel's
+volume controller), or FluidSynth with `TP_FLUIDSYNTH=1`.
+
 ## Milestone — 2026-10-16 (evening): sound, intro, launcher, save/load
 
 **Theme Park Nightly.app** runs INTRO.EXE and MAIN.EXE as native ARM64 code
