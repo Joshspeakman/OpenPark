@@ -2489,6 +2489,12 @@
 "old": "n = 6u",
 "new": "n = tp_map_shift"
 },
+"162e83": {
+"new": "(tp_map_w+1u)"
+},
+"162e8a": {
+"new": "((tp_map_ext-6u)*tp_map_w)"
+},
 "162ec8": {
 "asm": "mov ebx, 0x40",
 "old": "0x40u",
