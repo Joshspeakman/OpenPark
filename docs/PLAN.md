@@ -667,7 +667,12 @@ taking effect at once: Ride Music, Park Music, Fewer Ew Sounds | Steady Frame Pa
 CRT Lines, Mac Pointer; their ticks follow the settings every 8 ticks; choices are saved to the app's
 settings (main.m bridge), except in test runs (DS_TEST: in memory; a test once switched the player's
 Park Music on through the shared settings domain, put back). view.c's open drop-down rectangle now
-follows 0x1b14d4. Checked in the player's park: EXTRAS beside DISPLAY in the game's style, ticks right,
+follows 0x1b14d4. Later (the player's ask): GAME SPEED and PANEL SIZE submenus (the launcher's choices:
+1x/1.25x/1.5x/2x/4x speed, tp_host_set_cycles; panel 1x..2x, tp_view_set_ui_scale), drop-downs 32667 and
+32668 in the same area (flags at +0xb00, texts +0xc00, the table copy +0x2000); the game opens them to the
+left near the screen's edge. Checked: 2X chosen and ticked. The launcher's Visitors now offers 1,000,
+2,500, 5,000 and 10,000 (a 64x64 park at most 1,000; "The Game's": 800, or 10,000 in a 128x128 park).
+Checked in the player's park: EXTRAS beside DISPLAY in the game's style, ticks right,
 choosing toggles (park music on, ride music off), check suite and view tests pass. TP_NO_EXTRAS=1 leaves
 the bar as the game's.
 

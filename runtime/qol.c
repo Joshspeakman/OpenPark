@@ -13,9 +13,9 @@
  *                       at most n visitors in the park (the game's 800; the
  *                       things pool, 1200 records shared with rides, staff
  *                       and cars, takes visitors to about 1,100, so at most
- *                       1000). A 128x128 park has 12,000 records (bigmap.c)
- *                       and holds up to 10,000 whatever n is, a bus there
- *                       bringing four times as many (TP_FREE_ARRIVALS)
+ *                       1000 in a 64x64 park). A 128x128 park has 12,000
+ *                       records (bigmap.c): up to n (10,000 when n is 0), a
+ *                       bus there bringing four times as many (TP_FREE_ARRIVALS)
  *   TP_FREE_BUS=n       free mode: a bus brings up to n visitors (1..255; the
  *                       game's 20..150 by park level, table at 0x1b78cc)
  *   TP_SOUND_LOG=1      development: every sound effect the game asks for
@@ -50,6 +50,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
 
 uint32_t tp_get(unsigned i);
@@ -101,7 +102,7 @@ void tp_qol_init(void) {
     ride_music = !((e = getenv("TP_RIDE_MUSIC")) && atoi(e) == 0);
     park_tune = (e = getenv("TP_PARK_TUNE")) ? atoi(e) : 0;
     free_visitors = (e = getenv("TP_FREE_VISITORS")) ? atoi(e) : 0;
-    if (free_visitors > 1000) free_visitors = 1000;
+    if (free_visitors > BIG_VISITORS) free_visitors = BIG_VISITORS;
     if (free_visitors < 0) free_visitors = 0;
     arrive_x = (e = getenv("TP_FREE_ARRIVALS")) ? atoi(e) : 4;   /* (development: other multiples) */
     if (arrive_x < 1) arrive_x = 1; if (arrive_x > 100) arrive_x = 100;
@@ -136,7 +137,7 @@ static void play(uint32_t tune) {
     uint32_t v = 100; tp_host_guest_call(SET_MUSIC_VOL, &v, 1, 2000000);
 }
 
-/* ---- EXTRAS: this port's options in the game's own top bar ----
+/* ---- EXTRAS: this port's options in the game's own top bar (submenus: GAME SPEED, PANEL SIZE) ----
  * The bar is data: a list of {drop-down, text} words ([tp_menu_bar], the game's at 0x1b53b6, ended by text -1; a
  * build site, config/mapgeo.json), each drop-down 0x354 bytes at 0x1b53c6 + n * 0x354 (its rectangle, +0xa the item
  * under the pointer, from +0xc items of 0x15 bytes: submenu or -1, text, kind (bit 0 a tick from the byte at +5,
@@ -149,32 +150,46 @@ static void play(uint32_t tune) {
  * at once: the ride and park music, the grossed-out sounds, frame pacing, and the app's pixels and pointer. */
 #define X_AREA   0x1c40000u
 #define X_LIST   (X_AREA + 0x0)
-#define X_DROP   0x1c4004eu                         /* (0x1b53c6 + 32666 * 0x354) */
-#define X_DROP_N 32666
-#define X_FLAGS  (X_AREA + 0x400)
-#define X_TEXT   (X_AREA + 0x500)
-#define X_TAB    (X_AREA + 0x1000)
-#define X_TAB_MAX ((0x10000 - 0x1000) / 4)
+#define X_DROPS  3                                  /* EXTRAS and its two submenus */
+#define X_DROP_N 32666                              /* (0x1b53c6 + 32666 * 0x354 = 0x1c4004e: inside the area) */
+#define X_DROP(i) (0x1b53c6u + (uint32_t)(X_DROP_N + (i)) * 0x354u)
+#define X_FLAGS  (X_AREA + 0xb00)
+#define X_TEXT   (X_AREA + 0xc00)
+#define X_TAB    (X_AREA + 0x2000)
+#define X_TAB_MAX ((0x10000 - 0x2000) / 4)
 #define X_ARG    0x7700
 long (*tp_extras_get)(const char *key);              /* (main.m: the app's settings) */
 void (*tp_extras_set)(const char *key, long value);
+double (*tp_extras_getf)(const char *key);
+void (*tp_extras_setf)(const char *key, double value);
 extern uint32_t tp_menu_bar;
-void tp_view_set_pacing(int on); int tp_view_pacing(void);
+void tp_view_set_pacing(int on); int tp_view_pacing(void); void tp_view_set_ui_scale(double k);
+void tp_host_set_cycles(double per_ms); double tp_host_cycles(void);
 static const char *x_title = "EXTRAS";
-static const struct { const char *text; int line; } x_items[] = {
-    {"RIDE MUSIC", 0}, {"PARK MUSIC", 0}, {"FEWER EW SOUNDS", 1},
-    {"STEADY FRAME PACING", 1}, {"SMOOTH PIXELS", 0}, {"CRT LINES", 0}, {"MAC POINTER", 0}};
+/* menu: 0 EXTRAS, 1 GAME SPEED, 2 PANEL SIZE; sub: the submenu an item opens */
+static const struct { int menu; const char *text; int line, sub; } x_items[] = {
+    {0, "RIDE MUSIC", 0, 0}, {0, "PARK MUSIC", 0, 0}, {0, "FEWER EW SOUNDS", 1, 0},
+    {0, "GAME SPEED", 0, 1}, {0, "PANEL SIZE", 0, 2}, {0, "STEADY FRAME PACING", 1, 0},
+    {0, "SMOOTH PIXELS", 0, 0}, {0, "CRT LINES", 0, 0}, {0, "MAC POINTER", 0, 0},
+    {1, "ORIGINAL", 0, 0}, {1, "1.25X", 0, 0}, {1, "1.5X", 0, 0}, {1, "2X", 0, 0}, {1, "4X", 0, 0},
+    {2, "AS DRAWN", 0, 0}, {2, "1.25X", 0, 0}, {2, "1.5X", 0, 0}, {2, "1.75X", 0, 0}, {2, "2X", 0, 0}};
 #define X_N (int)(sizeof x_items / sizeof x_items[0])
+#define X_SPEED0 9                                   /* (first items of the submenus: the launcher's choices) */
+#define X_PANEL0 14
+static const double x_speeds[5] = {10000, 12500, 15000, 20000, 40000}, x_panels[5] = {1.0, 1.25, 1.5, 1.75, 2.0};
 static uint32_t x_game_tab; static int x_on = -1, x_tick;
 static long x_get(const char *k, long d) { return tp_extras_get ? tp_extras_get(k) : d; }
 static void x_set(const char *k, long v) { if (tp_extras_set) tp_extras_set(k, v); }
+static double x_getf(const char *k, double d) { return tp_extras_getf ? tp_extras_getf(k) : d; }
 static void x_flags(uint8_t *m) {
-    long px = x_get("SmoothPixels", 0);
-    uint8_t f[X_N] = {(uint8_t)(ride_music != 0), (uint8_t)(park_tune != 0), (uint8_t)(ew_gap != 0), (uint8_t)(tp_view_pacing() != 0),
-                      (uint8_t)(px == 1), (uint8_t)(px == 2), (uint8_t)(x_get("ShowMacCursor", 0) != 0)};
+    long px = x_get("SmoothPixels", 0); double cyc = tp_host_cycles(), ps = x_getf("PanelScale", 1.0);
+    uint8_t f[X_N]; memset(f, 0, sizeof f);
+    f[0] = ride_music != 0; f[1] = park_tune != 0; f[2] = ew_gap != 0; f[5] = tp_view_pacing() != 0;
+    f[6] = px == 1; f[7] = px == 2; f[8] = x_get("ShowMacCursor", 0) != 0;
+    for (int i = 0; i < 5; i++) { f[X_SPEED0 + i] = fabs(cyc - x_speeds[i]) < 1; f[X_PANEL0 + i] = fabs(ps - x_panels[i]) < 0.01; }
     memcpy(m + X_FLAGS, f, X_N);
 }
-static void x_build(uint8_t *m) {                    /* the menu, the bar's list, the texts (once the game's table exists) */
+static void x_build(uint8_t *m) {                    /* the menus, the bar's list, the texts (once the game's table exists) */
     uint32_t tab = r32(m, 0x1d7bcc);
     if (!tab || tab == X_TAB || tab >= 0x4000000u) return;
     int n = 0; uint32_t lo = 0xffffffffu, hi = 0;
@@ -183,11 +198,16 @@ static void x_build(uint8_t *m) {                    /* the menu, the bar's list
     memcpy(m + X_TAB, m + tab, (size_t)n * 4);
     uint32_t at = X_TEXT; int id0 = n;
     for (int k = 0; k <= X_N; k++) { const char *t = k ? x_items[k - 1].text : x_title; w32(m, X_TAB + (uint32_t)(n + k) * 4, at); memcpy(m + at, t, strlen(t) + 1); at += (uint32_t)strlen(t) + 1; }
-    uint32_t d = X_DROP; memset(m + d, 0, 0x354); w16(m, d + 0xa, 0xffff);
-    for (int k = 0; k < X_N; k++) { uint32_t it = d + 0xc + (uint32_t)k * 0x15;
-        w16(m, it, 0xffff); w16(m, it + 2, (uint16_t)(id0 + 1 + k)); m[it + 4] = (uint8_t)(1 | (x_items[k].line ? 2 : 0));
-        w32(m, it + 5, X_FLAGS + (uint32_t)k); w32(m, it + 9, 0); w32(m, it + 0xd, 0x150ccd); w16(m, it + 0x11, (uint16_t)(X_ARG + k)); m[it + 0x13] = m[it + 0x14] = 0; }
-    w16(m, d + 0xc + (uint32_t)X_N * 0x15 + 2, 0xffff);   /* (the end: text -1) */
+    for (int d = 0; d < X_DROPS; d++) {
+        uint32_t dd = X_DROP(d); memset(m + dd, 0, 0x354); w16(m, dd + 0xa, 0xffff); int c = 0;
+        for (int k = 0; k < X_N; k++) { if (x_items[k].menu != d) continue;
+            uint32_t it = dd + 0xc + (uint32_t)c++ * 0x15, sub = x_items[k].sub;
+            w16(m, it, sub ? (uint16_t)(X_DROP_N + sub) : 0xffff); w16(m, it + 2, (uint16_t)(id0 + 1 + k));
+            m[it + 4] = (uint8_t)((sub ? 0 : 1) | (x_items[k].line ? 2 : 0));
+            w32(m, it + 5, sub ? 0 : X_FLAGS + (uint32_t)k); w32(m, it + 9, 0); w32(m, it + 0xd, sub ? 0 : 0x150ccd); w16(m, it + 0x11, sub ? 0 : (uint16_t)(X_ARG + k));
+            m[it + 0x13] = m[it + 0x14] = 0; }
+        w16(m, dd + 0xc + (uint32_t)c * 0x15 + 2, 0xffff);   /* (the end: text -1) */
+    }
     int e = 0; for (uint32_t a = 0x1b53b6; e < 12 && (int16_t)r16(m, a + 2) != -1; a += 4, e++) w32(m, X_LIST + (uint32_t)e * 4, r32(m, a));
     w16(m, X_LIST + (uint32_t)e * 4, X_DROP_N); w16(m, X_LIST + (uint32_t)e * 4 + 2, (uint16_t)id0); e++;
     w16(m, X_LIST + (uint32_t)e * 4, 0); w16(m, X_LIST + (uint32_t)e * 4 + 2, 0xffff);
@@ -204,16 +224,18 @@ static void x_frame(uint8_t *m) {
 static void x_choose(uint8_t *m, int k) {
     switch (k) {
     case 0: ride_music = !ride_music; x_set("RideMusic", ride_music); break;
-    case 1: { static int last = 1; if (park_tune) { last = park_tune; park_tune = 0; } else park_tune = last > 0 ? last : 1; x_set("ParkTune", park_tune);
-              if (!park_tune && !(int16_t)r16(m, CUR_TUNE)) {} break; }
+    case 1: { static int last = 1; if (park_tune) { last = park_tune; park_tune = 0; } else park_tune = last > 0 ? last : 1; x_set("ParkTune", park_tune); break; }
     case 2: { static double last = 30; if (ew_gap) { last = ew_gap; ew_gap = 0; } else ew_gap = last > 0 ? last : 30; x_set("GrossOutGap", (long)ew_gap); break; }
-    case 3: { int on = !tp_view_pacing(); tp_view_set_pacing(on); x_set("SteadyPacing", on); break; }
-    case 4: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 1 ? 0 : 1); break;
-    case 5: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 2 ? 0 : 2); break;
-    case 6: x_set("ShowMacCursor", !x_get("ShowMacCursor", 0)); break;
+    case 5: { int on = !tp_view_pacing(); tp_view_set_pacing(on); x_set("SteadyPacing", on); break; }
+    case 6: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 1 ? 0 : 1); break;
+    case 7: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 2 ? 0 : 2); break;
+    case 8: x_set("ShowMacCursor", !x_get("ShowMacCursor", 0)); break;
+    default:
+        if (k >= X_SPEED0 && k < X_SPEED0 + 5) { tp_host_set_cycles(x_speeds[k - X_SPEED0]); x_set("Cycles", (long)x_speeds[k - X_SPEED0]); }
+        else if (k >= X_PANEL0 && k < X_PANEL0 + 5) { tp_view_set_ui_scale(x_panels[k - X_PANEL0]); if (tp_extras_setf) tp_extras_setf("PanelScale", x_panels[k - X_PANEL0]); }
     }
     x_flags(m);
-    if (log_sounds || getenv("TP_EXTRAS_LOG")) fprintf(stderr, "extras: %s chosen\n", x_items[k].text);
+    if (log_sounds || getenv("TP_EXTRAS_LOG")) fprintf(stderr, "extras: %s%s chosen\n", x_items[k].menu == 1 ? "game speed " : x_items[k].menu == 2 ? "panel size " : "", x_items[k].text);
 }
 
 void tp_qol_hook(int nested) {
@@ -311,7 +333,7 @@ void tp_qol_hook(int nested) {
         return;
     case H_BUS_ARRIVES: {                             /* free mode, sandbox parks only */
         int sandbox = m[SIM_LEVEL] == 0;
-        int cap = tp_things_n > 1200 ? BIG_VISITORS : free_visitors;
+        int cap = tp_things_n > 1200 ? (free_visitors ? free_visitors : BIG_VISITORS) : free_visitors < 1000 ? free_visitors : 1000;
         tp_tune_max_people = sandbox && cap > 0x320 ? (uint32_t)cap : 0x320;
         uint32_t park = r32(m, PLAYER_PARK);
         if (sandbox && free_bus && park) {
