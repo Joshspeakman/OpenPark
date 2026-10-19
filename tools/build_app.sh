@@ -26,8 +26,13 @@ OUT=build/app
 TRACE=work/check-startup/trace.json
 [[ -f $TRACE ]] || { echo "missing $TRACE: run tests/check_macos.sh $EXE $REF --park" >&2; exit 1; }
 # HMI sound drivers the game loads at run time (work/drv-ADDR-MODE-NAME.bin,
-# see tools/dump_drivers.md): compiled at their load addresses.
-HAVE_DRIVERS=0; ls work/drv-*-*-*.bin >/dev/null 2>&1 && HAVE_DRIVERS=1
+# see tools/dump_drivers.md): compiled at their load addresses. Made from the owned
+# package on the first build (tools/make_drivers.py, a few minutes); TP_NO_SOUND=1 skips them.
+if [[ -z ${TP_NO_SOUND:-} ]] && ! ls work/drv-*-*-*.bin >/dev/null 2>&1; then
+  echo "== making the sound driver images from the game (once, a few minutes)"
+  "$PYTHON" tools/make_drivers.py "$EXE" --reference "$REF" --out work | tail -1 || echo "   (failed: building without sound)" >&2
+fi
+HAVE_DRIVERS=0; [[ -z ${TP_NO_SOUND:-} ]] && ls work/drv-*-*-*.bin >/dev/null 2>&1 && HAVE_DRIVERS=1
 [[ $HAVE_DRIVERS == 1 ]] || echo "warning: no sound driver images; the app will run with sound off" >&2
 DRV=(); [[ $HAVE_DRIVERS == 1 ]] && DRV=(--drivers work)
 "$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-release --opt=-O2 ${DRV[@]+"${DRV[@]}"} >/dev/null

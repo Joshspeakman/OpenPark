@@ -13,13 +13,25 @@ at the addresses where the game deterministically loads them with GOG's
 | drv-402c0-{flat,cs}-dig.bin | 0x402c0 | flat init, then own selector | sw1616m.com (SB16 16-bit) |
 | drv-409a8-{flat,cs}-mix.bin | 0x409a8 | flat init, then own selector | tr16m.com (software mixer) |
 
-Images are dumped from a C-host checkpoint at first entry
-(`TP_DUMP_ON_STOP=x.ckpt` on the headless runner, then
-`tools/extract_region.py x.ckpt ADDR SIZE out.bin`). `<image>.mask` marks with
-0 the bytes the driver rewrites after loading (pre/post dumps differ); those
-are excluded from the identity check, and blocks covering them are re-checked
-on every execution. The mixer writes 32 identical 350-byte copies of one
-generated routine at body offset 0x1cd1; its image has all 32 slots filled.
+`tools/make_drivers.py` makes the images from the owned package; `tools/build_app.sh` runs it on the first
+build (a few minutes; `TP_NO_SOUND=1` skips it):
+
+1. Each driver is cut from its `.386` file (offsets in the tool; the cut bytes are checked against
+   `config/drivers.json`, which holds hashes only). The MIDI, detection and digital drivers run as they are.
+2. The game is built with the drivers fully guarded and run headless with sound on through the scripted
+   start into the first park (`tests/check_macos.sh --park`'s input). The first block whose bytes changed stops
+   the run (`TP_DUMP_ON_STOP`); the changed bytes are taken into the images, and the run repeats until it
+   finishes without a stop (five rounds with GOG's package: the mixer patches its own instructions, then
+   generates its voice routine).
+3. The mixer writes one generated routine into each of its 32 voice slots (350 bytes from body offset
+   0x1cd1) as voices come into use, the same routine in every slot. The run uses two; the tool checks they
+   match and fills all 32 with it.
+4. `<image>.mask` marks with 0 the bytes that differ from the file (the bytes a driver rewrites). They are
+   excluded from the identity check (the first 32 bytes), and blocks covering them are re-checked on every
+   execution.
+
+Checked against images dumped by hand from long play: the same bytes in every byte the build compiles; they
+differ only in 36 masked data bytes (sample pointers and volumes).
 A different load address or generated routine stops the game with an explicit
 message instead of running mismatched code. All images are game-derived and
 stay in work/.
