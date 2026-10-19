@@ -108,6 +108,22 @@ static void apply_difficulty(uint8_t *m, int fresh) {
     if (getenv("TP_FREE_LOG")) fprintf(stderr, "free mode: endless month %d of %d, difficulty %.2f\n", months, ramp, d);
 }
 
+/* A new park opens with its entrance in the middle of the view (the player's park record +0x63f: the entrance
+ * cell, on the bottom edge). Camera 0x1d667a x, 0x1d6666 y: entrance x - 6, y - 7 puts it in the middle
+ * (measured in a 128x128 park, the same steps in a 64x64 one). Below where scrolling stops (the game's limit:
+ * the map less a screen) is fine: the road shows, and scrolling up works as usual. */
+extern uint32_t tp_map_w;
+static int redraw_ticks;                            /* (the landscape redrawn on the next ticks too: the first frame's own clears it) */
+static void center_on_entrance(uint8_t *m) {
+    uint32_t park = r32(m, PLAYER_REC);
+    if (!ok_ptr(park) || !tp_map_w || getenv("TP_GAME_CAMERA")) return;   /* (TP_GAME_CAMERA: the game's own, for the golden checks) */
+    uint16_t cell; memcpy(&cell, m + park + 0x63f, 2);
+    int ex = cell % tp_map_w, ey = cell / tp_map_w, cx = ex - 6, cy = ey - 7;
+    if (cx < 4) cx = 4; if (cy < 0) cy = 0; if (cx > (int)tp_map_w || cy > (int)tp_map_w) return;
+    w16(m, 0x1d667a, cx); w16(m, 0x1d6666, cy); w16(m, 0x1d666e, 1); redraw_ticks = 8;
+    if (getenv("TP_FREE_LOG")) fprintf(stderr, "free mode: entrance %d,%d, camera %d,%d\n", ex, ey, cx, cy);
+}
+
 /* The park's first frame: its rules. */
 void tp_free_park_shown(void) {
     uint8_t *m = tp_host_memory();
@@ -121,6 +137,7 @@ void tp_free_park_shown(void) {
         last_month = month;
         if (rules == 1 && !kept) keep_settings(m, pending == 2);
         if (rules == 1) apply_difficulty(m, pending == 1);
+        if (pending == 1) center_on_entrance(m);
         if (rules && getenv("TP_FREE_LOG")) fprintf(stderr, "free mode: %s park, rules %d, month %d\n", pending == 2 ? "loaded" : "new", rules, months);
         pending = 0;
     }
@@ -129,6 +146,7 @@ void tp_free_park_shown(void) {
 void tp_free_frame(void) {
     uint8_t *m = tp_host_memory();
     uint32_t rec = r32(m, PLAYER_REC);
+    if (redraw_ticks > 0) { redraw_ticks--; w16(m, 0x1d666e, 1); }
     if (pending || !rules || !ok_ptr(rec)) return;
     int month = m[rec + 0x5ed];
     if (rules == 1) {

@@ -70,7 +70,7 @@ if [[ "${3:-}" == --park ]]; then
     runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c work/check-native/game.a -lz -o work/check-native/tp-headless
   overlay=$(mktemp -d work/check-native/c-host-XXXXXXXX)
   "$PYTHON" tools/export_image.py "$1" work/check-native/MAIN.TPIMG >/dev/null
-  work/check-native/tp-headless --game "$(dirname "$1")" --overlay "$PWD/$overlay" --image work/check-native/MAIN.TPIMG \
+  TP_GAME_CAMERA=1 work/check-native/tp-headless --game "$(dirname "$1")" --overlay "$PWD/$overlay" --image work/check-native/MAIN.TPIMG \
     --out work/check-native/c-host "${input_args[@]}" --quantum 1000 --blocks 8000000 > work/check-native/c-host.json
   "$PYTHON" - <<'PY'
 import json

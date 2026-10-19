@@ -80,6 +80,27 @@ int tp_audio_start(void) {
         OSStatus st = AudioUnitSetProperty(synth.audioUnit, kMusicDeviceProperty_SoundBankURL, kAudioUnitScope_Global, 0, &url, sizeof url);
         fprintf(stderr, "audio: instruments %s: %s\n", bank.lastPathComponent.UTF8String, st ? "could not be loaded, built-in used" : "loaded");
     }
+    /* Everything (effects and music) through a look-ahead peak limiter on its way out: the effects come from
+     * sb16.c in floating point with their level restored (they start at a quarter in the driver, qol.c), and
+     * effects and music together can pass full scale; the limiter holds the sum under it instead of the
+     * output clipping. TP_SOUND_RAW=1: no limiter. TP_AUDIO_REC_OUT=<file>: what goes out (development). */
+    if (!getenv("TP_SOUND_RAW")) {
+        AudioComponentDescription ld = {kAudioUnitType_Effect, kAudioUnitSubType_PeakLimiter, kAudioUnitManufacturer_Apple, 0, 0};
+        AVAudioUnitEffect *limiter = [[AVAudioUnitEffect alloc] initWithAudioComponentDescription:ld];
+        [engine attachNode:limiter];
+        AVAudioFormat *of = [engine.mainMixerNode outputFormatForBus:0];
+        [engine connect:engine.mainMixerNode to:limiter format:of];
+        [engine connect:limiter to:engine.outputNode format:of];
+        AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_AttackTime, kAudioUnitScope_Global, 0, 0.005, 0);
+        AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_DecayTime, kAudioUnitScope_Global, 0, 0.08, 0);
+        AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_PreGain, kAudioUnitScope_Global, 0, -1.0, 0);   /* (a decibel under full scale) */
+        const char *ro = getenv("TP_AUDIO_REC_OUT");
+        if (ro) { FILE *f = fopen(ro, "wb");
+            if (f) [limiter installTapOnBus:0 bufferSize:4096 format:nil block:^(AVAudioPCMBuffer *b, AVAudioTime *when) {
+                for (AVAudioFrameCount i = 0; i < b.frameLength; i++) for (AVAudioChannelCount c = 0; c < 2 && c < b.format.channelCount; c++)
+                    fwrite(&b.floatChannelData[c][i], 4, 1, f);
+                fflush(f); }]; }
+    }
     /* Automated tests run the whole path at zero output volume. */
     if (getenv("W32_AUDIO_MUTE") || getenv("TP_MUTE")) engine.mainMixerNode.outputVolume = 0;
     NSError *err = nil;
