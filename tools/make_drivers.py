@@ -53,7 +53,7 @@ PARK = ['--quantum', '1000', '--blocks', '8000000',
         '--keys', '60:1c0d,80:1454,82:1245,84:1f53,86:1454,88:1c0d,120:3b00,300:3d00',
         '--clicks', '180:564:316,220:280:90',
         '--block-clicks', '2450000:72:310,2650000:568:316,2800000:604:380']
-RUNTIME = ['host.c', 'sb16.c', 'headless.c', 'verify.c', 'view.c', 'native_land.c', 'native_draw.c', 'qol.c',
+RUNTIME = ['host.c', 'sha256.c', 'sb16.c', 'headless.c', 'verify.c', 'view.c', 'native_land.c', 'native_draw.c', 'qol.c',
            'walk.c', 'bigmap.c', 'freemode.c']
 
 
