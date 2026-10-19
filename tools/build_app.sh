@@ -30,12 +30,12 @@ TRACE=work/check-startup/trace.json
 HAVE_DRIVERS=0; ls work/drv-*-*-*.bin >/dev/null 2>&1 && HAVE_DRIVERS=1
 [[ $HAVE_DRIVERS == 1 ]] || echo "warning: no sound driver images; the app will run with sound off" >&2
 DRV=(); [[ $HAVE_DRIVERS == 1 ]] && DRV=(--drivers work)
-"$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-release --opt=-O2 "${DRV[@]}" >/dev/null
+"$PYTHON" tools/build_game.py "$EXE" --reference "$REF" --trace "$TRACE" --survey work/main-survey.json --out work/app-release --opt=-O2 ${DRV[@]+"${DRV[@]}"} >/dev/null
 # INTRO.EXE: its own image, linked beside MAIN.EXE's with an intro_ prefix.
 INTRO=$GAMEDIR/GAME/INTRO.EXE
 [[ -f work/intro-survey.json ]] || "$PYTHON" tools/survey.py "$INTRO" --out work/intro-survey.json
 [[ -f work/intro-trace/trace.json ]] || DS_TEST=1 W32_AUDIO_MUTE=1 "$PYTHON" tools/trace_startup.py "$INTRO" --out work/intro-trace --quantum 1000 --blocks 30000000 --seconds 240 >/dev/null
-"$PYTHON" tools/build_game.py "$INTRO" --reference "$REF" --trace work/intro-trace/trace.json --survey work/intro-survey.json --out work/app-release-intro --opt=-O2 --prefix intro_ "${DRV[@]}" >/dev/null
+"$PYTHON" tools/build_game.py "$INTRO" --reference "$REF" --trace work/intro-trace/trace.json --survey work/intro-survey.json --out work/app-release-intro --opt=-O2 --prefix intro_ ${DRV[@]+"${DRV[@]}"} >/dev/null
 mkdir -p "$OUT"
 APP="$OUT/$NAME.app"
 if [[ -e "$APP.new" ]]; then mv "$APP.new" "$HOME/.Trash/$NAME-partial-$(date +%s).app"; fi
