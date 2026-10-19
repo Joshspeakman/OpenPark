@@ -19,7 +19,11 @@ Builds need only this repository, the owned package and a Python venv (the share
 - Object id k is named by LANG string k + 26. That exposes four cut objects with names in all five languages and
   no records: the rides Dive Bomber (0x19) and Planet Bomber (0x1a), the stall Salty Dog (0x1f) and the sideshow
   Bingo Highway (0x145).
-- One unreferenced booth (animations 618..621) is the only new art found without an object.
+- No art was found for the cut objects. The unreferenced booth (618..621) turned out to be the Race Car Ride's station.
+- Ride videos play in the game. They ran about 2.8 times too fast: the host's DOS clock (int 21h/2Ch) was exact to the
+  hundredth, where DOS steps at the 18.2 Hz BIOS tick. Fixed in host.c (measured 50 to 18 frames a second). The
+  intro uses a 120 Hz driver timer event instead and was already at speed (measured). Open: the widescreen side
+  strips show the last park picture during a video.
 
 ## Milestone — 2026-10-16 (evening): sound, intro, launcher, save/load
 
