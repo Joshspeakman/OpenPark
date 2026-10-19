@@ -22,12 +22,18 @@ void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
 void tp_qol_init(void);
 extern long (*tp_extras_get)(const char *key); extern void (*tp_extras_set)(const char *key, long value);   /* (qol.c's EXTRAS menu) */
+extern double (*tp_extras_getf)(const char *key); extern void (*tp_extras_setf)(const char *key, double value);
 /* (thread-safe; read live. Test runs (DS_TEST) share the app's settings domain: their choices stay in memory) */
 static NSMutableDictionary *extras_test;
 static long extras_get(const char *k) { NSNumber *t; @synchronized ([NSApp class]) { t = extras_test[@(k)]; } return t ? t.longValue : [NSUserDefaults.standardUserDefaults integerForKey:@(k)]; }
 static void extras_set(const char *k, long v) {
     if (getenv("DS_TEST")) { @synchronized ([NSApp class]) { if (!extras_test) extras_test = [NSMutableDictionary dictionary]; extras_test[@(k)] = @(v); } return; }
     [NSUserDefaults.standardUserDefaults setInteger:v forKey:@(k)];
+}
+static double extras_getf(const char *k) { NSNumber *t; @synchronized ([NSApp class]) { t = extras_test[@(k)]; } return t ? t.doubleValue : [NSUserDefaults.standardUserDefaults doubleForKey:@(k)]; }
+static void extras_setf(const char *k, double v) {
+    if (getenv("DS_TEST")) { @synchronized ([NSApp class]) { if (!extras_test) extras_test = [NSMutableDictionary dictionary]; extras_test[@(k)] = @(v); } return; }
+    [NSUserDefaults.standardUserDefaults setDouble:v forKey:@(k)];
 }
 uint8_t *tp_host_memory(void);
 extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out_bgra;
@@ -766,7 +772,7 @@ static void *game_thread(void *arg) {
                 setenv("TP_RIDE_TUNES", [parts componentsJoinedByString:@","].UTF8String, 1);
             }
         }
-        tp_extras_get = extras_get; tp_extras_set = extras_set;
+        tp_extras_get = extras_get; tp_extras_set = extras_set; tp_extras_getf = extras_getf; tp_extras_setf = extras_setf;
         tp_qol_init();                                   /* quality-of-life hooks (qol.c), MAIN.EXE's code */
         if (tp_view_debug_fps) tp_view_count_game_frames(1);
         int r;
