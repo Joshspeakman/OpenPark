@@ -6,6 +6,48 @@ branch and install while they work on other branches.
 
 Branch: `codex/visitor-3d-mockups`, based on `01391b3`.
 Worktree: `/Users/joshuaspeakman/Projects/openpark-visitor-3d-mockups`.
+Current follow-up branch: `codex/visitor-authored-models`, after the user's
+rejection of the first implementation's appearance.
+
+## Replacement approach: authored surfaces
+
+The user explicitly rejected the generic shell/extrusion result. It is now
+disabled by default. `runtime/walk_model.h` loads bounded, indexed, authored
+surface meshes from the isolated profile's `visitor3d` directory. Models use
+actual original palette pixels with nearest sampling. Objects without a model,
+or with a differently cropped composite, use their original sprites. P still
+compares the model mode to original cards. `TP_WALK_SHELL_STUDY=1` is only for
+reproducing the rejected study; it is not the new default.
+
+Toy Land is the first actual authored proof: 302 vertices / 144 triangles,
+two sloping roof planes, a stone ridge, separate chimney and pot, a front
+gable, a physically open doorway with recess/jambs, wall panels and a shallow
+solid bear badge. UVs were laid out against the owned 100x77 source frame 4021.
+Roof samples avoid the fascia which occludes the thatch in the source image.
+Source texture dimensions are checked before model rendering; the live shop's
+different world anchor does not shift its texture. Side/rear architecture is
+inferred and reuses existing window, timber and thatch patterns. These surfaces
+cannot claim original unseen details. Only this one asset is modeled; rides and
+other assets have not been converted to authored geometry or animation rigs.
+
+Local game-derived artifacts (intentionally ignored):
+
+- `work/visitor-3d/authored/toyland.py`: authored surface/UV construction.
+- `work/visitor-3d/profile/visitor3d/0a-7.mesh`: the runtime model.
+- `work/visitor-3d/authored/index.html`: a 24-angle offline turntable with links
+  to the source pixels, front/side/rear views and actual TESTPARK snapshot.
+
+Validation: both existing walk modes and 17,808 view checks pass under
+sanitizers; the new synthetic model test covers bounded loading, invalid
+indices/nonfinite input, palette-exact sampling, texture-frame changes and
+fallback for incompatible texture dimensions. The native study app rebuilt
+and its signature verified. The updated headed test copies the mesh into its
+scratch profile and visits Toy Land from four directions. Its attempt in
+`work/visitor-3d/headed-sqectaq9` exited -6 in 0.11 seconds before any window
+or capture, consistent with the previously diagnosed macOS registration abort.
+No headed pass or user acceptance of this new visual direction is claimed.
+
+The sections below document the earlier concepts and rejected prototype.
 
 ## Concept deliverables
 

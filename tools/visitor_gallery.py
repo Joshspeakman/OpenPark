@@ -7,6 +7,7 @@ visitor_snapshot. All output is game-derived and stays in ignored work/.
 from concurrent.futures import ThreadPoolExecutor
 import html
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -55,7 +56,8 @@ def main():
         frame, form, yaw, filename = job
         proc = subprocess.run([str(work / 'native/snapshot'), str(work / 'baseline/park-memory.bin'),
             str(work / 'profile/game/DATA/MPALETTE.DAT'), str(out / filename), '128',
-            'frame', str(frame), str(form), str(yaw)], capture_output=True)
+            'frame', str(frame), str(form), str(yaw)], capture_output=True,
+            env=dict(os.environ,TP_WALK_SHELL_STUDY='1',TP_WALK_MESH='1'))
         return filename, proc.returncode, proc.stderr.decode(errors='replace')
     with ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(render, jobs))

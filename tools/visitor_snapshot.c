@@ -68,14 +68,36 @@ int main(int argc,char**argv){
     }
     if(!gallery&&argc>8)setenv("TP_WALK_MESH","0",1);
     if(!tp_walk_start(x,y))return 3;tp_walk_frame();
+    if(gallery && argc>9 && !strcmp(argv[9],"source")) {
+        Snap*s=&snaps[front];if(!s->ncards)return 4;Card*c=&s->cards[0];
+        int scale=6,sw=c->w*scale,sh=c->h*scale;
+        uint32_t*p=malloc((size_t)sw*sh*4);if(!p)return 4;
+        for(int y=0;y<sh;y++)for(int x=0;x<sw;x++) {
+            uint16_t colour=s->pix[c->off+(y/scale)*c->w+x/scale];
+            p[y*sw+x]=colour<256 ? palette[colour]:0xff403830;
+        }
+        fprintf(stderr,"source %dx%d anchor %d,%d\n",c->w,c->h,c->ax,c->ay);
+        int ok=png(argv[3],p,sw,sh);free(p);free(memory);return ok?0:5;
+    }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
         Card*c=&s->cards[0];c->shape=(uint8_t)atoi(argv[7]);
+        if(argc>11 && !strcmp(argv[9],"model")) {c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);}
         float width=c->w/s->g.tws,height=c->h*s->g.aspect/s->g.tws;
         double dist=fmax(width,height)*1.45+1;
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
         W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55;W.cam_pitch=.07;
-    }else{tp_walk_teleport(x,y,yaw);tp_walk_input(0,0,0,0,0,0,0);}
+        if(getenv("TP_SNAPSHOT_EYE"))W.cam_z=atof(getenv("TP_SNAPSHOT_EYE"));
+        if(getenv("TP_SNAPSHOT_PITCH"))W.cam_pitch=atof(getenv("TP_SNAPSHOT_PITCH"));
+    }else{
+        if(getenv("TP_MODEL_INSPECT")) {
+            Snap*s=&snaps[front];for(int i=0;i<s->ncards;i++) {
+                Card*c=&s->cards[i];if(c->cls==10 && c->type==7)
+                    fprintf(stderr,"Toy Land thing %d: %.2f,%.2f size %dx%d anchor %d,%d\n",c->idx,c->x,c->y,c->w,c->h,c->ax,c->ay);
+            }
+        }
+        tp_walk_teleport(x,y,yaw);tp_walk_input(0,0,0,0,0,0,0);
+    }
     int w=960,h=600;uint32_t*p=malloc((size_t)w*h*4);
     double began=now();if(!tp_walk_render(p,w,h))return 3;
     fprintf(stderr,"%d objects, %u source pixels, %.2f ms -> %s\n",snaps[front].ncards,snaps[front].npix,(now()-began)*1000,argv[3]);

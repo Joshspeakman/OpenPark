@@ -16,3 +16,6 @@ build/walk_view_test
 "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation -fsanitize=address,undefined \
   tests/walk_mesh_test.c -lm -o build/walk_mesh_test
 build/walk_mesh_test
+"$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation -fsanitize=address,undefined \
+  tests/walk_model_test.c -lm -o build/walk_model_test
+build/walk_model_test

@@ -5,6 +5,29 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, user rejected the generic 3D extrusion's appearance. New branch
+`codex/visitor-authored-models` replaces that approach with asset-specific
+surface models. Toy Land is the first proof: 302 vertices / 144 triangles,
+separate roof slopes/ridge, chimney, open arch, side/rear walls and thick bear
+badge. UVs sample original palette pixels; hidden layouts remain inferred.
+Model data and its authoring script stay in ignored `work/visitor-3d/`.
+The native renderer loads local `TP_DATA/visitor3d` meshes. Unmodeled objects
+use original sprites; the rejected shells are now explicitly opt-in only.
+One model is implemented, not the entire asset set or ride animation rigs.
+
+Evidence: 24-angle offline model review at
+`work/visitor-3d/authored/index.html`, plus front/side/rear and actual TESTPARK
+snapshot captures. Source texture alignment was corrected against the live
+shop composite (its inferred anchor differs from the standalone sprite).
+Synthetic checks pass in both renderer modes; new loader/sampling tests check
+invalid input, exact palette texels, changed frames and incompatible-crop
+fallback under ASan/UBSan. Native study build/signature validation passed.
+Headed attempt `headed-sqectaq9` still aborts before creating a window (exit
+-6, zero captures); no headed pass or user visual acceptance claimed. The
+headed script now copies the authored model and visits Toy Land from all sides.
+The existing Nightly checkout remains clean. Next: establish the one-model
+visual benchmark before authoring further assets and ride mechanisms.
+
 2026-10-19, Visitor View original-pixel 3D study (Codex, separate branch
 `codex/visitor-3d-mockups`, as requested): concepts revised to preserve the
 chunky original pixels. Implemented a provisional source-textured shell

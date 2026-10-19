@@ -28,6 +28,8 @@ def main():
     profile.mkdir()
     (profile / "game").symlink_to(source / "game", target_is_directory=True)
     shutil.copytree(source / "saves", profile / "saves")
+    if (source / "visitor3d").exists():
+        shutil.copytree(source / "visitor3d", profile / "visitor3d")
     control = out / "control.txt"
     control.write_text("show\nsize 960 600\nsleep 5\nkey 1c0d\nsleep 5\n"
                        "key 1454\nsleep 0.15\nkey 1245\nsleep 0.15\n"
@@ -36,13 +38,13 @@ def main():
                        "key 1352\nsleep 0.15\nkey 254b\nsleep 2\n"
                        "key 1c0d\nsleep 5\nkey 3d00\nsleep 10\n"
                        "walk 57.46 89.62\nsleep 2\n")
-    # The same eye-level scene from both directions, plus the tree house and
-    # observation tower. Front/side/rear coverage still needs human inspection.
+    # Focus the new approach on Toy Land before scaling to other models.
+    # Front/side/rear coverage still needs human inspection.
     poses = [("midway", 57.46, 89.62, -71.565),
-             ("midway-reverse", 57.46, 89.62, 108.435),
-             ("tree-house", 41, 79, -90),
-             ("tree-house-side", 48, 72, 180),
-             ("tower", 98, 61, -90)]
+             ("toyland-front", 69.5, 86.5, -90),
+             ("toyland-side", 75, 81, 180),
+             ("toyland-rear", 69.5, 76, 90),
+             ("toyland-quarter", 65, 85.5, -45)]
     for name, x, y, yaw in poses:
         with control.open("a") as f:
             f.write(f"walkteleport {x} {y} {yaw}\nsleep 1\n"
@@ -50,8 +52,8 @@ def main():
                     f"windowinfo {out / (name + '.window.json')}\n"
                     f"ack {name}\nsleep 2\n")
     with control.open("a") as f:
-        f.write(f"sleep 1\nwalkshot {out / 'tower-later.png'}\n"
-                f"walkcmd 6\nsleep 1\nwalkshot {out / 'tower-original.png'}\n"
+        f.write(f"sleep 1\nwalkshot {out / 'same-view-later.png'}\n"
+                f"walkcmd 6\nsleep 1\nwalkshot {out / 'toyland-original.png'}\n"
                 "ack complete\nsleep 1\nquit\n")
     env = dict(os.environ, DS_TEST="1", W32_AUDIO_MUTE="1", TP_SKIP_INTRO="1",
                TP_DATA=str(profile), TP_CONTROL=str(control), TP_TEST="65:quit",

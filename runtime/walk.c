@@ -1,4 +1,4 @@
-/* Visitor View (experimental): walk through the park at a visitor's height, a reconstructed 3D view
+/* Visitor View (experimental): walk through the park at a visitor's height, with authored 3D models
  * drawn natively from the game's own state and art (docs/PLAN.md, "Visitor View").
  *
  * What it rests on (all from the native renderer, native_land.c, which is pixel-exact against
@@ -13,8 +13,8 @@
  *   1/256ths (bytes 6, 8): people are drawn at x + tw b6/256 + (tw/3) b8/256, y + th b8/256.
  * - Each thing is drawn by native_land.c into a picture of its own (tp_native_cell_things marks
  *   where each thing starts): that picture, the game's art with its animation, riders in their
- *   seats, carried items and thoughts, supplies the original palette texture for a fixed
- *   reconstructed shell (walk_mesh.h). P selects the original camera-facing cards for comparison.
+ *   seats, carried items and thoughts, supplies the original palette texture for an authored
+ *   model (walk_model.h), or the original card if no compatible model exists. P compares cards.
  * - One scale for everything: an art pixel is 1/tws of a cell across and aspect/tws up (320x200's
  *   pixels are 1.2 times as tall as wide on a 4:3 screen), so people, stalls and rides keep the
  *   sizes the artists gave them relative to each other and to the cells. The eye is at a
@@ -22,8 +22,9 @@
  * - Who rides what: a ride's riders are a chain through word 0x47 (class 4 rides, class 0x0e
  *   cars; class 0x0a holds one), a train's cars a chain through word 0x7a (class 0x12).
  *
- * Limits (explicit, see the plan): the art exists from one direction only. Hidden surfaces are
- * inferred by extrusion/lofting, not recovered or individually authored; people remain cards.
+ * Limits (explicit, see the plan): only Toy Land has an authored proof model so far. Hidden
+ * surfaces reuse source material in inferred layouts; people and other assets remain cards.
+ * The rejected generic extrusion/lofting study is opt-in through TP_WALK_SHELL_STUDY.
  * The visitor AI is not reverse-engineered, so you cannot steer
  * a visitor, buy or queue yourself: you walk as an onlooker, or ride along with a real visitor
  * (follow, hop to another, join someone on a ride) and see what they do and buy. Rides are seen
@@ -43,6 +44,7 @@
 #include <string.h>
 #include <time.h>
 #include "walk_mesh.h"
+#include "walk_model.h"
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
@@ -249,7 +251,13 @@ static void finish(Build *B) {
             if(type==0 || type==1 || type==5 || type==6 || type==14 || (type>=22 && type<=25)) c->shape=WM_BOX;
             if(type==2 || type==3 || type==10 || type==11 || type==12 || type==15 || type==17 || type==19 || type==21 || type==26 || type==28) c->shape=WM_OPEN;
             if(type==4) c->shape=WM_GROUND;
-        } else if (B->cls==0xa || B->cls==0x14 || B->cls==6 || B->cls==0x1c) c->shape=WM_BOX;
+        } else if (B->cls==0xa || B->cls==0x14 || B->cls==6 || B->cls==0x1c) {
+            c->shape=WM_BOX;
+            if(t && B->cls==0xa) {
+                int type=(uint16_t)r16((uint32_t)(t-M)+0x16)/107;
+                if(type<17)c->type=(int16_t)type;
+            }
+        }
         else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;
         else if (B->idx<0 || B->cls==0x18) c->shape=WM_TREE;
         if(B->idx<0) {
@@ -506,6 +514,7 @@ int tp_walk_start(double wx, double wy) {
     W.on = 1; W.x = wx < 0.5 ? 0.5 : wx > MAPE - 0.5 ? MAPE - 0.5 : wx; W.y = wy < 0.5 ? 0.5 : wy > MAPE - 0.5 ? MAPE - 0.5 : wy;
     W.yaw = ART_YAW; W.mode = getenv("TP_WALK_DIORAMA") ? MODE_DIORAMA : MODE_STREET;
     W.mesh = !getenv("TP_WALK_MESH") || atoi(getenv("TP_WALK_MESH")) != 0;
+    wm_models_reset();
     W.hscale = getenv("TP_WALK_SCALE") ? atof(getenv("TP_WALK_SCALE")) : 1; if (W.hscale < 0.25 || W.hscale > 4) W.hscale = 1;
     snaps[0].valid = snaps[1].valid = 0; last_snap = 0;     /* (front stays: the emulation thread may be swapping) */
     pthread_mutex_unlock(&lock);
@@ -571,7 +580,7 @@ void tp_walk_command(int cmd) {
     } else if (cmd == WALK_NOCLIP) {
         W.noclip = !W.noclip; set_note(W.noclip ? "Walking through everything" : "Rides and scenery block the way");
     } else if (cmd == WALK_MESH) {
-        W.mesh=!W.mesh; set_note(W.mesh ? "Pixel 3D: original pixels on reconstructed surfaces" : "Original camera-facing sprites");
+        W.mesh=!W.mesh; set_note(W.mesh ? "Authored 3D preview; original sprites for remaining assets" : "Original camera-facing sprites");
     }
     pthread_mutex_unlock(&lock);
 }
@@ -662,7 +671,7 @@ int tp_walk_status(char *buf, int n) {
     char what[96];
     if (W.follow && s && s->valid && s->f_cont) snprintf(what, sizeof what, "On %s with a visitor", s->f_name[0] ? s->f_name : "a ride");
     else if (W.follow) snprintf(what, sizeof what, "Following a visitor");
-    else snprintf(what, sizeof what, W.mesh ? "Pixel 3D study" : "Walking (original cards)");
+    else snprintf(what, sizeof what, W.mesh ? "Authored 3D preview" : "Walking (original cards)");
     if (now() < note_until) snprintf(buf, (size_t)n, "%s   ·   %s", what, note);
     else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  R ride  V view  P compare  Esc leave", what, (int)W.cam_x, (int)W.cam_y);
     pthread_mutex_unlock(&lock);
@@ -777,6 +786,18 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             float forward=dx*cos(yaw)+dy*sin(yaw), lateral=dx*rx+dy*ry;
             if (dist-radius>FOG1 || forward+radius<.08f || fabsf(lateral)>fmaxf(0,forward)*tan(fov/2)+radius) continue;
             mr.texture=s->pix+c->off; mr.tw=c->w; mr.th=c->h;
+            const WMModel *model=wm_model_find(c->cls,c->type);
+            if(model && wm_model_draw(&mr,model,c->x,c->y,(float)W.hscale)) {
+                rendered++;continue;
+            }
+            if(!getenv("TP_WALK_SHELL_STUDY")) {
+                /* Unmodeled assets retain their original presentation. A
+                 * failed generic reconstruction is not a substitute model. */
+                WMShell card={.x=c->x,.y=c->y,.kx=kx,.ky=ky,.ax=c->ax,.ay=c->ay,
+                    .w=c->w,.h=c->h,.shape=WM_SMALL,.rx=-sinf(yaw),.ry=cosf(yaw),
+                    .dx=cosf(yaw),.dy=sinf(yaw)};
+                wm_shell(&mr,&card,dist);rendered++;continue;
+            }
             /* Keep the original direction-dependent character animation on a
              * camera-facing card; structures stay fixed in world space. */
             int person=c->cls==2 || c->cls==8;
