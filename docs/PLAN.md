@@ -654,6 +654,18 @@ smaller as well as larger with a slider, rail rides cannot be laid.
 - Rail rides, tested in a copy of TESTPARK (128x128): Big Dipper bought, station placed at x 55..59 y 88..89
   (found by diffing the things pool), five track pieces laid, curve and straights; the installed build before
   the two tables does the same. The player's failure is not yet reproduced: which ride, where, what happens.
+- Placing rides distorting other sounds (TESTPARK copy, sound on, TP_SOUND_LOG): the game starts some sounds
+  from its drawing. The ride object's draw (0x11e9a7, kinds 12/14/16 -> 0x11eba6) starts sample 22, HAMMER.RAW,
+  whenever its counter +0x20 is 0 or a multiple of 5: a ride being built, or held on the pointer, every frame
+  drawn. 162 starts in a minute, 126 of them within 30 ms of the one before; the driver stacks the copies.
+  Now the same sample started again within 120 ms is dropped (qol.c, H_SFX; TP_SFX_REPEAT ms, 0: as the game).
+  The soft limit was working in 43 of 264 s before, 4 of 55 after; nothing clips hard either way. Bank 0 names
+  are in SNDS0-0.TAB, sample n = entry n-1 (6 DIG, 9 ROLBLD, 22 HAMMER, 35 EXPLOD3).
+- Ride placement stall: not seen in TESTPARK (Big Dipper placed, 60 frames a second throughout, one 50 ms frame).
+- Exploding rides: wear is ride thing +0x2e, added at each cycle's end (0x131ed3, +0x3a cycles); past twice the
+  ride type's +0xa8 the ride explodes (0x16662d, EXPLOD3 from 0x166674). Forced in TESTPARK (poke +0x2e to
+  0xfff0; camera 0x1d667a/0x1d6666 moved onto it): the slide exploded on screen, 60 frames a second, park ticks
+  at most 28 ms. No hang; the earlier one was likely the overdue-timer stall fixed for the ew sound.
 - A person's path search (0x162d5c, up to 40 steps) took only cells 0x42..0xe7f: rows 1..57 of a 64-wide map,
   but rows 1..28 of a 128-wide one. Now (tp_map_w + 1) .. (tp_map_ext - 6) * tp_map_w (sites 162e83, 162e8a).
 - Seen while testing: placing a ride in a scratch park (scripted, maybe mis-clicked) gave a 21 s stretch
