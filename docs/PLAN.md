@@ -632,6 +632,19 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Fence gaps in 128x128 parks; the black pointer (2026-10-18)
+
+The player: large gaps in the fences of large sandbox parks; the hand pointer black at a new game.
+- Fences: the border routine 0x118bc0 still had three 64x64 numbers: the side fences' loop (0x119221, rows
+  1..55: the sides stopped there, 65 rows short) and the bottom row's entrance gap (0x11901a / 0x119021,
+  columns 30..34: a hole of five). Map-geometry sites now (tp_map_ext - 8, tp_map_ext / 2 -/+ 2; sites 634).
+  Parks made before keep their holes in their saves: a loaded 128x128 park gets the game's rule again on its
+  empty border cells at its first frame (bigmap.c repair_border). Checked: a new park's sides 119/119 rows,
+  the bottom row open only at the entrance; the old TEST park, 133 pieces filled.
+- Pointer: the app rebuilt its copy of the game's pointer only when its shape changed (view.c's serial),
+  so one made while a new game faded its palette in stayed black. It now also rebuilds when the pointer's
+  colours change (main.m: a hash of its pixels): 30 rebuilds during the fade, none after.
+
 ## EXTRAS: this port's options in the game's own top bar (2026-10-18)
 
 The player asked for the new options that make sense mid-game in the top menu, in a section of their own,

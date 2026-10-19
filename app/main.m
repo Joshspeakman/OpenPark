@@ -101,7 +101,8 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     /* The park view (runtime/view.c): on when zoomed, or when the window is wider
      * than 4:3 (widescreen: the park fills it, the interface stays in a centred
      * 4:3 column); off, the game draws its own view. */
-    BOOL _viewOn, _live, _viewMoved, _menuWide;   /* _menuWide: a full-screen game window in the wide view (see present) */
+    BOOL _viewOn, _live, _viewMoved, _menuWide;
+    uint32_t _curHash;                             /* the game pointer's pixels, as last made (updateGameCursor) */   /* _menuWide: a full-screen game window in the wide view (see present) */
     IOSurfaceRef _surf[2]; int _surfIdx;  /* the park view's pictures, shown in turn */    /* _viewMoved: pan or zoom since the last picture (compose now) */
     double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when the view last ended */
     uint32_t *_big; int _bigW, _bigH;
@@ -336,8 +337,11 @@ static uint32_t function_key(uint8_t scan, NSEventModifierFlags m) {
     int serial = tp_view_cursor_rgba(px, &w, &h, &ox, &oy);
     NSRect vr = [self viewRect];
     double kx = vr.size.width / [self layoutW], ky = vr.size.height / _sh;   /* points per game pixel */
-    if (serial == _curSerial && fabs(kx - _curKx) < 0.01 && fabs(ky - _curKy) < 0.01 && (_gameCursor || !serial)) return;
-    _curSerial = serial; _curKx = kx; _curKy = ky;
+    /* (its colours too: the serial follows its shape, but a new game fades the palette in from black, and a pointer
+     * made then stayed black until its shape changed) */
+    uint32_t hash = 2166136261u; for (int y = 0; y < h && y < 64; y++) for (int x = 0; x < w && x < 64; x++) hash = (hash ^ px[y * 64 + x]) * 16777619u;
+    if (serial == _curSerial && hash == _curHash && fabs(kx - _curKx) < 0.01 && fabs(ky - _curKy) < 0.01 && (_gameCursor || !serial)) return;
+    _curSerial = serial; _curHash = hash; _curKx = kx; _curKy = ky;
     if (!serial || w <= 0 || h <= 0) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; return; }
     double cap = getenv("TP_CURSOR_CAP") ? atof(getenv("TP_CURSOR_CAP")) : 64;      /* macOS shows no cursor larger than 64 points */
     if (w * kx > cap || h * ky > cap) { double f = cap / fmax(w * kx, h * ky); kx *= f; ky *= f; }

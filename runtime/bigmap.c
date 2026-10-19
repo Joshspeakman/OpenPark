@@ -170,8 +170,32 @@ void tp_bigmap_poll(void) {
     int n = tp_host_memory()[0x1d66f1] == 0 ? 128 : 64;
     if (n != (int)tp_map_ext) { fprintf(stderr, "bigmap: sim level %d: the park is now %dx%d\n", tp_host_memory()[0x1d66f1], n, n); rebuild(n); }
 }
-void tp_bigmap_loaded(void) { setup_open = 0; }   /* (a saved park: its own size, from host.c) */
-void tp_bigmap_setup_done(void) { if (setup_open) { tp_bigmap_poll(); setup_open = 0; } }
+/* The border of a 128x128 park made before the fence fix (2026-10-18: the side loop 0x119221 and the bottom row's
+ * entrance gap 0x11901a / 0x119021 were still 64x64's): the game's rules again, on its empty cells only (0x118bc0:
+ * byte 2 and word 0 clear -> the fence's piece, byte 3 bit 3 set). Run at the first frame of a loaded park. */
+static int repair_due;
+static void repair_border(void) {
+    uint8_t *m = tp_host_memory(); uint32_t map; memcpy(&map, m + 0x1d3b08, 4);
+    int n = (int)tp_map_ext, w = (int)tp_map_w, fixed = 0;
+    if (!map || n != 128 || w != 128) return;
+    #define CELL(x, y) (m + map + (uint32_t)(((y) * w + (x)) * 4))
+    #define EMPTY(c) (!(c)[2] && !(c)[0] && !(c)[1])
+    for (int y = 1; y < n - 8; y++) {
+        uint8_t *l = CELL(0, y), *r = CELL(n - 1, y);
+        if (EMPTY(l)) { l[2] = 0xcc; l[3] |= 8; fixed++; }
+        if (EMPTY(r)) { r[2] = 0xcc; r[3] |= 8; fixed++; }
+    }
+    for (int x = 0; x < n; x++) {
+        uint8_t *b = CELL(x, n - 8);
+        if (EMPTY(b) && (x < n / 2 - 2 || x > n / 2 + 2)) { b[2] = 0xcb; b[3] |= 8; fixed++; }
+        if (x < n / 2 - 1 || x > n / 2 + 1) CELL(x, n - 9)[3] |= 8;
+    }
+    #undef CELL
+    #undef EMPTY
+    if (fixed) fprintf(stderr, "bigmap: the border's fence completed (%d pieces)\n", fixed);
+}
+void tp_bigmap_loaded(void) { setup_open = 0; repair_due = 1; }   /* (a saved park: its own size, from host.c) */
+void tp_bigmap_setup_done(void) { if (repair_due) { repair_due = 0; repair_border(); } if (setup_open) { tp_bigmap_poll(); setup_open = 0; } }
 
 /* At start-up, before the game allocates its blocks: the block's size; TP_MAP_W / TP_MAP_EXT force a layout
  * (development and tests: TP_MAP_ALLOC gives the block of another size, for the same memory layout). */
