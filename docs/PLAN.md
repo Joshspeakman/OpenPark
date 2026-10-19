@@ -632,6 +632,17 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Game windows stay widescreen (2026-10-18)
+
+The player: opening the ride or shop catalogue switched the picture from widescreen to 4:3 (a jerk each
+way). With a full-screen game window the game stops drawing the park; after 150 ms view.c reports the
+view not live and the app used to lay out the game's 4:3 screen (stretched or boxed). Now, in the wide
+view, the layout stays: the last park picture at the sides, the game's screen in the column its interface
+takes in the park view (the panel's), every frame, the pointer mapped into that column (main.m, present:
+menuWide). Checked full screen with the player's park: the shop catalogue opens in the column with the
+park either side, its close button works, the park view returns. Not handled: Panel Size above 1 (the
+window's panel is drawn at 1x), and 640x480 screens (they fall back to the old way).
+
 ## Ride music: no more tunes stepping on each other (2026-10-18)
 
 The player: ride music steps on each other. The game plays the tune of a music ride in its own view
