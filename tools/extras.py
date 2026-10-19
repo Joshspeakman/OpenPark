@@ -117,6 +117,8 @@ def scan(source, packs, data):
         h = sha256(user)
         for name, pack in packs.items():
             if pack.get('data_track_sha256') == h:
+                if name != 'amiga-cd32':
+                    return name, pack['gives']
                 audio = {n: d for n, (mode, d) in tracks.items() if mode == 'AUDIO'}
                 return name, import_cd32_audio(audio, pack, data / 'extras' / name)
         return None, 'not a known disc'
@@ -137,7 +139,7 @@ def scan(source, packs, data):
         finally:
             subprocess.run(['hdiutil', 'detach', mnt], capture_output=True)
     if src.is_dir():
-        cues = sorted(src.glob('*.cue'))
+        cues = sorted(src.glob('*.cue')) or sorted(src.glob('*/*.cue'))
         if cues:
             return scan(cues[0], packs, data)
         return scan_folder(src, packs)
