@@ -5,28 +5,42 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
-2026-10-19, user rejected the generic 3D extrusion's appearance. New branch
-`codex/visitor-authored-models` replaces that approach with asset-specific
-surface models. Toy Land is the first proof: 302 vertices / 144 triangles,
-separate roof slopes/ridge, chimney, open arch, side/rear walls and thick bear
-badge. UVs sample original palette pixels; hidden layouts remain inferred.
-Model data and its authoring script stay in ignored `work/visitor-3d/`.
-The native renderer loads local `TP_DATA/visitor3d` meshes. Unmodeled objects
-use original sprites; the rejected shells are now explicitly opt-in only.
-One model is implemented, not the entire asset set or ride animation rigs.
+2026-10-19, authored asset follow-up (Codex, `codex/visitor-authored-models`):
+the user liked the Toy Land direction and requested a solid entrance, four more
+structures, trees and shops. Toy Land now has a closed entrance plane carrying
+the original pixels (246 vertices / 116 triangles); no recessed interior walls.
+The separate study profile now contains eight static review models: Toy Land,
+Haunted House, Gift Shop, Novelty Shop, Coffee Shop, Oak, Palm and Birch.
+Static scenery is keyed by its original animation ID. Original sprites remain
+the fallback for unmodeled objects and incompatible composite dimensions.
 
-Evidence: 24-angle offline model review at
-`work/visitor-3d/authored/index.html`, plus front/side/rear and actual TESTPARK
-snapshot captures. Source texture alignment was corrected against the live
-shop composite (its inferred anchor differs from the standalone sprite).
-Synthetic checks pass in both renderer modes; new loader/sampling tests check
-invalid input, exact palette texels, changed frames and incompatible-crop
-fallback under ASan/UBSan. Native study build/signature validation passed.
-Headed attempt `headed-sqectaq9` still aborts before creating a window (exit
--6, zero captures); no headed pass or user visual acceptance claimed. The
-headed script now copies the authored model and visits Toy Land from all sides.
-The existing Nightly checkout remains clean. Next: establish the one-model
-visual benchmark before authoring further assets and ride mechanisms.
+Evidence: `work/visitor-3d/authored/index.html` has each source sprite and a
+24-angle native-renderer turntable: 200 captures passed under ASan/UBSan. The
+capture tool now fails if a requested model is missing, invalid or incompatible,
+so fallback sprites cannot silently pass a model review. A copied park snapshot
+checks all five structure mappings; a separate scratch snapshot with three
+added trees verifies all eight runtime mappings and matching texture sizes.
+Both walk modes, 17,808 view checks and mesh/model tests pass. The isolated
+native app rebuilt and its signature verifies. The fresh headed attempt
+`headed-6buixn_p` again exited -6 in 0.11 s before a window or capture. No headed
+or overall visual pass is claimed. The existing Nightly checkout remains clean.
+New assets and inferred sides/rears still need user visual review; no complete
+ride animation rigs or full asset conversion are claimed.
+
+2026-10-19, additional user direction: maintain **Faithful 3D** and a second
+option named **Reimagined**, eventually selectable in the launcher. Reimagined
+covers the overhead game AND Visitor View: all rides, shops, props, landscaping,
+guests, staff and entertainers, including animation states. Five imagegen
+concept sheets now cover buildings, rides/motion poses, people/entertainers,
+landscaping/props and a two-camera park comparison. They are local raster
+concepts, not runtime meshes or game screenshots. Review:
+`work/reimagined/index.html`; coverage: `work/reimagined/coverage.json`.
+The tracker lists 65 object definitions plus eight loaded staff definitions;
+guests, terrain, track composites and other runtime families remain additional
+scope. Twenty-five definition records have concept representations, not
+finished conversions. Reimagined meshes/rigs, both-view rendering, launcher
+selection and full catalog conversion remain unimplemented. Architecture and
+acceptance plan: `docs/reports/2026-10-19-art-options.md`.
 
 2026-10-19, Visitor View original-pixel 3D study (Codex, separate branch
 `codex/visitor-3d-mockups`, as requested): concepts revised to preserve the

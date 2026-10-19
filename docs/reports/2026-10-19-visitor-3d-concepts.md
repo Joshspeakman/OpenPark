@@ -19,33 +19,62 @@ or with a differently cropped composite, use their original sprites. P still
 compares the model mode to original cards. `TP_WALK_SHELL_STUDY=1` is only for
 reproducing the rejected study; it is not the new default.
 
-Toy Land is the first actual authored proof: 302 vertices / 144 triangles,
-two sloping roof planes, a stone ridge, separate chimney and pot, a front
-gable, a physically open doorway with recess/jambs, wall panels and a shallow
-solid bear badge. UVs were laid out against the owned 100x77 source frame 4021.
-Roof samples avoid the fascia which occludes the thatch in the source image.
-Source texture dimensions are checked before model rendering; the live shop's
-different world anchor does not shift its texture. Side/rear architecture is
-inferred and reuses existing window, timber and thatch patterns. These surfaces
-cannot claim original unseen details. Only this one asset is modeled; rides and
-other assets have not been converted to authored geometry or animation rigs.
+The user accepted the Toy Land direction and requested a solid entrance plus
+four additional structures and trees. Toy Land now has 246 vertices / 116
+triangles, separate roof slopes, ridge, chimney/pot, solid front facade and bear
+badge. The original dark entrance pixels are on a closed plane; all recessed
+jamb/interior/threshold geometry was removed. Unseen sides/rears are inferred
+from existing motifs and cannot claim original unseen detail.
+
+The local review profile now has eight authored static models:
+
+| Asset | Runtime key | Triangles |
+| --- | --- | ---: |
+| Toy Land | 10/7 | 116 |
+| Haunted House | 4/6 | 767 |
+| Gift Shop | 10/9 | 378 |
+| Novelty Shop | 10/11 | 64 |
+| Coffee Shop | 10/6 | 271 |
+| Oak | 255/114 | 972 |
+| Palm | 255/111 | 148 |
+| Birch | 255/115 | 192 |
+
+Static scenery's original animation ID is its model key. These are separate
+surface constructions, not the rejected automatic shells. Coffee Shop has a
+solid cup, top swirl, handle, striped canopy and separate tables/parasols;
+Haunted House and Gift Shop have separate wings/towers/roofs. Trees use actual
+trunks, branches and foliage surfaces. These new models are for review; their
+shape, texture density, inferred views and scale are not declared accepted.
+No moving ride mechanism, guest or staff rig is implemented.
 
 Local game-derived artifacts (intentionally ignored):
 
-- `work/visitor-3d/authored/toyland.py`: authored surface/UV construction.
-- `work/visitor-3d/profile/visitor3d/0a-7.mesh`: the runtime model.
-- `work/visitor-3d/authored/index.html`: a 24-angle offline turntable with links
-  to the source pixels, front/side/rear views and actual TESTPARK snapshot.
+- `work/visitor-3d/authored/toyland.py`, `review_set.py`, `surfaces.py`: local
+  authoring sources; `profile/visitor3d/` holds the eight runtime meshes.
+- `work/visitor-3d/authored/index.html`: source plus 24-angle turntable per asset,
+  built by generic `tools/visitor_model_gallery.py`.
+- `authored/toyland-park-solid.png`: actual copied TESTPARK snapshot after the
+  doorway fix; `scenery-integration.png` adds three trees in a separate scratch
+  memory image, without changing any save. Both are offline native captures.
+- `work/reimagined/index.html`: the subsequent second art direction, distinct
+  from these original-pixel models; see the separate art-options report.
 
-Validation: both existing walk modes and 17,808 view checks pass under
-sanitizers; the new synthetic model test covers bounded loading, invalid
-indices/nonfinite input, palette-exact sampling, texture-frame changes and
-fallback for incompatible texture dimensions. The native study app rebuilt
-and its signature verified. The updated headed test copies the mesh into its
-scratch profile and visits Toy Land from four directions. Its attempt in
-`work/visitor-3d/headed-sqectaq9` exited -6 in 0.11 seconds before any window
-or capture, consistent with the previously diagnosed macOS registration abort.
-No headed pass or user acceptance of this new visual direction is claimed.
+Validation: both walk modes and 17,808 view checks pass; synthetic mesh/model
+checks cover palette texels, depth, clipping, invalid input, changed frames and
+incompatible texture fallback under ASan/UBSan. The eight-model gallery produced
+200 successful sanitized captures (192 model views and eight source exports).
+Requested models must now load and match their source dimensions or the capture
+fails: earlier negative root vertices had revealed a silent fallback risk, fixed
+by clipping authored ground-touching vertices to z=0. Logs record model triangle
+counts, so original cards cannot stand in for the requested gallery model.
+The park/scratch-scenery checks resolve all eight runtime keys with matching
+source sizes. This verifies routing, not every possible animation/state.
+
+The separate native app rebuilt, installed and passed signature verification.
+The fresh headed attempt `work/visitor-3d/headed-6buixn_p` exited -6 in 0.11 s,
+with zero windows/captures, consistent with the previously diagnosed macOS
+application-registration abort. No headed pass is claimed. The separate app,
+profile and bounded headed runner remain available for the user's GUI session.
 
 The sections below document the earlier concepts and rejected prototype.
 

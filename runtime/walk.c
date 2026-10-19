@@ -262,6 +262,7 @@ static void finish(Build *B) {
         else if (B->idx<0 || B->cls==0x18) c->shape=WM_TREE;
         if(B->idx<0) {
             int animation=(uint16_t)r16(0x1b44c1+(uint32_t)(-B->idx)*2);
+            c->type=(int16_t)animation; /* stable scenery key for authored models */
             if(animation==431) c->shape=WM_GROUND; /* lake */
             if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
         }

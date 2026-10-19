@@ -82,7 +82,15 @@ int main(int argc,char**argv){
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
         Card*c=&s->cards[0];c->shape=(uint8_t)atoi(argv[7]);
-        if(argc>11 && !strcmp(argv[9],"model")) {c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);}
+        if(argc>11 && !strcmp(argv[9],"model")) {
+            c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
+            const WMModel*m=wm_model_find(c->cls,c->type);
+            if(!m || m->tw!=c->w || m->th!=c->h) {
+                fprintf(stderr,"Requested model %d/%d missing, invalid, or incompatible with %dx%d source\n",c->cls,c->type,c->w,c->h);
+                return 4;
+            }
+            fprintf(stderr,"Authored model %d/%d: %d triangles\n",c->cls,c->type,m->nt);
+        }
         float width=c->w/s->g.tws,height=c->h*s->g.aspect/s->g.tws;
         double dist=fmax(width,height)*1.45+1;
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
@@ -92,8 +100,10 @@ int main(int argc,char**argv){
     }else{
         if(getenv("TP_MODEL_INSPECT")) {
             Snap*s=&snaps[front];for(int i=0;i<s->ncards;i++) {
-                Card*c=&s->cards[i];if(c->cls==10 && c->type==7)
-                    fprintf(stderr,"Toy Land thing %d: %.2f,%.2f size %dx%d anchor %d,%d\n",c->idx,c->x,c->y,c->w,c->h,c->ax,c->ay);
+                Card*c=&s->cards[i];const WMModel*m=wm_model_find(c->cls,c->type);
+                if(m) fprintf(stderr,"Model %d/%d thing %d: %.2f,%.2f source %dx%d model %dx%d %s\n",
+                    c->cls,c->type,c->idx,c->x,c->y,c->w,c->h,m->tw,m->th,
+                    c->w==m->tw && c->h==m->th ? "compatible" : "sprite fallback");
             }
         }
         tp_walk_teleport(x,y,yaw);tp_walk_input(0,0,0,0,0,0,0);
