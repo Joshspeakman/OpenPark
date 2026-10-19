@@ -40,10 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <mach/mach_time.h>
-#include <dispatch/dispatch.h>
-#include <mach/mach.h>
-#include <mach/thread_policy.h>
+#include "platform.h"                               /* (timing, real-time thread, parallel bands: platform/<os>/) */
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -277,21 +274,14 @@ static void pace_frame(void) {
     double wait = target - now();
     if (getenv("TP_PACE_DEBUG")) { static double l3, late; if (-wait > late) late = -wait; if (t - l3 > 1) { fprintf(stderr, "pace late max %.2f ms\n", late * 1e3); late = 0; l3 = t; } }
     if (getenv("TP_PACE_DEBUG")) { static double l; static int n, sl; n++; if (wait > 0) sl++; if (t - l > 1) { fprintf(stderr, "pace: %d frames, %d waited, fps %.0f, last wait %.2f ms\n", n, sl, fps, wait * 1e3); n = sl = 0; l = t; } }
-    static mach_timebase_info_data_t tb; if (!tb.denom) mach_timebase_info(&tb);
     { static int rt; if (!rt) {                           /* the game thread as a real-time thread: timers not coalesced, woken on time */
-        rt = 1; thread_time_constraint_policy_data_t pol;
-        pol.period = (uint32_t)(period * 1e9 * tb.denom / tb.numer);
-        pol.computation = (uint32_t)(0.004 * 1e9 * tb.denom / tb.numer);
-        pol.constraint = (uint32_t)(period * 0.9 * 1e9 * tb.denom / tb.numer);
-        pol.preemptible = 1;
-        kern_return_t kr = thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&pol, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
-        fprintf(stderr, "pace: real-time thread policy %s\n", kr == KERN_SUCCESS ? "set" : "refused"); } }
-    {   /* mach_wait_until: woken on time, unlike nanosleep under load; a millisecond at a time, the sound card
-         * going on meanwhile (sb16.c: the HMI driver mixes just ahead of its DMA position) */
-        void sb16_pump(double t); uint64_t ms = (uint64_t)(1e6 * tb.denom / tb.numer);
-        while (target - now() > 0.0015) { mach_wait_until(mach_absolute_time() + ms); sb16_pump(now()); }
+        rt = 1; fprintf(stderr, "pace: real-time thread policy %s\n", tp_plat_realtime_thread(period) ? "set" : "refused"); } }
+    {   /* a millisecond at a time, the sound card going on meanwhile (sb16.c: the HMI driver mixes just ahead of its
+         * DMA position) */
+        void sb16_pump(double t);
+        while (target - now() > 0.0015) { tp_plat_sleep(0.001); sb16_pump(now()); }
         double left = target - now();
-        if (left > 0.0008) mach_wait_until(mach_absolute_time() + (uint64_t)((left - 0.0005) * 1e9 * tb.denom / tb.numer));
+        if (left > 0.0008) tp_plat_sleep(left - 0.0005);
     }
     while (now() < target) ;                              /* (the last half millisecond, exactly) */
     tp_frame_paced_at = now();
@@ -1652,7 +1642,7 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
     double kk = ui_scale; if (kk * g.sw > lw) kk = lw / g.sw;   /* (no wider than the view) */
     ComposeJob job = {out, ow, oh, smooth, g, z, vx, vy, lw, col, lpx, lpy, sx, sy, ss, pal, stride, kk};
     dbg_stride = stride;
-    dispatch_apply_f((size_t)((oh + 31) / 32), DISPATCH_APPLY_AUTO, &job, compose_band);   /* bands of 32 rows across the cores */
+    tp_plat_parallel_for((size_t)((oh + 31) / 32), &job, compose_band);   /* bands of 32 rows across the cores */
     st_comp++; stats_tick();
     if (getenv("TP_VIEW_FPS")) tp_view_debug_fps = 1;
     if (getenv("TP_VIEW_GRID")) tp_view_debug_grid = 1;

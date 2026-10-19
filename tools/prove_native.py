@@ -15,6 +15,7 @@ from pathlib import Path
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
 from unicorn import x86_const as U
 from le import LE
+import toolchain
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (0x28656, 0x87790)
@@ -84,7 +85,7 @@ uint32_t tp_run(uint32_t fn, uint32_t *regs) {
     source = out / 'proof.c'
     source.write_text(wrapper)
     library = out / 'proof.dylib'
-    subprocess.run(['clang', '-arch', 'arm64', '-O2', '-dynamiclib', '-I', str(reference / 'recomp/runtime'), str(source), '-o', str(library)], check=True)
+    subprocess.run([*toolchain.cc(), '-O2', *toolchain.shared(), '-I', str(reference / 'recomp/runtime'), str(source), '-o', str(library)], check=True)
     lib = ctypes.CDLL(str(library))
     lib.tp_memory.restype = ctypes.c_void_p
     lib.tp_run.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
@@ -128,7 +129,7 @@ uint32_t tp_run(uint32_t fn, uint32_t *regs) {
             for at, size in writable:
                 if bytes(uc.mem_read(at, size)) != ctypes.string_at(memory + at, size):
                     raise AssertionError((hex(fn), iteration, 'memory mismatch', hex(at)))
-    result = {'architecture': 'arm64', 'functions': list(FUNCTIONS), 'cases': len(FUNCTIONS) * args.iterations,
+    result = {'architecture': toolchain.arch(), 'functions': list(FUNCTIONS), 'cases': len(FUNCTIONS) * args.iterations,
               'mismatches': 0, 'compared': ['eight integer registers', 'defined arithmetic flags and direction flag', 'all writable LE objects', 'scratch and stack'],
               'limits': 'Two integer/memory slices only; no startup, x87, DOS services, graphics, audio or game loop.'}
     (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')

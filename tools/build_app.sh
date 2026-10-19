@@ -47,14 +47,14 @@ if [[ -e "$APP.new" ]]; then mv "$APP.new" "$HOME/.Trash/$NAME-partial-$(date +%
 mkdir -p "$APP.new/Contents/MacOS" "$APP.new/Contents/Resources"
 INC="$REF/recomp/runtime"
 clang -arch arm64 -O2 -fobjc-arc -Wall -Wno-unused-function -I "$INC" -I runtime \
-  app/main.m app/audio.m app/launcher.m runtime/cinepak.c runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c work/app-release/game.a work/app-release-intro/game.a \
+  platform/macos/main.m platform/macos/audio.m platform/macos/launcher.m platform/macos/platform_macos.c runtime/cinepak.c runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c work/app-release/game.a work/app-release-intro/game.a \
   -framework Cocoa -framework QuartzCore -framework AVFoundation -framework AudioToolbox -framework UniformTypeIdentifiers -framework ImageIO -framework GameController -framework IOSurface -lz \
   -o "$APP.new/Contents/MacOS/ThemePark"
 "$PYTHON" tools/export_image.py "$EXE" "$APP.new/Contents/Resources/MAIN.TPIMG" >/dev/null
 "$PYTHON" tools/export_image.py "$INTRO" "$APP.new/Contents/Resources/INTRO.TPIMG" >/dev/null
 # Launcher art from the player's own copy: the title screen (its "theme PARK" box heads the
 # launch window), rendered by running the compiled game headless (muted, scratch).
-clang -arch arm64 -O2 -w -I "$INC" -I runtime runtime/host.c runtime/sb16.c runtime/headless.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c \
+clang -arch arm64 -O2 -w -I "$INC" -I runtime platform/macos/platform_macos.c runtime/host.c runtime/sb16.c runtime/headless.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c \
   work/app-release/game.a -lz -o "$OUT/tp-headless"
 ART=$(mktemp -d "$OUT/art-XXXXXXXX")
 DS_TEST=1 W32_AUDIO_MUTE=1 "$OUT/tp-headless" --game "$GAMEDIR/GAME" --overlay "$PWD/$ART/o1" \
@@ -86,13 +86,13 @@ for name, key in (("keyart.jpg", "galaxyBackgroundImage"), ("logo.png", "logo"),
 fetch_art
 for f in keyart.jpg logo.png; do [[ -s $DATA/art/$f ]] && cp "$DATA/art/$f" "$APP.new/Contents/Resources/$f"; done
 # The icon: the park planet (GOG's box art, else GOG's icon from the package) on a Nightly tile like
-# the other ports' (tools/tp_icon.m); GOG's own icon if that cannot be made.
+# the other ports' (platform/macos/tp_icon.m); GOG's own icon if that cannot be made.
 ICO=$GAMEDIR/goggame-1207660423.ico
 ICONSET=$OUT/AppIcon.iconset
 mkdir -p "$ICONSET"
 sips -s format png "$ICO" --out "$OUT/icon-256.png" >/dev/null
 SRC=$OUT/icon-256.png
-if clang -fobjc-arc -framework AppKit tools/tp_icon.m -o "$OUT/tp_icon"; then
+if clang -fobjc-arc -framework AppKit platform/macos/tp_icon.m -o "$OUT/tp_icon"; then
   if [[ -s $DATA/art/box.jpg ]] && "$OUT/tp_icon" "$DATA/art/box.jpg" "$OUT/icon-1024.png" --nightly --box; then SRC=$OUT/icon-1024.png
   elif "$OUT/tp_icon" "$OUT/icon-256.png" "$OUT/icon-1024.png" --nightly; then SRC=$OUT/icon-1024.png; fi
 fi

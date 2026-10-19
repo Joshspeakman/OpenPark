@@ -22,6 +22,7 @@ from capstone import x86 as X
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dos import load_image, BIAS
 from lift_dos import create_lifter, ROOT
+import toolchain
 
 # Bytes the DOS host places at bootstrap (dos.py DOS.bootstrap).
 SYNTHETIC = {0xf000: bytes.fromhex('cf'), 0xf010: bytes.fromhex('0fa90fa1071f619dc3')}
@@ -433,22 +434,22 @@ int tp_dispatch(Ctx *c) {
         obj = path.with_suffix('.o')
         if obj.exists() and obj.stat().st_mtime >= path.stat().st_mtime:
             return obj
-        subprocess.run(['clang', '-arch', 'arm64', args.opt, '-c', '-fPIC', '-w', '-I', inc, str(path), '-o', str(obj)], check=True)
+        subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(path), '-o', str(obj)], check=True)
         return obj
 
     with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as pool:
         objects = list(pool.map(compile_one, files))
     runtime = out / 'runtime.o'
-    subprocess.run(['clang', '-arch', 'arm64', args.opt, '-c', '-fPIC', '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
+    subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
     library = out / 'game.dylib'
     if not args.prefix:    # a prefixed image is linked into the app beside the main one
-        subprocess.run(['clang', '-arch', 'arm64', '-dynamiclib', *map(str, objects), str(runtime), '-o', str(library)], check=True)
+        subprocess.run([*toolchain.cc(), *toolchain.shared(), *map(str, objects), str(runtime), '-o', str(library)], check=True)
     staged = out / 'game.a.new'
-    subprocess.run(['libtool', '-static', '-o', str(staged), *map(str, objects)], check=True, capture_output=True)
+    toolchain.static_lib(staged, objects)
     os.replace(staged, out / 'game.a')
     if not args.prefix:
         (out / 'build.json').write_text(json.dumps({'image_sha256': image.sha256,
-            'library_sha256': hashlib.sha256(library.read_bytes()).hexdigest(), 'architecture': 'arm64'}, indent=2) + '\n')
+            'library_sha256': hashlib.sha256(library.read_bytes()).hexdigest(), 'architecture': toolchain.arch()}, indent=2) + '\n')
     report = {'blocks': len(blocks), 'functions': len(sources), 'seeds': len(seeds),
               'traced_blocks': len(observed), 'guarded': len(guarded),
               'targets_outside_code': sorted(hex(t) for t in outside)[:50], 'outside_count': len(outside),

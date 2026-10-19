@@ -13,6 +13,7 @@ from dos import DOS, Stop, REGS, SEGMENTS, MEMORY, load_image, scratch_profile
 from trace_startup import Original
 from lift_dos import create_lifter, ROOT
 from native_host import Native
+import toolchain
 
 
 def build(image, reference, out, blocks, variants):
@@ -46,7 +47,7 @@ def build(image, reference, out, blocks, variants):
     path = out / 'startup.c'
     path.write_text(header + '\n'.join(sources) + dispatch)
     library = out / 'startup.dylib'
-    subprocess.run(['clang', '-arch', 'arm64', '-O1', '-dynamiclib', '-I', str(reference / 'recomp/runtime'), str(path), '-o', str(library)], check=True)
+    subprocess.run([*toolchain.cc(), '-O1', *toolchain.shared(), '-I', str(reference / 'recomp/runtime'), str(path), '-o', str(library)], check=True)
     (out/'build.json').write_text(json.dumps({'image_sha256':getattr(image,'sha256',None),
         'library_sha256':hashlib.sha256(library.read_bytes()).hexdigest(),'architecture':'arm64'},indent=2)+'\n')
     (out / 'lift.json').write_text(json.dumps({'blocks':len(blocks), 'unsupported':lifter.unsup}, indent=2))

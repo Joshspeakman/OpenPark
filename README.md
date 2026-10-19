@@ -1,7 +1,8 @@
 # Theme Park — native macOS recompilation
 
-Bullfrog's Theme Park (1994) running as native Apple Silicon code. The DOS game's own code is statically
-recompiled to ARM64 and runs on a native Mac host: no DOSBox, Wine, Rosetta or CPU emulator at run time. You
+Bullfrog's Theme Park (1994) running as native code. The DOS game's own code is statically recompiled to C and
+compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU emulator at run time. macOS on Apple
+Silicon is the first platform; Windows and Linux are next ([docs/PORTING.md](docs/PORTING.md)). You
 build it from your own copy of the game; this repository contains no game code, data or art.
 
 ![A park in full swing, widescreen](docs/screenshots/park.jpg)
@@ -37,7 +38,17 @@ for coverage, the original developers' unfinished features, and a modding map.
 - **Mac comforts:** full screen, a launch window, and the game's pointer as the Mac pointer. Control-click is
   the right mouse button.
 
-## Requirements
+## Platforms
+
+| Platform | Status |
+|---|---|
+| macOS, Apple Silicon | Playable (this beta) |
+| Linux | The runtime compiles and its tests pass in CI; an app is to be written |
+| Windows | Planned |
+
+How a platform is added, and what is portable today: [docs/PORTING.md](docs/PORTING.md).
+
+## Requirements (macOS)
 
 - An Apple Silicon Mac and Apple's command-line tools (`xcode-select --install`). Tested on macOS 27; a build
   targets the macOS it is built on (set `MACOSX_DEPLOYMENT_TARGET=26.0` for macOS 26).
@@ -45,7 +56,7 @@ for coverage, the original developers' unfinished features, and a modding map.
 - **Your own copy of the game:** GOG's Mac package `theme_park_enUS_1_0_33010.pkg`. `config/inputs.json` records
   the package's and executables' hashes, and the build checks them.
 
-## Build and install
+## Build and install (macOS)
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # once: Capstone and Unicorn
@@ -106,7 +117,9 @@ python3 tools/extras.py --list                                            # what
   every function to C, which is compiled to ARM64.
 - **The host:** `runtime/host.c` provides the DOS, DPMI, mouse, keyboard, timer and VGA/VESA services in C.
   `runtime/sb16.c` models the Sound Blaster 16 and its DMA.
-- **The app:** `app/` is the Mac app: launcher, Core Animation presentation, Core Audio and input.
+- **The platform layer:** `runtime/platform.h` (timing, the game thread, parallel drawing), implemented in
+  `platform/macos/platform_macos.c` and `runtime/platform_posix.c`.
+- **The app:** `platform/macos/` is the Mac app: launcher, Core Animation presentation, Core Audio and input.
 - **Verification:** the Unicorn engine is used only during development, as a differential oracle. The CPU-written
   memory, registers, port traffic and frames of the recompiled code are compared with the x86 original. See
   [DOS contract](docs/DOS-CONTRACT.md) and [provenance](docs/PROVENANCE.md).
