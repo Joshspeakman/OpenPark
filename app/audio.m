@@ -10,8 +10,12 @@ static AVAudioUnitMIDIInstrument *synth;
 static float sfx_volume = 1.0f, music_volume = 1.0f;
 /* CD-audio music (Launcher > Sound > Music Type): a track imported from the owner's Amiga CD32 disc
  * (tools/extras.py) plays in place of the game's General MIDI tune, which goes silent meanwhile. */
-static AVAudioPlayerNode *cd;
-static int cd_playing;
+static AVAudioPlayerNode *cd, *vid;
+static int cd_playing, vid_playing;                 /* (a 3DO ride video's sound: the music silent meanwhile) */
+static void apply_music(void) {
+    if (synth) synth.volume = cd_playing || vid_playing ? 0 : music_volume;
+    if (cd) cd.volume = vid_playing ? 0 : music_volume;
+}
 
 /* MIDI byte stream -> messages (running status; SysEx passed whole). */
 static uint8_t msg[3], status_byte; static int have, need;
@@ -49,8 +53,8 @@ void tp_audio_midi_reset(void) {
 
 void tp_audio_set_volumes(float sfx, float music) {
     sfx_volume = sfx; music_volume = music;
-    if (synth) synth.volume = cd_playing ? 0 : music;
-    if (cd) cd.volume = music;
+    apply_music();
+    if (vid) vid.volume = music;
 }
 
 /* Play a WAV track (loop: until stopped or replaced); the MIDI synth is muted while it plays. */
@@ -67,14 +71,34 @@ int tp_audio_cd_play(const char *path, int loop) {
         [engine connect:cd to:engine.mainMixerNode format:b.format];
     }
     [cd scheduleBuffer:b atTime:nil options:loop ? AVAudioPlayerNodeBufferLoops : 0 completionHandler:nil];
-    cd.volume = music_volume;
     [cd play];
-    if (!cd_playing) { cd_playing = 1; if (synth) synth.volume = 0; }   /* (the game's MIDI keeps running underneath, unheard) */
+    cd_playing = 1; apply_music();                   /* (the game's MIDI keeps running underneath, unheard) */
     return 0;
 }
 void tp_audio_cd_stop(void) {
     if (cd) [cd stop];
-    if (cd_playing) { cd_playing = 0; if (synth) synth.volume = music_volume; }
+    cd_playing = 0; apply_music();
+}
+/* A ride video's sound (a WAV beside the 3DO stream), once; the music is silent until tp_audio_video_stop. */
+int tp_audio_video_play(const char *path) {
+    if (!engine || !vid) return -1;
+    NSError *err = nil;
+    AVAudioFile *f = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:@(path)] error:&err];
+    if (!f) return -1;
+    AVAudioPCMBuffer *b = [[AVAudioPCMBuffer alloc] initWithPCMFormat:f.processingFormat frameCapacity:(AVAudioFrameCount)f.length];
+    if (![f readIntoBuffer:b error:&err]) return -1;
+    [vid stop];
+    [engine disconnectNodeOutput:vid];
+    [engine connect:vid to:engine.mainMixerNode format:b.format];
+    [vid scheduleBuffer:b atTime:nil options:0 completionHandler:nil];
+    vid.volume = music_volume;
+    [vid play];
+    vid_playing = 1; apply_music();
+    return 0;
+}
+void tp_audio_video_stop(void) {
+    if (vid) [vid stop];
+    vid_playing = 0; apply_music();
 }
 int tp_audio_cd_busy(void) { return cd && cd.isPlaying; }
 
@@ -106,6 +130,9 @@ int tp_audio_start(void) {
     cd = [AVAudioPlayerNode new];
     [engine attachNode:cd];
     [engine connect:cd to:engine.mainMixerNode format:fmt];
+    vid = [AVAudioPlayerNode new];
+    [engine attachNode:vid];
+    [engine connect:vid to:engine.mainMixerNode format:fmt];
     /* The player's own instruments for the General MIDI music (a SoundFont .sf2 or DLS file, launcher > Sound). */
     NSString *bank = NSProcessInfo.processInfo.environment[@"TP_SOUNDBANK"] ?: [NSUserDefaults.standardUserDefaults stringForKey:@"SoundBank"];
     if (bank.length && [NSFileManager.defaultManager fileExistsAtPath:bank]) {
@@ -148,5 +175,5 @@ int tp_audio_start(void) {
 
 void tp_audio_stop(void) {
     [engine stop];
-    engine = nil; synth = nil; cd = nil; cd_playing = 0;
+    engine = nil; synth = nil; cd = nil; vid = nil; cd_playing = vid_playing = 0;
 }

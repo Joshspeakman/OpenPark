@@ -13,6 +13,10 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, 3DO extras: the 3DO (USA) disc imports its recorded tunes (Music Type: 3DO Recorded) and ride videos
+(Launcher > Display > Ride Videos; runtime/cinepak.c, played over the paused game). Space Shuttle and Tree House get
+videos the PC never had. TP_TEST_RIDE_VIDEO=<ride> (development) turns the win video's call into a ride's.
+
 2026-10-19, extras (tools/extras.py, config/extras.json: hashes only): the owner's Amiga CD32 bin/cue imports as CD-audio
 music, Launcher > Sound > Music Type (the Amiga game's own tune -> track table). Japanese CD, demo and PC CD are
 recognised (docs/reports/2026-10-19-other-editions.md). Checked in TESTPARK: Super Spinner tune 12 -> track 13 heard

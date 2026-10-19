@@ -109,18 +109,21 @@ class Decoder:
                     def bit():
                         nonlocal p, bits, mask
                         if not mask:
-                            bits = int.from_bytes(b[p:p + 4], 'big'); p += 4; mask = 0x80000000
+                            bits = int.from_bytes(b[p:p + 4], 'big') if p + 4 <= cend else 0
+                            p += 4; mask = 0x80000000
                         r = bits & mask; mask >>= 1
                         return r
                     for by in range(top, top + height, 4):
                         for bx in range(0, self.w, 4):
-                            if p >= cend:
-                                break
                             if cid == 0x3100 and not bit():
-                                continue             # unchanged block
+                                continue             # unchanged block (needs no data, even at the chunk's end)
                             if cid == 0x3200 or not bit():
+                                if p >= cend:
+                                    break
                                 self.v1(bx, by, v1[b[p]]); p += 1
                             else:
+                                if p + 4 > cend:
+                                    break
                                 self.v4(bx, by, [v4[b[p + q]] for q in range(4)]); p += 4
                 c = cend
             ytop = top + height

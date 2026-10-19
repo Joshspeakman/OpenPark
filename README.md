@@ -86,6 +86,7 @@ python3 tools/extras.py --list                                            # what
 | Disc | What it adds |
 |---|---|
 | **Amiga CD32** (Mindscape, 1995), a full bin/cue dump | Its CD-audio soundtrack: **Launcher > Sound > Music Type: Amiga CD32**. Each game tune plays the Amiga game's own track for it. |
+| **3DO** (USA), bin/cue | Its recordings of the PC tunes (**Music Type: 3DO Recorded**) and its first-person ride videos in full colour (**Launcher > Display > Ride Videos**), including Space Shuttle and Tree House, which have no PC video |
 | Japanese PC CD | Recognised: Japanese and Chinese text are a later step |
 | PC demo floppy (1994) | Recognised: a pre-release build ([the editions report](docs/reports/2026-10-19-other-editions.md)) |
 | DOS PC CD | The same data as GOG's release |
