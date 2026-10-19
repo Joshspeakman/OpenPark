@@ -72,6 +72,32 @@ bash tools/build_app.sh                    # installs ~/Applications/Theme Park 
 - **Everything else stays local:** everything game-derived (extracted files, generated C, traces, driver
   images) stays in the ignored `work/` and `build/` folders.
 
+## Linux (this branch, not yet played)
+
+This branch builds the same recompiled game for Linux (x86-64 or ARM64) with an SDL2 window instead of the Mac
+app. It has been compiled and smoke-tested, not yet played with the real game: see
+[the plan](docs/PLAN.md) ("Linux and Windows ports") for what is verified.
+
+```sh
+sudo apt install clang pkg-config libsdl2-dev zlib1g-dev libfluidsynth-dev fluid-soundfont-gm python3-venv   # Debian/Ubuntu
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python3 tools/prepare.py ~/Downloads/theme_park_enUS_1_0_33010.pkg
+bash tests/check_native.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
+  vendor/freedom-force-recomp --park      # checks the recompiler against the x86 original; the build uses its trace
+bash tools/build_linux.sh                  # installs ~/.local/lib/theme-park-native and a menu entry
+```
+
+- **Your copy of the game:** GOG's Mac package, as above (GOG offers it to every owner, whatever their system).
+  `prepare.py` reads it without Apple's tools.
+- **Where things go:** data (game files, saves, `settings.ini`, the log) in `~/.local/share/ThemeParkNative`;
+  `TP_DATA` and `TP_INSTALL_DIR` change them.
+- **Settings:** `settings.ini` (written on the first start, every setting explained) instead of a launch window;
+  the game's EXTRAS menu works as on the Mac.
+- **Music:** FluidSynth with a General MIDI SoundFont (the system's, or `SoundBank` in settings.ini); without
+  FluidSynth the music is off.
+- **Keys:** Ctrl where the Mac uses Command (Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+Shift+V Visitor View, Ctrl+E park
+  picture into `pictures/`), F11 or Alt+Enter full screen, Ctrl+wheel zooms, the middle button drags the park.
+
 ## Known limitations (beta 1)
 
 - **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which
