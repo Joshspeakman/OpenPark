@@ -632,6 +632,29 @@ Stage 2 (extent 128, 2026-10-18):
   pointer on the bottom row, no camera moves (before: 51 -> 52 -> 53 -> 54 with re-centres);
   camera reaches row 64 on a 128 park.
 
+## Sound levels and output; smaller panels; two more direction tables (2026-10-18)
+
+The player: audio still bad (placing rides distorts other effects), per-kind volumes in game, the panel
+smaller as well as larger with a slider, rail rides cannot be laid.
+- The card plays 16-bit signed mono at 44.1 kHz (DSP b4, TP_DEBUG). The effects are 8-bit samples of 11 to 22
+  kHz that the HMI driver holds to 44.1 kHz and adds with clipping. Now every sample starts at 0.6 of its
+  volume times its kind's level (hook at the driver's start-sample 0x18943f: (driver, record, selector),
+  volume word at +0x10, 0x7fff from 0x180c80 / 0x180fe0): system sounds are BUTTON, BUTTON2, BUTTON3 (bank 0
+  samples 1, 25, 26), game sounds the rest. sb16.c gives the 0.6 back, low-passes at 9 kHz (2nd order) and
+  soft-limits (tanh above 0.6). TP_SOUND_RAW=1: as before. Settings GameSoundVolume, SystemSoundVolume; EXTRAS
+  submenus MUSIC VOLUME, GAME SOUNDS, SYSTEM SOUNDS (off, quarter, half, three quarters, full; drop-downs
+  32669..32671; flags +0x1500, texts +0x1600). Not yet listened to by the player.
+- Panel Size 0.5x and 0.75x (launcher, View menu, EXTRAS): the band is drawn smaller and the rest of its place
+  shows park (view.c: band_map for any size; the panel rows beside a smaller panel). Checked: half size, park
+  around it, its buttons work. The launcher draws sliders (track and knob, click or drag) for Panel Size and
+  the four volumes.
+- Two more cell-step tables found by scanning the data for 64x64 steps outside the list: 0x1b7df4 (by direction
+  bit, used by the path and queue linker 0x12c2ec) and 0x1b48e4 (N E S W). Whether they are what broke laying
+  rail rides in a 128x128 park is not yet known.
+- Seen while testing: placing a ride in a scratch park (scripted, maybe mis-clicked) gave a 21 s stretch
+  without park ticks, the governor holding the game to DOS speed while it drew another screen. To repeat with
+  the player's test park (TESTPARK, 128x128, True Freeplay).
+
 ## Fence gaps in 128x128 parks; the black pointer (2026-10-18)
 
 The player: large gaps in the fences of large sandbox parks; the hand pointer black at a new game.

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <math.h>
 
 extern uint8_t *G_MEM;
 
@@ -276,9 +277,29 @@ static int fetch(float *l, float *r) {
 
 static float peak;
 float sb16_peak(void) { float p = peak; peak = 0; return p; }
+/* The output stage: the game's effects are 8-bit samples of 11 to 22 kHz that the HMI driver stretches to 44.1 kHz
+ * by holding each value (harsh, gritty highs), and it clips where they add up. qol.c starts every effect at 0.6 of
+ * its volume (headroom in the driver's sum); here that is given back, a gentle low-pass (2nd order, 9 kHz) takes the
+ * stair-steps' edge off, and a soft limit replaces the hard clip. TP_SOUND_RAW=1: the card's output as it was. */
+#define OUT_GAIN (1.0f / 0.6f)
+static int raw_out = -1; static double lp_rate; static float lp_b0, lp_b1, lp_b2, lp_a1, lp_a2, lp_x1[2], lp_x2[2], lp_y1[2], lp_y2[2];
+static float shape(float x, int ch) {
+    if (raw_out) return x;
+    x *= OUT_GAIN;
+    float y = lp_b0 * x + lp_b1 * lp_x1[ch] + lp_b2 * lp_x2[ch] - lp_a1 * lp_y1[ch] - lp_a2 * lp_y2[ch];
+    lp_x2[ch] = lp_x1[ch]; lp_x1[ch] = x; lp_y2[ch] = lp_y1[ch]; lp_y1[ch] = y;
+    return y > 0.6f || y < -0.6f ? tanhf(y) : y;    /* (below 0.6 tanh is within 7% of linear: leave it) */
+}
+static void shape_setup(double out_rate) {
+    if (raw_out < 0) raw_out = getenv("TP_SOUND_RAW") != NULL;
+    if (out_rate == lp_rate) return;
+    lp_rate = out_rate; double w = 2 * M_PI * 9000.0 / out_rate, c = cos(w), al = sin(w) / (2 * 0.7071), a0 = 1 + al;
+    lp_b0 = (float)((1 - c) / 2 / a0); lp_b1 = (float)((1 - c) / a0); lp_b2 = lp_b0; lp_a1 = (float)(-2 * c / a0); lp_a2 = (float)((1 - al) / a0);
+}
 /* Fill `frames` stereo float frames at `out_rate`; silence when idle. */
 void sb16_render(float *out, int frames, double out_rate) {
     pthread_mutex_lock(&lock);
+    shape_setup(out_rate);
     double step = playing && !paused ? (stereo && time_constant_rate ? rate / 2.0 : rate) / out_rate : 0;
     for (int i = 0; i < frames; i++) {
         if (step > 0) {
@@ -289,7 +310,7 @@ void sb16_render(float *out, int frames, double out_rate) {
                 if (fetch(&hold_l, &hold_r)) { hold_l = hold_r = 0; break; }
             }
             double f = phase < 1.0 ? phase : 1.0;
-            out[2 * i] = prev_l + (hold_l - prev_l) * (float)f; out[2 * i + 1] = prev_r + (hold_r - prev_r) * (float)f;
+            out[2 * i] = shape(prev_l + (hold_l - prev_l) * (float)f, 0); out[2 * i + 1] = shape(prev_r + (hold_r - prev_r) * (float)f, 1);
             if (hold_l > peak) peak = hold_l; else if (-hold_l > peak) peak = -hold_l;
         } else out[2 * i] = out[2 * i + 1] = 0;
         if (!playing || paused) step = 0;

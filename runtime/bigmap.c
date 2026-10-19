@@ -54,6 +54,8 @@ static const Table OFFSETS[] = {
     {0x1b16f8, 29, 0xc8, 26, {0x2a, 0x2c, 0x30, 0x32, 0x34, 0x36, 0x38, 0x3a, 0x3c, 0x3e, 0x40, 0x42, 0x44,
                               0x46, 0x48, 0x4a, 0x4c, 0x4e, 0x50, 0x52, 0x54, 0x56, 0x58, 0x5a, 0x5c, 0x5e}},   /* rides: footprints */
     {0x1b4cca, 23, 6, 1, {0}},                                       /* the park entrance's template */
+    {0x1b7df4, 1, 0, 4, {2, 4, 8, 16}},                              /* by direction bit, word-indexed (0x12c3de, 0x12c4aa: rails) */
+    {0x1b48e4, 1, 0, 4, {0, 2, 4, 6}},                               /* N E S W, beside the reverse-direction table 0x1b48ec */
 };
 #define NTABLES (int)(sizeof OFFSETS / sizeof OFFSETS[0])
 /* The game plays from copies of the ride and shop definitions, made when a park is started (0x119f73:
