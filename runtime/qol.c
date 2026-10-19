@@ -83,6 +83,11 @@ extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 
 
 static int log_sounds, ride_music = 1, park_tune, free_visitors, free_bus, arrive_x = 4;
 static double ew_gap, ew_last = -1e9;
+/* The same sample started again within this many seconds: dropped. The game starts some sounds from its
+ * drawing (a ride object's, 0x11eba6: sample 22 while its counter is 0, so a waiting ride, or one held on
+ * the pointer being placed, every frame drawn); at 60 frames a second the driver stacked a dozen copies and
+ * clipped every other sound. */
+static double sfx_repeat = 0.12, sfx_last[4][64];
 #define SFX_HEADROOM 0.6                    /* (sb16.c gives it back on output) */
 static int sfx_kind;                       /* the next sample: 1 a system sound */
 extern double tp_game_sound_volume, tp_system_sound_volume;   /* (the EXTRAS section) */
@@ -101,6 +106,7 @@ void tp_qol_init(void) {
     const char *e;
     log_sounds = getenv("TP_SOUND_LOG") != NULL;
     ew_gap = (e = getenv("TP_EW_GAP")) ? atof(e) : 0;
+    if ((e = getenv("TP_SFX_REPEAT"))) sfx_repeat = atof(e) / 1000.0;   /* (milliseconds; 0: as the game) */
     if ((e = getenv("TP_MUSIC_HOLD"))) music_hold = atof(e);
     if ((e = getenv("TP_GAME_SOUND_VOL"))) tp_game_sound_volume = atof(e) / 100.0;
     if ((e = getenv("TP_SYSTEM_SOUND_VOL"))) tp_system_sound_volume = atof(e) / 100.0;
@@ -323,6 +329,11 @@ void tp_qol_hook(int nested) {
             double t = now();
             if (ew_gap < 0 || t - ew_last < ew_gap) { if (log_sounds) fprintf(stderr, "sound: ew skipped\n"); skip_call(); return; }
             ew_last = t; if (log_sounds) fprintf(stderr, "sound: ew played\n");
+        }
+        if (sfx_repeat > 0 && a1 < 4 && a2 < 64) {
+            double t = now(), *last = &sfx_last[a1][a2];
+            if (t - *last < sfx_repeat) { if (log_sounds) fprintf(stderr, "sound: repeat skipped\n"); skip_call(); return; }
+            *last = t;
         }
         return;
     case H_PLAY_TUNE:
