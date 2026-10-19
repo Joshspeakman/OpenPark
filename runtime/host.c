@@ -424,7 +424,8 @@ static void debug_stats(void) {
     ltime = time_calls; lret = retrace_reads; lint = int_calls;
     { static uint32_t ls; float sb16_peak(void); fprintf(stderr, "sbirq/s=%u pend=%d peak=%.3f midi/s=%u ", sb_irqs_delivered - ls, sb_irq_pending, sb16_peak(), midi_bytes); ls = sb_irqs_delivered; midi_bytes = 0; }
     { double sb16_pump_stats(long *jumps, long *clipped); long jumps, clipped; double worst = sb16_pump_stats(&jumps, &clipped);
-      fprintf(stderr, "card: step max %.1f ms, over 5 ms x%ld, full-scale samples %ld ", worst * 1e3, jumps, clipped); }
+      double tp_host_card_hold_max(void);
+      fprintf(stderr, "card: step max %.1f ms, over 5 ms x%ld, hold max %.1f ms, full-scale samples %ld ", worst * 1e3, jumps, tp_host_card_hold_max() * 1e3, clipped); }
     fprintf(stderr, "t=%.1f irq/s=%u polls/s=%u Mblocks/s=%.1f pit=%u vec8=%x:%x mode=%x eip=%08x keys=%d cb=%d\n",
             t - rt_start, irq_count - lirq, poll_count - lpoll, (blocks - lblocks) / 1e6, pit_divisor,
             vec_sel[8], vec_pc[8], video_mode, G(EIP), nkeys, in_callback);
@@ -443,15 +444,21 @@ int tp_host_timer_behind(void) {
  * long with a sound playing (#10). Now each delivered tick lets the card on by one period (card_allow), so it
  * advances in lockstep with the mixer whatever the clocks (emu_now is the wall clock while frames are paced and
  * the instruction count's time otherwise: holding by either clock alone let the card outrun the mixer in the menus
- * and while loading). It never runs ahead of real time, and after a stall over 100 ms it goes on from now (sb16_skip_to): the stall is not replayed. The output ring's
+ * and while loading). It never runs ahead of real time, and after a stall longer than the ring's lead it goes on from now (sb16_skip_to): the stall is not replayed. The output ring's
  * lead (sb16_play) covers the hold. Deterministic runs: the wall clock, as before. */
-static double card_allow;
+static double card_allow, card_hold_max;   /* (card_hold_max: the longest the card waited for a tick, TP_DEBUG's card: line) */
 static void card_tick(double period) {
-    double t = now_s();
-    if (card_allow < t - 0.1) { void sb16_skip_to(double t); card_allow = t; sb16_skip_to(t); }   /* (after a stall or at the start: on from now, the stall not replayed) */
-    card_allow += period;
+    double t = now_s(), sb16_lead_seconds(void);
+    if (card_allow && t - card_allow > card_hold_max) card_hold_max = t - card_allow;
+    /* After a stall longer than the output ring's lead (or at the start): on from now, the stall not replayed. (A
+     * shorter threshold than the lead let a stall run the ring dry and then replayed it, leaving the effects that
+     * much later until the next dry-out.) */
+    if (card_allow < t - sb16_lead_seconds()) { void sb16_skip_to(double t); card_allow = t; sb16_skip_to(t); }
+    card_allow += period;                              /* (the card may play a period past this tick before its handler has mixed:
+                                                        * safe because the driver mixes further ahead than one period) */
     if (card_allow > t + period) card_allow = t + period;
 }
+double tp_host_card_hold_max(void) { double h = card_hold_max; card_hold_max = 0; return h; }
 double tp_host_card_clock(void) {
     double t = now_s();
     static int wall = -1; if (wall < 0) wall = getenv("TP_CARD_WALLCLOCK") != NULL;   /* (development: the old clock, for A/B) */
@@ -1102,7 +1109,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     memset(port_val, 0, sizeof port_val); memset(port_known, 0, sizeof port_known);
     memset(palette, 0, sizeof palette); dac_index = 0;
     ticks = 0; poll_count = irq_count = 0; blocks = 0; release_due = -1;
-    pit_divisor = 65536; pit_low = -1;
+    pit_divisor = 65536; pit_low = -1; card_allow = 0; card_hold_max = 0;
     memset(&mouse, 0, sizeof mouse); pending_mouse = 0; in_callback = 0;
     pthread_mutex_lock(&input_lock); nkeys = 0; nraw = 0; mq_head = mq_tail = 0; pthread_mutex_unlock(&input_lock);
     port60 = 0;
