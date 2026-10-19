@@ -72,13 +72,90 @@ Extending the corpus is the next step before calling any of this verified.
 | **A removed developer menu** | The menu text holds a full set of items that no menu points to: PAUSE, SCROLL ONLY, VERSION, TURBO MODE, MISCELLANEOUS, RAIN LEFT/RIGHT, PALETTE DARKER/LIGHTER/CHANGE/RESET, FORCE YEAR END, COM PLAYERS, GAME SPEED FASTER/SLOWER, CHEATS (MORE MONEY, LESS MONEY), DEBUG, GENERAL, 3DO TEST, WEATHER NEXT TYPE, PARK NAMING, MOVE PANEL, DELETE PEOPLE, LOAD SAVED GAME, SAVE CURRENT GAME (menu texts 14..69). There are no hidden drop-downs; the menus were unlinked, and some handlers survive as keys (next rows). "3DO TEST" points to the 3DO port. | confirmed (texts, menus) |
 | **Cheat mode (HORZA)** | The player name is checked against an encoded table at 0x1b8c58 (each letter shifted left by its position), which decodes to HORZA. A match sets 0x1d6682, and keys 8, F8, C and Z then do more (key table 0x113cda, handlers 0x113cf9). | confirmed (code) |
 | **MAKE THINGS TINY** (Business mode DISPLAY menu, Shift-T) | A toggle at 0x1d7762 sets 0x1d6640 = 3, 0x1d6642 = 4 and 0x1d667c = 8: a reduced-scale view. It sits next to the developer items and has no help text. Not seen on screen yet (a negotiation popped up over the test). | static |
-| **Ride animations for only 15 of 29 rides** | `RIDEANI.nnn` exists for 0, 2, 3, 4, 6, 7, 8, 9, 12, 13, 14, 19, 21, 26 and 28. The player (0x15c04f) remaps ride 16 to animation 9 by hand, and a missing file is skipped without a message. | confirmed (files, code) |
+| **Ride videos for only 15 of 29 rides** | `RIDEANI.nnn` (first-person ride videos) exists for 0, 2, 3, 4, 6, 7, 8, 9, 12, 13, 14, 19, 21, 26 and 28. The player (0x15c04f) remaps ride 16 to video 9 by hand, and a missing file is skipped without a message. Six real rides never got one (see *Ride videos and cut objects*). | confirmed (files, code) |
 | **A command queue for computer or network players** | Many keys don't act directly: they post action codes to a per-player queue (0x1d441f + player x 6). "COM PLAYERS" in the cut menu and the "%s HAS JUST CHEATED" messages fit an unfinished multiplayer or computer-player layer. | static |
 | GAME (DISPLAY menu, options case 5) | Not unfinished: it clears the screen state (0x1d6652, 0x1d6670) and returns to the park view. | confirmed |
 | Menu items with no function | Not unfinished: each fires its keyboard shortcut instead (+0x13 scancode, +0x14 modifier: F5..F7, O, F, Shift-S, Ctrl-S, M, Shift-T and so on). | confirmed |
 
 The second sound bank (`SNDS1`: barks, propellers, magic, parachute and the father and boy voices) is the intro's,
 not unused game sound.
+
+### Ride videos and cut objects (2026-10-19)
+
+**What `RIDEANI.nnn` is.** Each file is a 320x200 FLIC video (magic 0xAF12 at +4, frame count at +6; a 16-byte
+header instead of FLIC's 128; standard chunk types 4, 7, 12 and 15) that shows the ride from a seat. All 15 were
+decoded and each shows its own ride: 0 Flight Sim, 2 Pirate Boat, 3 Plane Flyer, 4 Maze, 6 Haunted House, 7 Rubber
+Tubing, 8 Race Car Ride, 9 Roller Coaster, 12 Big Wheel, 13 Merry-Go-Round (teacups), 14 Bouncy Castle, 19 Snakes and
+Ladders, 21 Parasol Chairs, 26 Super Spinner (25 frames) and 28 Planet Rocket. None shows a ride that is not in the
+game. The number is the ride's index in the ride table (`(thing+0x16)/0xc8`).
+- **How it is played:** button action 14 (jump table 0x13b787, handler 0x13c086). On the ride panel (screen 0x14)
+  it calls the player 0x15c04f in mode 2 with the selected ride. On the other panels the same action centres the
+  camera on the selected thing.
+- **Music:** the player takes each video's tune from a two-byte-per-ride table at 0x1ba0ff. The table has entries
+  for exactly the 15 rides that have files and zeros for the rest. So the 14 missing videos were never planned in
+  the shipped code; they are not files missing from this copy.
+- **The 14 without a video:**
+  - 3 are track pieces, not rides: Loop the Loop, Cork Screw and Water Splash.
+  - 4 are shows: the Cowboy, Clown, Dolphin and Medieval acts.
+  - Big Dipper (16) reuses the Roller Coaster's video by the hard-coded remap.
+  - That leaves six real rides that never got one: Tree House, Ghost House, Space Shuttle, Monorail, Observation
+    Tower and Observatory.
+
+**The id-to-name rule.** Every ride, shop and scenery record has an object id at +0x22, and the text in
+`LANGn-0.DAT` is laid out so that **object id k is named by string k + 26**. This holds for all 65 defined objects:
+29 rides at 0x1cced0 (0xc8 bytes), 17 shops and sideshows at 0x1d3c62 (0x6b bytes) and 19 scenery and toilet items at
+0x1cca92 (0x38 bytes). The tables' templates in the executable hold the same counts: 29 ride records at 0x1b16f8 and 17 shop records at
+0x1b2ff8, each followed by zeros. Ids
+that have a name but no record are objects that were cut:
+
+| id | Name (all five languages) | Group, from its neighbours | Evidence |
+|---|---|---|---|
+| 0x19 | DIVE BOMBER (STURZBOMBER, PAZZO BOMBARDIERE, ...) | ride, between Snakes and Ladders (0x18) and Observation Tower (0x1b) | no record; no code tests the id |
+| 0x1a | PLANET BOMBER | ride, as above | no record; no code tests the id |
+| 0x1c | (slot reused for the UI text TIME REMAINING) | ride, between Observation Tower and Flight Sim | name replaced, so nothing is left |
+| 0x1f | SALTY DOG | food stall, before Pokey Cola, Mr. Whippy and the Big Time stalls (0x20..0x23) | no shop record |
+| 0x145 | BINGO HIGHWAY (BINGO HIWAY, BINGO LAND) | sideshow, after Tin Can Alley (0x143) | no shop record |
+
+Dive Bomber and Planet Bomber also appear in the old ride-name run (strings 44..56) that runs in id order from
+Merry-Go-Round (0x12) to Tree House (0x1e). They were translated into all four other languages, so they were cut
+after localisation began. Game code tests ride ids by constant only for 0x14, 0x64, 0xaf, 0xb0 and 0x108, so
+nothing in the code is waiting for the cut ids.
+
+**Animations no ride or shop record uses** (decoded from `MSTA/MFRA/MELE-0.ANI`: start frame per animation; 8-byte
+frames {first element, w, h, flags, next}; 10-byte elements {sprite x 6, x, y, flags, next}; 694 animations over the
+3,301 sprites of `MSPR-0`). Every sprite that has art belongs to some animation; 785 sprite slots are empty (0x0),
+which is art taken out of the bank with its slot kept. Of the ride-sized animations that no ride or shop record names:
+- **The one piece of new art with no object: animations 618..621** (sprites 992..995).
+  - What it shows: a gold-roofed booth with red and yellow striped pillars, seen from four sides, with a painted
+    mural and a sign.
+  - Where it sits: in the shops' block of the sprite bank, after the shop pictures (973..982: Gift Shop, Saloon,
+    Arcade, Mr. Whippy, Toy Land, Balloon World, Coffee Shop, Novelty Shop) and between runs of emptied slots.
+  - Nothing else uses its sprites, and no constant or table that was found points to it.
+  - It is most likely the picture of one of the two cut shops (Salty Dog or Bingo Highway). Which one is not
+    proven.
+- **Alternate animations of five existing rides: 610..617.** They are built only from those rides' own sprites:
+  Pirate Boat, Space Shuttle, Snakes and Ladders, Ghost House and Tree House. They match those rides' sizes but use
+  different frame sequences, and no reference to them was found. They may be extra states that were dropped; they
+  add no new ride.
+- **Copies of existing sideshows:**
+  - 671..673 are frame-for-frame copies of the Duck Shoot set (581, 582, 586);
+  - 577 is a second Coconut Shy picture (the same art as 568, with different frames);
+  - 585 is an 18-frame Race Track loop beside the 17- and 28-frame ones.
+- **Used, not cut:**
+  - 319, 543 and 544 (and the pieces 317, 318, 545, 546) are the park entrance's gate arm and ticket kiosk. Function
+    0x118bc0 places them from a 6-byte layout table at 0x1b4ccc, relative to the entrance cell.
+  - The four show stages in full (393, 394, 400, 410).
+  - Buses (176..212, the bus-upgrade event).
+  - The pieces that look like track-ride and path parts: 137..153, 498..503 (race cars) and 432..433 (one-way
+    arrows).
+  - Seven sheets of every guest pose in one frame each (603..609, probably developer reference sheets).
+- **Caveat:** absence from the records does not prove an animation unused. The code also picks animations by
+  constants and through other tables (302 sites read the start table), and only the ride-sized animations were
+  checked one by one.
+
+No ride art was found for Dive Bomber or Planet Bomber. To bring a cut object back, an engine needs a new record
+with the cut id in the matching table (the id already has a name in all five languages) and, except for the booth
+above, new art.
 
 ## 3. Modding map (for an OpenThemePark engine)
 
@@ -115,7 +192,10 @@ Addresses are this port's guest addresses (the file's plus 0x100000). The data f
   - Effects start through 0x180fe0 (interface and events) and 0x180c80 (the park), and the HMI start-sample call is
     at 0x18943f: the volume word is at record +0x10 and the size at +8.
   - Music: `MUSICb-v` banks of HMP tunes; play_tune is at 0x180a20.
-- **Ride animations:** `data/rideani.%03d`, played by 0x15c04f (mode 2; mode 1 plays `wingame.dat`).
+- **Ride videos:** `data/rideani.%03d` (FLIC), played by 0x15c04f (mode 2; mode 1 plays `wingame.dat`); tune per ride at 0x1ba0ff.
+- **Park animations:** `MSTA-0.ANI` (start frame per animation, pointer [0x1d3b38]), `MFRA-0.ANI`, `MELE-0.ANI`, sprites `MSPR-0`.
+- **Scenery and toilets:** 19 records of 0x38 bytes at 0x1cca92 (+0 object id, +2 animation).
+- **Object names:** object id k is `LANGn-0.DAT` string k + 26.
 - **Saves:** `<name>.g0`/`.gy` hold the park; `.GD` is the profile. This port adds `.big` (128x128: stride and
   things) and `.free` (Free Mode rules) beside a save.
 - **Tunables** the host can change at run time are listed in `tools/build_game.py` (TUNABLES, for example the

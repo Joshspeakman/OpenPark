@@ -13,6 +13,14 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, ride videos and cut content (report section "Ride videos and cut objects"):
+- `RIDEANI.nnn` files are first-person FLIC ride videos. All 15 match their own ride; six real rides never got a
+  video (no tune entries).
+- Object id k is named by LANG string k + 26. That exposes four cut objects with names in all five languages and
+  no records: the rides Dive Bomber (0x19) and Planet Bomber (0x1a), the stall Salty Dog (0x1f) and the sideshow
+  Bingo Highway (0x145).
+- One unreferenced booth (animations 618..621) is the only new art found without an object.
+
 ## Milestone — 2026-10-16 (evening): sound, intro, launcher, save/load
 
 **Theme Park Nightly.app** runs INTRO.EXE and MAIN.EXE as native ARM64 code
