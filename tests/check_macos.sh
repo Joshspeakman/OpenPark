@@ -28,6 +28,7 @@ if [[ "${3:-}" == --park ]]; then
 fi
 "$PYTHON" tools/trace_startup.py "$1" --out work/check-startup "${trace_args[@]}" "${input_args[@]}"
 # Whole-program build: every statically reachable block, traced extents kept.
+[[ -f work/main-survey.json ]] || "$PYTHON" tools/survey.py "$1" --out work/main-survey.json   # (a fresh clone has none)
 "$PYTHON" tools/build_game.py "$1" --reference "$2" --trace work/check-startup/trace.json \
   --survey work/main-survey.json --out work/check-native
 "$PYTHON" tools/verify_startup.py "$1" --reference "$2" --trace work/check-startup/trace.json --out work/check-native \

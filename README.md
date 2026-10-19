@@ -1,116 +1,103 @@
 # Theme Park — native macOS recompilation
 
-A new Apple Silicon port of the user's own GOG Theme Park release. The target is
-an ARM64 app that recompiles the original game code, with native platform
-services. DOSBox, Wine and Rosetta are not part of the intended runtime.
+Bullfrog's Theme Park (1994) running as native Apple Silicon code. The DOS game's own code is statically
+recompiled to ARM64 and runs on a native Mac host: no DOSBox, Wine, Rosetta or CPU emulator at run time. You
+build it from your own copy of the game; this repository contains no game code, data or art.
 
-**Status:** `Theme Park Nightly.app` runs the intro and the game as native
-ARM64 code with a launch window, keyboard and mouse, Sound Blaster 16 sound
-effects and General MIDI music, paced like GOG's DOSBox configuration. Saving
-and loading are verified, including 128x128 parks. The game's HMI sound drivers are compiled ahead of time
-like the rest of the code. The scripted first-park run and long random-play
-runs match the x86 original; see [the plan](docs/PLAN.md) for what is
-verified and what is not.
+![A park in full swing, widescreen](docs/screenshots/park.jpg)
 
-## Build and install the app
+| Zoomed out | Zoomed in |
+|---|---|
+| ![Zoomed out over a busy park](docs/screenshots/zoomed-out.jpg) | ![Zoomed in on the Super Spinner](docs/screenshots/zoomed-in.jpg) |
+| **Visitor View (experimental)** | **The original ride videos** |
+| ![Walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The Super Spinner's ride video](docs/screenshots/ride-video.jpg) |
+
+**Status: beta 1.** The intro and the whole game run natively, at the original's pace. The recompiled code is
+checked against the original x86 code: scripted runs and long random-play runs match it. See [the plan](docs/PLAN.md) for what is verified and what is not, and [the port audit](docs/reports/2026-10-18-port-audit.md)
+for coverage, the original developers' unfinished features, and a modding map.
+
+## What you get
+
+- **The game:** the original game at its original pace, adjustable from the launcher (Game Speed).
+- **Sound:** Sound Blaster 16 effects and General MIDI music through the game's own HMI drivers, compiled ahead
+  of time. A look-ahead limiter stops clipping, and each kind of sound has its own volume level.
+- **Widescreen and zoom:** a widescreen park view you can zoom with a pinch or ⌘-scroll (⌘= / ⌘- / ⌘0). Scroll or
+  use the arrow keys to move while zoomed. R in the park switches to the game's own 640x480 mode.
+- **Visitor View (experimental):** View > Visitor View (⇧⌘V) walks the park at a visitor's height.
+  - WASD to move, drag to look.
+  - F follows a visitor; R rides along.
+  - Esc goes back.
+- **Larger maps:** 128 × 128 sandbox parks with up to 10,000 visitors.
+- **Free Mode rules:** Sandbox, Endless (difficulty rises month by month) or True Freeplay.
+- **An EXTRAS menu in the game's own top bar:**
+  - game speed and panel size;
+  - music, effects and interface volumes;
+  - "ew" (sick visitors) and purchase sound levels.
+- **Saves:** saving and loading work, including 128 × 128 parks.
+- **Mac comforts:** full screen, a launch window, and the game's pointer as the Mac pointer. Control-click is
+  the right mouse button.
+
+## Requirements
+
+- An Apple Silicon Mac and Apple's command-line tools (`xcode-select --install`). Tested on macOS 27; a build
+  targets the macOS it is built on (set `MACOSX_DEPLOYMENT_TARGET=26.0` for macOS 26).
+- Python 3.9 or later.
+- **Your own copy of the game:** GOG's Mac package `theme_park_enUS_1_0_33010.pkg`. `config/inputs.json` records
+  the package's and executables' hashes, and the build checks them.
+
+## Build and install
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # once (Capstone, Unicorn)
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # once: Capstone and Unicorn
+.venv/bin/python3 tools/prepare.py ~/Downloads/theme_park_enUS_1_0_33010.pkg
 bash tests/check_macos.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  vendor/freedom-force-recomp --park              # verified trace the build uses
-bash tools/build_app.sh                            # installs ~/Applications/Theme Park Nightly.app
+  vendor/freedom-force-recomp --park      # checks the recompiler against the x86 original; the build uses its trace
+bash tools/build_app.sh                    # installs ~/Applications/Theme Park Nightly.app
 ```
 
-The scripts use `TP_PYTHON` if set, else `.venv/bin/python3`, else `python3`. The shared static lifter and its
-runtime headers are vendored in `vendor/freedom-force-recomp` at the commit `config/reference.json` pins, and
-their hashes are checked before use, so a clone of this repository plus the owned package is enough.
+- **`prepare.py`:** verifies the package and extracts only the game payload into `work/`. It never runs the
+  installer or its scripts.
+- **The build:** copies the game files to `~/Games/ThemeParkNative/game` (no DOS executables). Saves go to
+  `~/Games/ThemeParkNative/saves`, and the log is `~/Games/ThemeParkNative/theme-park.log`.
+- **Locations:** set `TP_DATA` and `TP_INSTALL_DIR` to use other folders.
+- **Python:** the scripts use `TP_PYTHON` if it is set, else `.venv/bin/python3`, else `python3`.
+- **The lifter:** the static lifter and its runtime headers are vendored in `vendor/freedom-force-recomp`. Their
+  hashes are pinned in `config/reference.json` and checked before use.
+- **Launch-window art:** the launch window and icon use Theme Park's store art, downloaded once from GOG's public
+  store API into `~/Games/ThemeParkNative/art`. It is never part of this repository. `TP_NO_DOWNLOADS=1` skips the
+  download; the app then uses the game's title screen.
+- **Everything else stays local:** everything game-derived (extracted files, generated C, traces, driver
+  images) stays in the ignored `work/` and `build/` folders.
 
-Game files are copied from the verified extraction to
-`~/Games/ThemeParkNative/game` (DOS executables excluded); saves and changed
-files go to `~/Games/ThemeParkNative/saves`; the log is
-`~/Games/ThemeParkNative/theme-park.log`. `TP_CYCLES` sets the emulated CPU
-speed in thousands of instructions per second: 10000 is GOG's DOSBox configuration and the headless
-default; the app's Game Speed starts at 15000 (1.5x) on a fresh install, because the player found the
-original pace about a fifth slow; the Launcher's "Original" is 10000. Control-click is the right mouse button. Zoom the park
-with a pinch or ⌘-scroll (⌘= / ⌘- / ⌘0 in the View menu), move around with
-scroll or the arrow keys while zoomed; R in the park switches the game to its
-640x480 mode (runtime/view.c, docs/PLAN.md "Engine rebuild"). View > Visitor View (⇧⌘V, experimental)
-drops you into the park at a visitor's height: WASD and drag to look, F follow a visitor, R ride
-along, Esc back (runtime/walk.c, docs/PLAN.md "Visitor View"; `bash tests/check_walk.sh` tests it
-on a synthetic park). Sound needs
-the driver images described in [tools/dump_drivers.md](tools/dump_drivers.md);
-without them the app runs silent.
+## Known limitations (beta 1)
 
-The launch window and icon use Theme Park's store art (key art, logo, box art),
-downloaded once from GOG's public store API into `~/Games/ThemeParkNative/art`
-for this Mac only; it is never part of this repository. `TP_NO_DOWNLOADS=1`
-skips the download, and the app then uses the title screen and GOG's icon from
-the package.
+- **Sound on a fresh build needs a manual step.** The HMI driver images are dumped from a run of the game by
+  hand ([tools/dump_drivers.md](tools/dump_drivers.md)); this step isn't scripted yet. Without them the build
+  warns, and the app runs with sound off.
+- **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which
+  `THEME.BAT` reruns) is fixed by reading the code, but not yet tested (#6).
+- **Ride videos:** during a ride video, the widescreen side strips keep the last park picture.
+- **Visitor View** is experimental.
+- **Untested areas:** about half the game's functions have run in testing so far. The audit lists the areas not
+  yet exercised (a full Sim or Business year, the stock market, the world map, weather, every breakdown).
 
-The supplied Mac package contains DOS/4GW LE executables. This requires a DOS
-platform layer; the Windows loaders in the other ports cannot load it directly.
-See [the plan and findings](docs/PLAN.md) and [reference provenance](docs/PROVENANCE.md).
+## How it works
 
-## Reproduce the current milestone
+- **The executables:** the game ships DOS/4GW LE executables. `tools/` parses them, surveys the code and lifts
+  every function to C, which is compiled to ARM64.
+- **The host:** `runtime/host.c` provides the DOS, DPMI, mouse, keyboard, timer and VGA/VESA services in C.
+  `runtime/sb16.c` models the Sound Blaster 16 and its DMA.
+- **The app:** `app/` is the Mac app: launcher, Core Animation presentation, Core Audio and input.
+- **Verification:** the Unicorn engine is used only during development, as a differential oracle. The CPU-written
+  memory, registers, port traffic and frames of the recompiled code are compared with the x86 original. See
+  [DOS contract](docs/DOS-CONTRACT.md) and [provenance](docs/PROVENANCE.md).
 
-Run from this directory. Python 3.9+, Apple's command-line tools, `xar` and `tar`
-are required. The survey uses Capstone; the development oracle uses Unicorn.
-Versions are recorded in `requirements.txt` (a `.venv` as above):
+`tests/check.sh` runs synthetic parser and instruction tests with no game files. `tests/check_macos.sh` adds the
+2,000-routine comparison, a scripted startup and, with `--park`, eight million blocks through buying land and
+entering the first park. The native-only runner then reproduces the same result.
 
-```sh
-python3 tools/prepare.py "$HOME/Downloads/theme_park_enUS_1_0_33010.pkg"
-"$TP_PYTHON" tools/survey.py \
-  work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  --out work/main-survey.json
-bash tests/check.sh
-bash tests/check.sh \
-  work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  vendor/freedom-force-recomp
-bash tests/check_macos.sh \
-  work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  vendor/freedom-force-recomp
-```
+## Legal
 
-`prepare.py` verifies the package and executable hashes, extracts only the game
-payload into `work/`, and never runs the installer or its postinstall script.
-The native proof verifies hashes of the reused lifter/header files before using
-them (the vendored copies; docs/PROVENANCE.md records what is reused).
-
-`tests/check.sh` without arguments uses synthetic fixtures and needs no game.
-With both arguments it also generates, compiles and runs the native differential
-proof. Generated code, binaries, extracted files and reports remain ignored in
-`work/`. The proof library links only `libSystem`; Unicorn is used by the Python
-test harness, not by the generated ARM64 routines.
-
-`check_macos.sh` runs 18 parser/host tests, 124 synthetic instruction cases,
-the 2,000 routine comparisons, and scripted startup through nickname entry and
-the menu. It compares CPU-written pages at every service boundary, all 64 MiB
-periodically and at completion, register/segment state, port traffic and the
-final framebuffer. Arithmetic flags that may be undefined at arbitrary service
-boundaries are excluded; IF/DF are checked. See [DOS contract](docs/DOS-CONTRACT.md)
-for the limits of the shared host and deterministic input/timer model.
-
-Add `--park` after the two paths to check setup, mouse interaction, buying UK
-land and entering the first park. This compares eight million blocks, including
-scheduling checkpoints and scratch profile bytes, then reproduces the same
-result with the native-only runner. Each run creates fresh scratch profiles and
-preserves them under work/; it does not reuse previous saved player data.
-
-After the default menu check, run the compiled game without the development oracle:
-
-```sh
-python3 -S tools/run_native.py \
-  work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE \
-  --library work/check-native/startup.dylib \
-  --services 12699 \
-  --keys 60:1c0d,80:1454,82:1245,84:1f53,86:1454,88:1c0d
-```
-
-The frame is saved to `work/native-run/frame.png`. `-S` excludes third-party
-Python packages; the game executes in the compiled ARM64 library, with a Python
-development implementation of the DOS platform services. A library/input hash
-manifest guards against using a mismatched build. Unknown code targets or
-self-modified variants stop explicitly, without decoding or interpreting x86.
-
-Nothing here installs an app or modifies the downloaded package, an installed
-game, the user's saves, or another project. No game content belongs in git.
+Theme Park is © Bullfrog Productions / Electronic Arts. This is an unofficial fan project, not affiliated with or
+endorsed by them. It distributes no game code, data or art: you need your own copy, and the build reads it on
+your Mac. The project's own source is under the [MIT License](LICENSE).
