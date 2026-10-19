@@ -17,7 +17,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <zlib.h>
-#include <CommonCrypto/CommonDigest.h>
+#include "sha256.h"
 
 /* compiled-code runtime (runtime/verify.c) */
 void *tp_memory(void);
@@ -1269,7 +1269,7 @@ int tp_host_png(const char *path, char hex[65]) {
     if (hex) {
         FILE *g = fopen(path, "rb"); fseek(g, 0, SEEK_END); long len = ftell(g); fseek(g, 0, SEEK_SET);
         uint8_t *buf = malloc(len); fread(buf, 1, len, g); fclose(g);
-        uint8_t md[32]; CC_SHA256(buf, (CC_LONG)len, md); free(buf);
+        uint8_t md[32]; tp_sha256(buf, len, md); free(buf);
         for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", md[i]);
     }
     return 1;
@@ -1353,10 +1353,10 @@ static void list_dir(const char *dir, const char *rel, void (*fn)(const char *, 
         snprintf(r, sizeof r, "%s%s%s", rel, *rel ? "/" : "", names[i]);
         if (is_dir(full)) { list_dir(full, r, fn, ctx); continue; }
         FILE *f = fopen(full, "rb"); if (!f) continue;
-        CC_SHA256_CTX h; CC_SHA256_Init(&h); uint8_t buf[65536]; size_t k;
-        while ((k = fread(buf, 1, sizeof buf, f))) CC_SHA256_Update(&h, buf, (CC_LONG)k);
+        TpSha256 h; tp_sha256_init(&h); uint8_t buf[65536]; size_t k;
+        while ((k = fread(buf, 1, sizeof buf, f))) tp_sha256_update(&h, buf, k);
         fclose(f);
-        uint8_t md[32]; CC_SHA256_Final(md, &h); char hex[65];
+        uint8_t md[32]; tp_sha256_final(&h, md); char hex[65];
         for (int j = 0; j < 32; j++) sprintf(hex + j * 2, "%02x", md[j]);
         fn(r, hex, ctx);
     }
