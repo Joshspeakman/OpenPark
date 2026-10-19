@@ -661,6 +661,13 @@ smaller as well as larger with a slider, rail rides cannot be laid.
   Now the same sample started again within 120 ms is dropped (qol.c, H_SFX; TP_SFX_REPEAT ms, 0: as the game).
   The soft limit was working in 43 of 264 s before, 4 of 55 after; nothing clips hard either way. Bank 0 names
   are in SNDS0-0.TAB, sample n = entry n-1 (6 DIG, 9 ROLBLD, 22 HAMMER, 35 EXPLOD3).
+- Crackle at the end of sounds (the player, in the menus): the game loads SNDS0-2.DAT (16-bit, 44.1 kHz) whole
+  at 0x1403024 and plays each sample to its length less 16 (start record: +0 data, +8 size, +0x10 volume;
+  BUTTON3: 0x2710 in the table, 0x2700 played), so the padding itself is not played, but many samples stop
+  dead at a few percent of full scale, and some padding is full-scale junk (BUTTON3, ROLBLD; in the 8-bit sets
+  zeros, full negative). sb16.c tp_sound_bank_read (from host.c's DOS read) gives every sample whose end is read
+  a clean end: silence from the first full-scale step in its last 16 bytes, a 5 ms fade before it. 39 samples
+  of SNDS0-2; the recorded BUTTON3 matches the cleaned data and now fades to silence. TP_SOUND_RAW=1: as before.
 - Ride placement stall: not seen in TESTPARK (Big Dipper placed, 60 frames a second throughout, one 50 ms frame).
 - Exploding rides: wear is ride thing +0x2e, added at each cycle's end (0x131ed3, +0x3a cycles); past twice the
   ride type's +0xa8 the ride explodes (0x16662d, EXPLOD3 from 0x166674). Forced in TESTPARK (poke +0x2e to

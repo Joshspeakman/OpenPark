@@ -13,6 +13,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <math.h>
+#include <strings.h>
 
 extern uint8_t *G_MEM;
 
@@ -365,4 +366,45 @@ void sb16_reset(void) {
     rate = 22050; block8 = 0x7ff; hold_l = hold_r = prev_l = prev_r = 0;
     pthread_mutex_unlock(&lock);
     pthread_mutex_lock(&ring_lock); r_tail = r_head; primed = 0; pumped = 0; pthread_mutex_unlock(&ring_lock);
+}
+
+/* The game's sound banks (SNDSb-v.DAT; table SNDSb-v.TAB: 32-byte entries, name[18], offset, 0, length; v 0..2:
+ * 8-bit unsigned at 11 or 22 kHz, 16-bit signed at 44.1 kHz) end many samples with their file padding: zeros
+ * (8-bit: full negative), or other bytes, full-scale steps heard as a crack at the sound's end (BUTTON3, ROLBLD,
+ * DIG, ...); others stop dead (HAMMER). As the game reads a bank, each sample whose end is read gets a clean end: from
+ * the first full-scale step in its last 16 bytes, silence, and the 5 ms before that faded out. TP_SOUND_RAW=1:
+ * as the files are. Called by host.c after each DOS read. */
+void tp_sound_bank_read(const char *path, long pos, uint8_t *buf, long n) {
+    static int raw = -1; if (raw < 0) raw = getenv("TP_SOUND_RAW") != NULL;
+    if (raw || n < 32 || !path) return;
+    const char *b = strrchr(path, '/'); b = b ? b + 1 : path;
+    size_t bl = strlen(b);
+    if (bl < 11 || strncasecmp(b, "SNDS", 4) || strcasecmp(b + bl - 4, ".DAT") || b[5] != '-') return;
+    int v = b[6] - '0', bps = v == 2 ? 2 : 1, rate = v == 2 ? 44100 : v == 1 ? 22050 : 11025;
+    static struct { char path[1024]; int n; uint32_t off[160], len[160]; } tab[6]; static int ntab;
+    int t = 0; while (t < ntab && strcmp(tab[t].path, path)) t++;
+    if (t == ntab) {                                      /* (its table, once) */
+        if (ntab == 6) return;
+        char tp[1024]; snprintf(tp, sizeof tp, "%s", path); memcpy(tp + strlen(tp) - 3, b[bl - 3] == 'd' ? "tab" : "TAB", 3);
+        FILE *f = fopen(tp, "rb"); if (!f) return;
+        uint8_t e[32]; int k = 0;
+        while (k < 160 && fread(e, 1, 32, f) == 32) { memcpy(&tab[t].off[k], e + 18, 4); memcpy(&tab[t].len[k], e + 26, 4); k++; }
+        fclose(f); snprintf(tab[t].path, sizeof tab[t].path, "%s", path); tab[t].n = k; ntab++;
+    }
+    int fade = (int)(rate * 0.005), done = 0, junk = 0;
+    for (int k = 1; k < tab[t].n; k++) {                  /* (entry 0: the whole bank) */
+        long s = tab[t].off[k], len = tab[t].len[k], e = s + len, N = len / bps;
+        if (N < 2 * fade + 32 || e - (fade + 32) * bps < pos || e > pos + n) continue;   /* (its end in this read) */
+        uint8_t *p = buf + (s - pos);                     /* (only its last fade + 32 samples are touched) */
+        #define SV(i) (bps == 2 ? (int)(int16_t)(p[2 * (i)] | p[2 * (i) + 1] << 8) : ((int)p[i] - 128) << 8)
+        long cut = N;
+        for (long i = N - 16 / bps; i < N; i++) if (abs(SV(i) - SV(i - 1)) > 16000) { cut = i; break; }
+        done++; junk += cut < N;
+        for (long i = cut - fade; i < N; i++) {
+            int x = i < cut ? (int)((long)SV(i) * (cut - i) / fade) : 0;
+            if (bps == 2) { p[2 * i] = (uint8_t)x; p[2 * i + 1] = (uint8_t)(x >> 8); } else p[i] = (uint8_t)((x >> 8) + 128);
+        }
+        #undef SV
+    }
+    if (done && getenv("TP_SOUND_LOG")) fprintf(stderr, "sound bank %s: %d samples' ends cleaned (%d with padding)\n", b, done, junk);
 }

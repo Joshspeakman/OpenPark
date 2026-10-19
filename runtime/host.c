@@ -788,6 +788,8 @@ static void interrupt(uint32_t number) {
               } }
             ssize_t got = 0, r;
             while ((uint32_t)got < c && (r = read(handles_fd[b], mem + at + got, c - got)) > 0) got += r;
+            { void tp_sound_bank_read(const char *, long, uint8_t *, long);   /* (a sound bank: its samples' ends cleaned, sb16.c) */
+              if (got > 0) tp_sound_bank_read(handles_path[b], (long)lseek(handles_fd[b], 0, SEEK_CUR) - got, mem + at, got); }
             if (things_grow) { uint32_t tp; memcpy(&tp, mem + 0x1d3b10, 4);   /* a 128x128 park's things read: the rest of the pool, empty, in play */
                 if (tp && at == tp) { uint32_t room = (uint32_t)tp_bigmap_things_room() * 0xc8u;
                     if ((uint32_t)got < room) memset(mem + at + got, 0, room - (uint32_t)got);
