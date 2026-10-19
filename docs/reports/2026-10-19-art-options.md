@@ -8,17 +8,51 @@ branch/install, without modifying Nightly or its game data.
 
 ## Direction and current deliverables
 
+### User correction: angular forms and original proportions
+
+The user rejected the first Reimagined sheets as too soft, round and cute.
+Their correction supersedes that art direction: preserve the original chunky,
+over-exaggerated proportions, silhouettes and character identities. Use hard
+planes and sharp forms where the source calls for them, without turning every
+pixel into a cube. Do not enlarge eyes, inflate heads/limbs, soften architecture
+or replace original expressions/clothing with generic modern mascot features.
+
+Riders must use the **same canonical guest mesh, face, hair, clothing, palette
+variant and proportions as walking guests**. Boarding changes pose and attaches
+the guest to a seat; it must not replace that guest with a separate passenger
+design. This is an implementation requirement for all rides and both camera
+views. The concept sheet illustrates the requirement but cannot verify shared
+geometry or animation behavior.
+
+Three revised sheets and their exact prompts are local:
+
+- `work/reimagined/revision-02/01-characters.png`: the two guest examples and
+  eight staff/entertainer identities, using the original sprite contact sheet.
+- `02-riders.png`: those green/blue guest designs walking and seated, with
+  passengers in the six-cabin Big Wheel and four-cup Merry-Go-Round.
+- `03-buildings.png`: Toy Land, Haunted House, Coffee Shop, Oak, Palm and Birch;
+  a follow-up edit closes entrance surfaces and adjusts squat proportions.
+
+All were produced with the built-in imagegen tool. The current gallery is
+`work/reimagined/index.html`, with original references and prompt links.
+`index-v1.html` preserves the rejected first direction, explicitly marked
+superseded. Revision 02 covers 16 definition identities and two guest examples;
+coverage marks older unrevised concepts accordingly. Neither revision is a
+completed model pack. Exact original proportions, detail identity and pose
+consistency still require source-aligned model checks and user visual review.
+
 | Option | Art treatment | Current implementation |
 | --- | --- | --- |
 | Faithful 3D | Original palette texels, nearest sampling, authored solid forms, preserved visible motifs | Eight static Visitor View review models; overhead art unchanged |
-| Reimagined | New solid 3D art, original silhouettes and distinctive details, chunky cartoon proportions, restrained materials | Five raster concept sheets; no runtime models or rigs yet |
+| Reimagined | Angular solid 3D forms, original exaggerated proportions, original character identities, shared walking/riding guests | Three revised concept sheets; first five sheets superseded; no runtime models or rigs yet |
 
 The original artwork remains a supported baseline. Reimagined is an additional
 option, not a replacement for Faithful 3D. Source pixels cannot reveal hidden
 surfaces; reconstructed backs, material treatment and topology remain proposals.
 Entrances should be solid dark surfaces wherever an interior is not needed.
 
-Local review artifacts, all ignored as game-derived material:
+Earlier review artifacts, all ignored as game-derived material (the five
+first-direction sheets below are superseded by revision 02):
 
 - `work/visitor-3d/authored/index.html`: eight real model turntables using the
   native Visitor renderer, with original sprites beside them.

@@ -5,6 +5,18 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, Reimagined visual correction: the user rejected the first concepts
+as too soft and round. Require angular chunky forms, the original exaggerated
+silhouettes and proportions, and original character identities. Walking and
+seated riders must be the same guest designs, including faces, clothes and
+proportions. Three revised imagegen sheets are saved under
+`work/reimagined/revision-02/`: characters, walking/seated guests on two rides,
+and three buildings with three trees. The gallery now leads with this revision;
+the earlier direction is marked superseded. Coverage distinguishes 16 revised
+definition concepts plus two guest examples from the unconverted remainder.
+These are visual proposals awaiting review, not proportional/rig verification
+or implemented Reimagined assets. No runtime or install change in this revision.
+
 2026-10-19, authored asset follow-up (Codex, `codex/visitor-authored-models`):
 the user liked the Toy Land direction and requested a solid entrance, four more
 structures, trees and shops. Toy Land now has a closed entrance plane carrying
