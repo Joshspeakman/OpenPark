@@ -21,6 +21,8 @@ int tp_plat_realtime_thread(double period) {
     return kr == KERN_SUCCESS;
 }
 
+void tp_plat_game_thread(void) { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0); }
+
 /* mach_wait_until: woken on time, unlike nanosleep under load. */
 void tp_plat_sleep(double seconds) { if (seconds > 0) mach_wait_until(mach_absolute_time() + ticks(seconds)); }
 

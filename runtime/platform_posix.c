@@ -14,6 +14,8 @@ int tp_plat_realtime_thread(double period) {
     return pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0;
 }
 
+void tp_plat_game_thread(void) {}
+
 void tp_plat_sleep(double seconds) {
     if (seconds <= 0) return;
     struct timespec t;

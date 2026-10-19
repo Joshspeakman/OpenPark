@@ -10,6 +10,9 @@
  * best effort, quietly ignored where the system offers nothing. Returns 1 if granted. */
 int tp_plat_realtime_thread(double period);
 
+/* Mark the calling thread as the game thread (interactive priority where the system has classes). */
+void tp_plat_game_thread(void);
+
 /* Sleep for about `seconds` (sub-millisecond precision where the system has it; never much longer). */
 void tp_plat_sleep(double seconds);
 

@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include "platform.h"
 /* Headless native runner: the deterministic scripted scenario through the C
  * host, for comparison with config/milestones.json. Bounded and muted. */
 #include "host.h"
@@ -94,7 +95,7 @@ int main(int argc, char **argv) {
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));
     if (tp_host_init(game, overlay, !realtime || getenv("TP_PREFIX_BLOCKS"), &s)) { fprintf(stderr, "init: %s\n", tp_host_status()); return 1; }
-    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);    /* (as the app's game thread) */
+    tp_plat_game_thread();                                            /* (as the app's game thread) */
     if (!intro) { void tp_qol_init(void); tp_qol_init(); }            /* quality-of-life hooks (qol.c) */
     if (!intro && getenv("TP_COUNT_FRAMES")) { void tp_view_count_game_frames(int); tp_view_count_game_frames(1); }   /* (development: frames counted with the view off) */
     if (getenv("TP_START_HIRES")) tp_view_request_hires(1);          /* as the app's Start In 640x480 */
