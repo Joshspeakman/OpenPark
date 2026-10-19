@@ -13,6 +13,11 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, beta 1: the repository goes public (source only: no game code, data, art or built app in it or in the
+release). A clean clone built and ran to the title with the README's steps after two fixes (check_macos.sh makes the
+survey; build_app.sh survives no driver images under bash 3.2). Sound on a fresh build still needs the hand-dumped
+driver images (tools/dump_drivers.md): the next step is a script for it.
+
 2026-10-19, ride videos and cut content (report section "Ride videos and cut objects"):
 - `RIDEANI.nnn` files are first-person FLIC ride videos. All 15 match their own ride; six real rides never got a
   video (no tune entries).
