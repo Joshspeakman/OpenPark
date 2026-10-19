@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdatomic.h>
 /* Development-only bounded native block host. No x86 interpreter or decoder. */
 #include "rt.h"
 #include <stdlib.h>
@@ -134,7 +135,12 @@ uint32_t tp_hook_pcs[32];   /* 0..11 view.c, 12..31 qol.c; all 0xffffffff until 
 static int hook_lo = 0x7fffffff, hook_hi = -1;
 __attribute__((constructor)) static void tp_hooks_init(void) { for (int h = 0; h < 32; h++) tp_hook_pcs[h] = 0xffffffffu; }   /* hooks lie in [lo, hi]: one compare in the common case */
 static uint8_t hook_bits[4096];                   /* a hook may be at addresses with these low 12 bits */
-void tp_hooks_changed(void) {
+/* tp_hook_pcs may be changed from any thread (the app's zoom, pan, poster, Visitor View); the table the game
+ * thread tests on every block is only rebuilt by the game thread, at the start of a run, so it never sees it
+ * half built (issue #2). Hooks are handled between runs, so a change made there applies at once. */
+static _Atomic int hooks_dirty;
+void tp_hooks_changed(void) { atomic_store_explicit(&hooks_dirty, 1, memory_order_release); }
+static void hooks_rebuild(void) {
     hook_lo = 0x7fffffff; hook_hi = -1; memset(hook_bits, 0, sizeof hook_bits);
     for (int h = 0; h < 32; h++) if (tp_hook_pcs[h] != 0xffffffffu) {
         hook_bits[tp_hook_pcs[h] & 4095] = 1;
@@ -145,6 +151,7 @@ void tp_hooks_changed(void) {
 int tp_hook_which;
 int tp_hook_armed = 1;   /* the host clears it after handling a hook (its own guest calls re-arm it) */
 int tp_run(uint32_t budget) {
+    if (atomic_exchange_explicit(&hooks_dirty, 0, memory_order_acquire)) hooks_rebuild();
     interrupt_number = 0;
     blocks_run = 0;
     if (setjmp(trap)) return -1;

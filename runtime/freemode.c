@@ -43,6 +43,7 @@ static uint32_t rng = 0x9e3779b9u;
 /* Endless moves the player-details screen's own bytes; the next game gets back what was there
  * (a loaded Endless park: the screen's defaults, Happy / Medium / Easy). */
 static uint8_t keep_set[3]; static int kept;
+static int redraw_ticks;                            /* (the landscape redrawn on the next ticks too: the first frame's own clears it) */
 static void keep_settings(const uint8_t *m, int defaults) {
     if (defaults) { keep_set[0] = 0; keep_set[1] = 1; keep_set[2] = 0; }
     else { keep_set[0] = m[SET_VISITORS]; keep_set[1] = m[SET_START]; keep_set[2] = m[SET_OPPS]; }
@@ -60,6 +61,7 @@ static int ok_ptr(uint32_t p) { return p >= 0x1000 && p < 0x3f00000; }
 
 void tp_free_init(void) {
     const char *e;
+    rules = months = pending = 0; last_month = -1; loaded_rules = -1; kept = 0; redraw_ticks = 0;   /* (a new game: issue #6) */
     rules_new = (e = getenv("TP_FREE_RULES")) ? atoi(e) : 0;
     if (rules_new < 0 || rules_new > 2) rules_new = 0;
     ramp_new = (e = getenv("TP_FREE_RAMP")) ? atoi(e) : 60;
@@ -113,7 +115,6 @@ static void apply_difficulty(uint8_t *m, int fresh) {
  * (measured in a 128x128 park, the same steps in a 64x64 one). Below where scrolling stops (the game's limit:
  * the map less a screen) is fine: the road shows, and scrolling up works as usual. */
 extern uint32_t tp_map_w;
-static int redraw_ticks;                            /* (the landscape redrawn on the next ticks too: the first frame's own clears it) */
 static void center_on_entrance(uint8_t *m) {
     uint32_t park = r32(m, PLAYER_REC);
     if (!ok_ptr(park) || !tp_map_w || getenv("TP_GAME_CAMERA")) return;   /* (TP_GAME_CAMERA: the game's own, for the golden checks) */

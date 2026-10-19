@@ -104,8 +104,10 @@ static void w16(uint8_t *m, uint32_t a, uint16_t v) { memcpy(m + a, &v, 2); }
 static void w32(uint8_t *m, uint32_t a, uint32_t v) { memcpy(m + a, &v, 4); }
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 
+static void qol_reset(void);
 void tp_qol_init(void) {
     const char *e;
+    qol_reset();
     log_sounds = getenv("TP_SOUND_LOG") != NULL;
     ew_gap = (e = getenv("TP_EW_GAP")) ? atof(e) : 0;
     cash_gap = (e = getenv("TP_CASH_GAP")) ? atof(e) : 0;
@@ -207,6 +209,11 @@ static const double x_vols[5] = {0, 0.25, 0.5, 0.75, 1.0};
 static const char *const x_vol_keys[X_NVOL] = {"MusicVolume", "GameSoundVolume", "SystemSoundVolume", "EwVolume", "PurchaseVolume"};
 double tp_game_sound_volume = 1, tp_system_sound_volume = 1;   /* (H_START_SAMPLE scales each effect by its kind) */
 static uint32_t x_game_tab; static int x_on = -1, x_tick;
+/* A new game (tp_qol_init runs again on THEME.BAT's in-process restart): the last one's timers and menus go (issue #6). */
+static void qol_reset(void) {
+    ew_last = cash_last = -1e9; memset(sfx_last, 0, sizeof sfx_last); memset(tune_seen, 0, sizeof tune_seen); sfx_kind = 0;
+    x_game_tab = 0; x_on = -1; x_tick = 0;
+}
 static long x_get(const char *k, long d) { return tp_extras_get ? tp_extras_get(k) : d; }
 static void x_set(const char *k, long v) { if (tp_extras_set) tp_extras_set(k, v); }
 static double x_getf(const char *k, double d) { return tp_extras_getf ? tp_extras_getf(k) : d; }

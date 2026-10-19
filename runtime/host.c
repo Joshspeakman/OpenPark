@@ -1017,6 +1017,10 @@ static int load_image(const char *path, uint32_t *entry, uint32_t *stack) {
 
 static char cmd_args[128];
 void tp_host_set_args(const char *args) { snprintf(cmd_args, sizeof cmd_args, "%s", args ? args : ""); }
+/* The image to load (the app switches from INTRO.EXE to MAIN.EXE on the game thread: no setenv there, issue #3);
+ * empty: TP_IMAGE, then the caller's. */
+static char image_path[1024];
+void tp_host_set_image(const char *path) { snprintf(image_path, sizeof image_path, "%s", path ? path : ""); }
 int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const TpScript *s) {
     mem = tp_memory();
     memset(mem, 0, MEMORY);
@@ -1061,7 +1065,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     mouse.x = 320; mouse.y = 240; mouse.rx1 = 639; mouse.ry1 = 479;
     tp_io_callback(io_cb);
     char img[1100]; snprintf(img, sizeof img, "%s/MAIN.TPIMG", game_dir);
-    const char *env_img = getenv("TP_IMAGE");
+    const char *env_img = image_path[0] ? image_path : getenv("TP_IMAGE");
     uint32_t entry, stack;
     if (load_image(env_img ? env_img : img, &entry, &stack)) return -1;
     memset(mem + GDT, 0, 4096);
@@ -1107,7 +1111,11 @@ int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_
     S(ESP, sp); S(EIP, fn);
     int64_t result = -1;
     jmp_buf outer; memcpy(outer, stop_jb, sizeof outer);
-    if (!setjmp(stop_jb)) {
+    int js = setjmp(stop_jb);
+    if (js) {   /* a service stopped inside the call: the run stops too and says so (issue #4); -2, not a budget overrun's -1 */
+        size_t l = strlen(status); snprintf(status + l, sizeof status - l, " (in a host call to %06x)", fn);
+        stopped = 1; result = -2;
+    } else {
         uint32_t ran = 0;
         while (ran < max_blocks) {
             int n = tp_run(20000); ran += 20000;
