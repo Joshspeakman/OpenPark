@@ -22,7 +22,11 @@ mixer. Output ring lead 60 ms (TP_AUDIO_LEAD). Measured, the same scripted sessi
 ran-dry gap -> none; sound content unchanged (79% of the time, same rms). TP_CARD_WALLCLOCK=1 runs the old clock
 for A/B. The repeat gate (TP_SFX_REPEAT) now applies only to the ride draw's HAMMER (return 0x11ebd0): it had also
 dropped a dragged path's DIG per tile (5 in that session) and fast button clicks (#11 part 1). The driver's sum did
-not clip in that session (full-scale samples 0): headroom unchanged (#11 part 2).
+not clip in that session (full-scale samples 0): headroom unchanged (#11 part 2). Fable's re-review (no blockers):
+the resync after a stall now uses the ring's lead (was 100 ms against a 60 ms lead), the lead is at least two output
+callbacks, TP_DEBUG's card: line shows hold max (the longest the card waited for a tick: what the lead must cover),
+and card_allow resets with the game. Known and accepted: if ticks come slower than real time (interrupts off for
+long, or TP_CYCLES set very low) the card holds and the output has brief silences instead of the old garbage.
 
 2026-10-19: the repository is renamed OpenPark (GitHub Joshspeakman/OpenPark; the old URL redirects), at the user's say.
 

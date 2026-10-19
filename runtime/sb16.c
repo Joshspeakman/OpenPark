@@ -333,8 +333,11 @@ static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
 static double pumped;
 static long underruns, pump_jumps; static double pump_worst;
 /* How far the output runs behind the card (frames): the card is held while the game thread cannot deliver timer
- * ticks (host.c tp_host_card_clock), for a frame's passes or its pacing wait, up to ~30 ms; the lead covers that.
+ * ticks (host.c tp_host_card_clock), for a frame's passes and its pacing wait (TP_DEBUG's card: line, hold max: the
+ * longest measured); the lead covers that.
  * TP_AUDIO_LEAD=<ms> (default 60): latency against gaps. */
+static unsigned ring_lead(void);
+double sb16_lead_seconds(void) { return ring_lead() / 44100.0; }
 static unsigned ring_lead(void) {
     static unsigned lead; if (!lead) { const char *e = getenv("TP_AUDIO_LEAD"); double ms = e ? atof(e) : 60; if (ms < 10) ms = 10; if (ms > 300) ms = 300; lead = (unsigned)(ms * 44.1); }
     return lead;
@@ -367,6 +370,7 @@ void sb16_pump(double t) {
 void sb16_play(float *out, int frames) {
     pthread_mutex_lock(&ring_lock);
     unsigned avail = r_head - r_tail, lead = ring_lead();
+    if (lead < 2u * (unsigned)frames) lead = 2u * (unsigned)frames;   /* (an output with large buffers, Bluetooth: under two callbacks it stutters) */
     if (!primed && avail >= lead) primed = 1;
     static int rlog = -1; if (rlog < 0) rlog = getenv("TP_RING_LOG") != NULL;
     if (primed && avail > 2 * lead + 1024) { if (rlog) fprintf(stderr, "sb16: skipped ahead %u frames\n", avail - lead); r_tail = r_head - lead; }   /* (far behind, the game ran ahead of the device: catch up) */
