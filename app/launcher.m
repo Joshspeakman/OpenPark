@@ -81,8 +81,10 @@ static void bulbs(NSRect r, CGFloat step, BOOL sides) {
 }
 
 /* ---- settings ---- */
-typedef struct { NSString *title, *key; NSArray *values; NSArray<NSString *> *labels, *notes; } Setting;
-static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray *n) { Setting s = {t, k, v, l, n}; return s; }
+typedef struct { NSString *title, *key; NSArray *values; NSArray<NSString *> *labels, *notes; BOOL slider; } Setting;
+static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray *n) { Setting s = {t, k, v, l, n, NO}; return s; }
+/* A slider: the values on a track under the value (drag or click it; the arrows still step) */
+static Setting slider(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray *n) { Setting s = {t, k, v, l, n, YES}; return s; }
 
 /* ---- music: the game's tunes and its ride types (the type table at 0x1cced0, in order) ---- */
 static NSString *const ride_types[29] = {@"Flight Sim", @"Tree House", @"Pirate Boat", @"Plane Flyer", @"Maze", @"Ghost House",
@@ -144,6 +146,7 @@ void tp_ride_tunes_window(NSWindow *parent) {
 
 @interface TPLaunchView : NSView
 @property NSInteger focus, hover, open;   /* open: -1 or group index */
+@property NSInteger dragRow;              /* a slider being dragged, or -1 */
 @property BOOL result, done;
 @end
 
@@ -156,7 +159,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[7], _sound[4], _tweaks[6], _free[5];
+    Setting _display[7], _sound[6], _tweaks[6], _free[5];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -189,18 +192,21 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                               @[@"The shape a 1994 monitor gave it", @"Stretched to the window's shape"]);
         _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"],
                             @[@"Sound Blaster effects and General MIDI music", @"The park is silent"]);
-        _sound[3] = setting(@"Music Instruments", @"SoundBank", @[@""], @[@"Built-in"],
+        _sound[5] = setting(@"Music Instruments", @"SoundBank", @[@""], @[@"Built-in"],
                             @[@"The Mac's synthesizer; → picks a SoundFont"]);
-        _sound[1] = setting(@"Effects Volume", @"SoundVolume", vol, volL, volN);
-        _sound[2] = setting(@"Music Volume", @"MusicVolume", vol, volL, volN);
+        _sound[1] = slider(@"Effects Volume", @"SoundVolume", vol, volL, volN);
+        _sound[4] = slider(@"Music Volume", @"MusicVolume", vol, volL, volN);
+        _sound[2] = slider(@"Game Sounds", @"GameSoundVolume", vol, volL, volN);     /* (qol.c: rides, people, the ew, purchases) */
+        _sound[3] = slider(@"System Sounds", @"SystemSoundVolume", vol, volL, volN); /* (the button clicks) */
         _display[5] = setting(@"Start In", @"StartHiRes", @[@NO, @YES], @[@"320 × 200", @"640 × 480"],
                               @[@"The game's usual screen; R in the park switches", @"The game's SVGA mode: more of the park at once"]);
         _display[4] = setting(@"Wide Windows", @"Widescreen", @[@YES, @NO], @[@"More Park", @"Black Bars"],
                               @[@"The park fills the window; the panel stays centred", @"The game's 4:3 picture, as on a CRT"]);
         _display[6] = setting(@"Zoomed Drawing", @"NativePasses", @[@YES, @NO], @[@"Native", @"The Game's"],
                               @[@"Zoomed-out views drawn by the new engine: faster", @"Zoomed-out views drawn by the game's own code"]);
-        _tweaks[5] = setting(@"Panel Size", @"PanelScale", @[@1.0, @1.25, @1.5, @1.75, @2.0], @[@"The Game's", @"1.25×", @"1.5×", @"1.75×", @"2×"],
-                              @[@"The panel and the advisor as drawn in 1994", @"The panel and the advisor a quarter larger (wide windows)",
+        _tweaks[5] = slider(@"Panel Size", @"PanelScale", @[@0.5, @0.75, @1.0, @1.25, @1.5, @1.75, @2.0], @[@"0.5×", @"0.75×", @"The Game's", @"1.25×", @"1.5×", @"1.75×", @"2×"],
+                              @[@"The panel and the advisor half size, more park in view (wide windows)", @"The panel and the advisor three quarters size (wide windows)",
+                                @"The panel and the advisor as drawn in 1994", @"The panel and the advisor a quarter larger (wide windows)",
                                 @"The panel and the advisor half as large again (wide windows)", @"The panel and the advisor 1.75 times as large (wide windows)",
                                 @"The panel and the advisor twice as large (wide windows)"]);
         _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
@@ -233,7 +239,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _free[3] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
                            @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
                              @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
-        self.open = -1; self.hover = HIT_NONE; self.focus = -1;
+        self.open = -1; self.hover = HIT_NONE; self.focus = -1; self.dragRow = -1;
         NSDictionary *env = NSProcessInfo.processInfo.environment;
         if (env[@"TP_LAUNCHER_OPEN"]) {
             NSUInteger g = [_groups indexOfObject:[env[@"TP_LAUNCHER_OPEN"] capitalizedString]];
@@ -249,7 +255,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 4 : self.open == 4 ? 6 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 7 : self.open == 1 ? 6 : self.open == 4 ? 6 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -320,6 +326,15 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSRect r = [self rowRect:k];
     return NSMakeRect(right ? NSMaxX(r) - 46 : NSMaxX(r) - 326, r.origin.y + 10, 34, 30);
 }
+- (NSRect)trackRect:(NSInteger)k {
+    NSRect la = [self arrow:k right:NO], ra = [self arrow:k right:YES], r = [self rowRect:k];
+    return NSMakeRect(NSMaxX(la) + 16, r.origin.y + 46, ra.origin.x - NSMaxX(la) - 32, 10);
+}
+- (void)slide:(NSInteger)k to:(NSPoint)p {
+    Setting *s = [self rowSetting:k]; NSRect t = [self trackRect:k]; NSInteger n = (NSInteger)s->values.count;
+    double f = (p.x - t.origin.x) / t.size.width; NSInteger i = (NSInteger)lround(fmin(fmax(f, 0), 1) * (n - 1));
+    if (i != [self valueIndex:s]) { [NSUserDefaults.standardUserDefaults setObject:s->values[i] forKey:s->key]; self.needsDisplay = YES; }
+}
 - (NSRect)groupRect:(NSInteger)g {                      /* three across: Display Sound Tweaks / Free Mode Controls Files */
     static const int slot[6] = {0, 1, 4, 5, 2, 3};
     int k = slot[g], w = 212, gap = 16, x0 = (WIN_W - 3 * w - 2 * gap) / 2;
@@ -332,6 +347,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     if (NSPointInRect(p, self.playRect)) return HIT_PLAY;
     if (NSPointInRect(p, self.quitRect)) return self.open >= 0 ? HIT_BACK : HIT_QUIT;
     for (NSInteger k = 0; k < self.rowCount; k++) {
+        if ([self rowSetting:k]->slider && NSPointInRect(p, NSInsetRect([self trackRect:k], -6, -8))) return 400 + k;
         if (NSPointInRect(p, NSInsetRect([self arrow:k right:NO], -6, -6))) return 100 + k;
         if (NSPointInRect(p, [self rowRect:k])) return 200 + k;
     }
@@ -363,7 +379,13 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     [super updateTrackingAreas];
 }
 - (void)mouseMoved:(NSEvent *)e { NSInteger h = [self hit:[self convertPoint:e.locationInWindow fromView:nil]]; if (h != self.hover) { self.hover = h; self.needsDisplay = YES; } }
-- (void)mouseDown:(NSEvent *)e { [self press:[self hit:[self convertPoint:e.locationInWindow fromView:nil]]]; }
+- (void)mouseDown:(NSEvent *)e {
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil]; NSInteger h = [self hit:p];
+    if (h >= 400 && h < 500) { self.focus = h - 400; self.dragRow = h - 400; [self slide:h - 400 to:p]; return; }
+    self.dragRow = -1; [self press:h];
+}
+- (void)mouseDragged:(NSEvent *)e { if (self.dragRow >= 0) [self slide:self.dragRow to:[self convertPoint:e.locationInWindow fromView:nil]]; }
+- (void)mouseUp:(NSEvent *)e { self.dragRow = -1; }
 - (void)keyDown:(NSEvent *)e {
     NSInteger rows = self.rowCount, items = rows + (self.open < 0 ? 6 : 0);
     switch (e.keyCode) {
@@ -442,7 +464,15 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSRect va = NSMakeRect(NSMaxX(la) + 4, r.origin.y + 10, ra.origin.x - NSMaxX(la) - 8, 30);
     label([self valueOf:s], heavy(20), cream(), va, NSTextAlignmentCenter, 1.2, YES);
     NSString *note = [self noteOf:s];
-    if (note.length) label(note, plain(14), note_c(), NSMakeRect(va.origin.x - 60, r.origin.y + 42, va.size.width + 120, 20), NSTextAlignmentCenter, 0.6, YES);
+    if (s->slider) {                                     /* the track, gold to the knob */
+        NSRect t = [self trackRect:k]; NSInteger n = (NSInteger)s->values.count, i = [self valueIndex:s];
+        CGFloat x = t.origin.x + t.size.width * (n > 1 ? (CGFloat)i / (n - 1) : 0);
+        rounded(t, 5, rgb(60, 36, 14), rgb(160, 110, 50), 1);
+        rounded(NSMakeRect(t.origin.x, t.origin.y, x - t.origin.x, t.size.height), 5, gold(), nil, 0);
+        for (NSInteger j = 0; j < n; j++) { CGFloat tx = t.origin.x + t.size.width * (n > 1 ? (CGFloat)j / (n - 1) : 0); [rgb(60, 36, 14) setFill]; NSRectFill(NSMakeRect(tx - 0.5, t.origin.y + 2, 1, t.size.height - 4)); }
+        NSRect knob = NSMakeRect(x - 9, NSMidY(t) - 9, 18, 18);
+        NSBezierPath *kp = [NSBezierPath bezierPathWithOvalInRect:knob]; [cream() setFill]; [kp fill]; [rgb(120, 70, 20) setStroke]; kp.lineWidth = 2; [kp stroke];
+    } else if (note.length) label(note, plain(14), note_c(), NSMakeRect(va.origin.x - 60, r.origin.y + 42, va.size.width + 120, 20), NSTextAlignmentCenter, 0.6, YES);
     for (int side = 0; side < 2; side++) {   /* gold pennant arrows */
         NSRect a = side ? ra : la; BOOL lit = self.hover == (side ? 200 : 100) + k;
         NSBezierPath *t = [NSBezierPath bezierPath];
@@ -457,7 +487,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 - (NSString *)summary:(NSInteger)g {
     if (g == 0) return [NSString stringWithFormat:@"%@ · %@ · %@", [self valueOf:&_display[0]], [self valueOf:&_display[1]], [self valueOf:&_display[2]]];
-    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[2]]];
+    if (g == 1) return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Effects %@ · Music %@ · Game %@", [self valueOf:&_sound[1]], [self valueOf:&_sound[4]], [self valueOf:&_sound[2]]];
     if (g == 2) return @"Mouse and keyboard";
     if (g == 4) return [NSString stringWithFormat:@"Ew %@ · Rides %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]]];
     if (g == 5) return [NSString stringWithFormat:@"%@ · %@ visitors · %@", [self valueOf:&_free[0]], [self valueOf:&_free[2]], [self valueOf:&_free[4]]];

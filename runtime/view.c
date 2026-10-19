@@ -1313,10 +1313,10 @@ void tp_view_hook(void) {
 /* Panel size (Launcher: Display > Panel Size): the bottom of the interface, the panel and the advisor's
  * band above it (BAND_H screen rows), drawn k times larger, anchored at the bottom middle of the view;
  * pointer events in it are mapped back. */
-void tp_view_set_ui_scale(double k) { ui_scale = k < 1 ? 1 : k > 3 ? 3 : k; }
+void tp_view_set_ui_scale(double k) { ui_scale = k < 0.5 ? 0.5 : k > 3 ? 3 : k; }
 /* A layout point in the enlarged band: its point in the screen (sx, sy). 0 if outside it. */
 static int band_map(double lx, double ly, double lw, int sw, int sh, double k, double *sx, double *sy) {
-    if (k <= 1.001) return 0;
+    if (fabs(k - 1) <= 0.001) return 0;                  /* (smaller as well as larger: the rest of its place shows park) */
     if (pub_straddle) return 0;                           /* (a game window over the band: the panel at its own size) */
     double bh = BAND_H + (sh == 480 ? 44 : 22);           /* (the advisor's rows and the panel's) */
     double x0 = lw / 2 - sw * k / 2, y0 = sh - bh * k;
@@ -1350,7 +1350,7 @@ void tp_view_poll(void) {
         int in_band = on && band_map(lx, ly, lw, SW, SH, kk, &bsx, &bsy);
         if (in_band) { cxs = bsx; ly_ui = bsy; }          /* (the enlarged panel: its point on the screen) */
         int incol = cxs >= 0 && cxs < SW, ui = incol && ly_ui >= WORLD_H;   /* the panel, or the game's interface: through */
-        if (on && !in_band && kk > 1.001 && !pub_straddle && incol && ly >= SH - (BAND_H + (SH == 480 ? 44 : 22))) incol = 0;   /* (its original place shows park) */
+        if (on && !in_band && fabs(kk - 1) > 0.001 && !pub_straddle && incol && ly >= SH - (BAND_H + (SH == 480 ? 44 : 22))) incol = 0;   /* (its original place shows park) */
         int menus = menu_open();
         if (on && incol && (ly < TOPBAR_OPEN || (topbar && ly < TOPBAR_H) || (menus && ly < WORLD_H))) {   /* the top bar and its menus: straight to the game, camera held */
             if (!topbar) { topbar = 1; topbar_cx = r16(CAM_X); topbar_cy = r16(CAM_Y); }
@@ -1601,15 +1601,16 @@ static void compose_band(void *ctx, size_t band) {
                     uint16_t u = pub_overlay[by * g.sw + bx];
                     if (u != 0xffff) { o[x] = pal[u]; continue; }
                 }
-                if (iy >= g.wh) { o[x] = 0xff000000u; continue; }   /* (the panel's own rows beside it) */
+                if (iy >= g.wh && j->k > 1) { o[x] = 0xff000000u; continue; }   /* (the panel's own rows beside it; a smaller one: park) */
                 goto park;
             }
+            if (j->k < 0.999 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - BAND_H - (g.sh == 480 ? 44 : 22)) goto park;   /* (a smaller panel: the rest of its place) */
             if (ix >= 0 && ix < g.sw) {                                /* the screen column: panel and interface */
                 if (panel_row) { o[x] = pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
                 uint16_t u = pub_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pal[u]; continue; }
             }
-            if (j->k > 1.001 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - BAND_H - (g.sh == 480 ? 44 : 22)) goto park;   /* (its original place: park) */
+            if (fabs(j->k - 1) > 0.001 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - BAND_H - (g.sh == 480 ? 44 : 22)) goto park;   /* (its original place: park) */
           park:
             /* The weather the game drew (screen space): over the whole view, repeated beside the 4:3 column. */
             if (pub_weather_n) {                                       /* (the panel and interface came first) */

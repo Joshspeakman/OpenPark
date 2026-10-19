@@ -32,8 +32,12 @@ static void extras_set(const char *k, long v) {
 }
 static double extras_getf(const char *k) { NSNumber *t; @synchronized ([NSApp class]) { t = extras_test[@(k)]; } return t ? t.doubleValue : [NSUserDefaults.standardUserDefaults doubleForKey:@(k)]; }
 static void extras_setf(const char *k, double v) {
-    if (getenv("DS_TEST")) { @synchronized ([NSApp class]) { if (!extras_test) extras_test = [NSMutableDictionary dictionary]; extras_test[@(k)] = @(v); } return; }
-    [NSUserDefaults.standardUserDefaults setDouble:v forKey:@(k)];
+    if (getenv("DS_TEST")) { @synchronized ([NSApp class]) { if (!extras_test) extras_test = [NSMutableDictionary dictionary]; extras_test[@(k)] = @(v); } }
+    else [NSUserDefaults.standardUserDefaults setDouble:v forKey:@(k)];
+    if (!strcmp(k, "MusicVolume") || !strcmp(k, "SoundVolume")) {   /* (heard at once) */
+        float sfx = (float)extras_getf("SoundVolume"), mus = (float)extras_getf("MusicVolume");
+        dispatch_async(dispatch_get_main_queue(), ^{ tp_audio_set_volumes(sfx, mus); });
+    }
 }
 uint8_t *tp_host_memory(void);
 extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out_bgra;
@@ -751,6 +755,8 @@ static void *game_thread(void *arg) {
             NSUserDefaults *u = NSUserDefaults.standardUserDefaults; char v[32];
             #define QOL_ENV(name, value) do { if (!getenv(name)) { snprintf(v, sizeof v, "%ld", (long)(value)); setenv(name, v, 1); } } while (0)
             QOL_ENV("TP_EW_GAP", [u integerForKey:@"GrossOutGap"]);
+            QOL_ENV("TP_GAME_SOUND_VOL", lround([u doubleForKey:@"GameSoundVolume"] * 100));   /* (qol.c: each effect by its kind) */
+            QOL_ENV("TP_SYSTEM_SOUND_VOL", lround([u doubleForKey:@"SystemSoundVolume"] * 100));
             QOL_ENV("TP_RIDE_MUSIC", [u boolForKey:@"RideMusic"]);
             QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
             QOL_ENV("TP_FREE_VISITORS", [u integerForKey:@"FreeVisitors"]);
@@ -807,7 +813,8 @@ static void *game_thread(void *arg) {
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @1.0}];
+                          @"GrossOutGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @1.0,
+                          @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
@@ -1184,10 +1191,10 @@ static uint32_t key_of_char(unichar c) {
 - (void)panelLarger:(id)sender { [self panelStep:1]; }
 - (void)panelSmaller:(id)sender { [self panelStep:-1]; }
 - (void)panelStep:(int)d {
-    static const double steps[] = {1.0, 1.25, 1.5, 1.75, 2.0};
+    static const double steps[] = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
     double k = [NSUserDefaults.standardUserDefaults doubleForKey:@"PanelScale"]; int i = 0;
-    for (int j = 0; j < 5; j++) if (fabs(steps[j] - k) < fabs(steps[i] - k)) i = j;
-    i += d; if (i < 0) i = 0; if (i > 4) i = 4;
+    for (int j = 0; j < 7; j++) if (fabs(steps[j] - k) < fabs(steps[i] - k)) i = j;
+    i += d; if (i < 0) i = 0; if (i > 6) i = 6;
     [NSUserDefaults.standardUserDefaults setDouble:steps[i] forKey:@"PanelScale"];
     tp_view_set_ui_scale(steps[i]);
 }
