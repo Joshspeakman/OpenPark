@@ -1,0 +1,22 @@
+{
+  "note": "SHA-256 of the HMI drivers cut from the owned package (files) and of the images tools/make_drivers.py makes from them (images). Hashes only: the images are game-derived and stay in work/.",
+  "files": {
+    "mpu": "0c459f801635858b6e5e3632e08fc7e6d20f752323c27d517e25cd343c117ad7",
+    "det": "312e0ef1896e2acc455294b2aedecfcba5a39b04c298e9c0a91823dc3b173c97",
+    "dig": "a8de5b2795fee6c86454b99b1aab0ddd48f3ea612c559343e12acf69d48eea2c",
+    "mix": "333f601addb5913599d29f078a08bc83ad85fbcaa2b8067e1ed1eb14ea429fce"
+  },
+  "images": {
+    "drv-40034-flat-mpu.bin": "f15d7ae67ffc5c60b293738de2216dba7826b6145432ba1599b41846c4ef84d1",
+    "drv-40034-flat-mpu.bin.mask": "103d949a1c47efb684d75d38f223467793391e7f1119553f3e1bda18a9ae0faf",
+    "drv-402c0-cs-dig.bin": "883e1e041b4ecdcc1ad877ab956311d1d8ccaa4d4ec9666fc6f48cb306cba57f",
+    "drv-402c0-cs-dig.bin.mask": "8bdd5824624dfcee17cf6391d3a9368b5226324d566c2d36ef88ebc9a09f5c35",
+    "drv-402c0-flat-det.bin": "312e0ef1896e2acc455294b2aedecfcba5a39b04c298e9c0a91823dc3b173c97",
+    "drv-402c0-flat-dig.bin": "883e1e041b4ecdcc1ad877ab956311d1d8ccaa4d4ec9666fc6f48cb306cba57f",
+    "drv-402c0-flat-dig.bin.mask": "8bdd5824624dfcee17cf6391d3a9368b5226324d566c2d36ef88ebc9a09f5c35",
+    "drv-409a8-cs-mix.bin": "fb0e843371b1e9de2307335cf3a0a32b8561ce5cacf5530450d0bc47389e51f8",
+    "drv-409a8-cs-mix.bin.mask": "84087604c811fb7a1f76913affdaaa9e392dcb84722174b395cf3c2ce1cfca6e",
+    "drv-409a8-flat-mix.bin": "fb0e843371b1e9de2307335cf3a0a32b8561ce5cacf5530450d0bc47389e51f8",
+    "drv-409a8-flat-mix.bin.mask": "84087604c811fb7a1f76913affdaaa9e392dcb84722174b395cf3c2ce1cfca6e"
+  }
+}
