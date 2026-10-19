@@ -33,7 +33,7 @@ CI (`.github/workflows/ci.yml`) runs everything that needs no game files on Ubun
   - the EXTRAS menu;
   - the 3DO video decoder (`runtime/cinepak.c`).
 
-  It uses three platform functions (below), and nothing else from the operating system beyond the C library.
+  It uses four platform functions (below), and nothing else from the operating system beyond the C library.
 - **The Python tools:** they need Python 3.9+, Capstone and Unicorn (`requirements.txt`).
 
 ## `runtime/platform.h`
@@ -41,6 +41,7 @@ CI (`.github/workflows/ci.yml`) runs everything that needs no game files on Ubun
 | Function | What it does | macOS | POSIX |
 |---|---|---|---|
 | `tp_plat_realtime_thread(period)` | asks for the game thread to be woken on time | Mach time-constraint policy | `SCHED_FIFO` if allowed |
+| `tp_plat_game_thread()` | marks the game thread interactive | QoS user-interactive | nothing |
 | `tp_plat_sleep(seconds)` | a precise short sleep | `mach_wait_until` | `clock_nanosleep` |
 | `tp_plat_parallel_for(n, ctx, fn)` | the compositor's row bands across the cores | `dispatch_apply_f` | serial for now |
 
