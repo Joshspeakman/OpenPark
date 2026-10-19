@@ -93,7 +93,6 @@ int tp_audio_start(void) {
         [engine connect:limiter to:engine.outputNode format:of];
         AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_AttackTime, kAudioUnitScope_Global, 0, 0.005, 0);
         AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_DecayTime, kAudioUnitScope_Global, 0, 0.08, 0);
-        AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_PreGain, kAudioUnitScope_Global, 0, -1.0, 0);   /* (a decibel under full scale) */
         const char *ro = getenv("TP_AUDIO_REC_OUT");
         if (ro) { FILE *f = fopen(ro, "wb");
             if (f) [limiter installTapOnBus:0 bufferSize:4096 format:nil block:^(AVAudioPCMBuffer *b, AVAudioTime *when) {

@@ -757,6 +757,8 @@ static void *game_thread(void *arg) {
             QOL_ENV("TP_EW_GAP", [u integerForKey:@"GrossOutGap"]);
             QOL_ENV("TP_CASH_GAP", [u integerForKey:@"PurchaseGap"]);
             QOL_ENV("TP_GAME_SOUND_VOL", lround([u doubleForKey:@"GameSoundVolume"] * 100));   /* (qol.c: each effect by its kind) */
+            QOL_ENV("TP_EW_VOL", lround([u doubleForKey:@"EwVolume"] * 100));
+            QOL_ENV("TP_CASH_VOL", lround([u doubleForKey:@"PurchaseVolume"] * 100));
             QOL_ENV("TP_SYSTEM_SOUND_VOL", lround([u doubleForKey:@"SystemSoundVolume"] * 100));
             QOL_ENV("TP_RIDE_MUSIC", [u boolForKey:@"RideMusic"]);
             QOL_ENV("TP_PARK_TUNE", [u integerForKey:@"ParkTune"]);
@@ -815,7 +817,7 @@ static void *game_thread(void *arg) {
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
                           @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
-                          @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0}];
+                          @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */

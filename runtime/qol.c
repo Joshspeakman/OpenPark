@@ -91,7 +91,8 @@ static double ew_gap, ew_last = -1e9, cash_gap, cash_last = -1e9;   /* (seconds 
 static double sfx_repeat = 0.12, sfx_last[4][64];
 #define SFX_HEADROOM 0.25                   /* (sb16.c gives it back on output) */
 static int sfx_kind;                       /* the next sample: 1 a system sound */
-extern double tp_game_sound_volume, tp_system_sound_volume;   /* (the EXTRAS section) */
+extern double tp_game_sound_volume, tp_system_sound_volume;
+static double ew_volume = 1, cash_volume = 1;        /* (of the game sounds' level: the ew, a guest's purchase) */   /* (the EXTRAS section) */
 static double music_hold = 3.0;             /* seconds a ride tune outlasts its ride leaving the game's view (TP_MUSIC_HOLD) */
 #define MUSIC_HOLD music_hold
 static double tune_seen[64];               /* when each tune's ride was last in the game's view */
@@ -112,6 +113,8 @@ void tp_qol_init(void) {
     if ((e = getenv("TP_MUSIC_HOLD"))) music_hold = atof(e);
     if ((e = getenv("TP_GAME_SOUND_VOL"))) tp_game_sound_volume = atof(e) / 100.0;
     if ((e = getenv("TP_SYSTEM_SOUND_VOL"))) tp_system_sound_volume = atof(e) / 100.0;
+    if ((e = getenv("TP_EW_VOL"))) ew_volume = atof(e) / 100.0;
+    if ((e = getenv("TP_CASH_VOL"))) cash_volume = atof(e) / 100.0;
     ride_music = !((e = getenv("TP_RIDE_MUSIC")) && atoi(e) == 0);
     park_tune = (e = getenv("TP_PARK_TUNE")) ? atoi(e) : 0;
     free_visitors = (e = getenv("TP_FREE_VISITORS")) ? atoi(e) : 0;
@@ -163,13 +166,13 @@ static void play(uint32_t tune) {
  * at once: the ride and park music, the grossed-out sounds, frame pacing, and the app's pixels and pointer. */
 #define X_AREA   0x1c40000u
 #define X_LIST   (X_AREA + 0x0)
-#define X_DROPS  6                                  /* EXTRAS and its submenus */
+#define X_DROPS  8                                  /* EXTRAS and its submenus */
 #define X_DROP_N 32666                              /* (0x1b53c6 + 32666 * 0x354 = 0x1c4004e: inside the area) */
 #define X_DROP(i) (0x1b53c6u + (uint32_t)(X_DROP_N + (i)) * 0x354u)
-#define X_FLAGS  (X_AREA + 0x1500)                 /* (after the drop-downs: 0x4e + 6 * 0x354) */
-#define X_TEXT   (X_AREA + 0x1600)
-#define X_TAB    (X_AREA + 0x2000)
-#define X_TAB_MAX ((0x10000 - 0x2000) / 4)
+#define X_FLAGS  (X_AREA + 0x1c00)                 /* (after the drop-downs: 0x4e + 8 * 0x354) */
+#define X_TEXT   (X_AREA + 0x1c80)
+#define X_TAB    (X_AREA + 0x2400)
+#define X_TAB_MAX ((0x10000 - 0x2400) / 4)
 #define X_ARG    0x7700
 long (*tp_extras_get)(const char *key);              /* (main.m: the app's settings) */
 void (*tp_extras_set)(const char *key, long value);
@@ -179,9 +182,10 @@ extern uint32_t tp_menu_bar;
 void tp_view_set_pacing(int on); int tp_view_pacing(void); void tp_view_set_ui_scale(double k);
 void tp_host_set_cycles(double per_ms); double tp_host_cycles(void);
 static const char *x_title = "EXTRAS";
-/* menu: 0 EXTRAS, 1 GAME SPEED, 2 PANEL SIZE, 3 MUSIC VOLUME, 4 GAME SOUNDS, 5 SYSTEM SOUNDS; sub: the submenu an item opens */
+/* menu: 0 EXTRAS, 1 GAME SPEED, 2 PANEL SIZE, 3 MUSIC VOLUME, 4 GAME SOUNDS, 5 SYSTEM SOUNDS, 6 EW SOUNDS, 7 PURCHASE SOUNDS;
+ * sub: the submenu an item opens */
 static const struct { int menu; const char *text; int line, sub; } x_items[] = {
-    {0, "RIDE MUSIC", 0, 0}, {0, "PARK MUSIC", 0, 0}, {0, "EW SOUNDS", 0, 0}, {0, "PURCHASE SOUNDS", 1, 0},
+    {0, "RIDE MUSIC", 0, 0}, {0, "PARK MUSIC", 0, 0}, {0, "EW SOUNDS", 0, 6}, {0, "PURCHASE SOUNDS", 1, 7},
     {0, "MUSIC VOLUME", 0, 3}, {0, "GAME SOUNDS", 0, 4}, {0, "SYSTEM SOUNDS", 1, 5},
     {0, "GAME SPEED", 0, 1}, {0, "PANEL SIZE", 0, 2}, {0, "STEADY FRAME PACING", 1, 0},
     {0, "SMOOTH PIXELS", 0, 0}, {0, "CRT LINES", 0, 0}, {0, "MAC POINTER", 0, 0},
@@ -189,15 +193,18 @@ static const struct { int menu; const char *text; int line, sub; } x_items[] = {
     {2, "0.5X", 0, 0}, {2, "0.75X", 0, 0}, {2, "AS DRAWN", 0, 0}, {2, "1.25X", 0, 0}, {2, "1.5X", 0, 0}, {2, "1.75X", 0, 0}, {2, "2X", 0, 0},
     {3, "OFF", 0, 0}, {3, "QUARTER", 0, 0}, {3, "HALF", 0, 0}, {3, "THREE QUARTERS", 0, 0}, {3, "FULL", 0, 0},
     {4, "OFF", 0, 0}, {4, "QUARTER", 0, 0}, {4, "HALF", 0, 0}, {4, "THREE QUARTERS", 0, 0}, {4, "FULL", 0, 0},
-    {5, "OFF", 0, 0}, {5, "QUARTER", 0, 0}, {5, "HALF", 0, 0}, {5, "THREE QUARTERS", 0, 0}, {5, "FULL", 0, 0}};
+    {5, "OFF", 0, 0}, {5, "QUARTER", 0, 0}, {5, "HALF", 0, 0}, {5, "THREE QUARTERS", 0, 0}, {5, "FULL", 0, 0},
+    {6, "OFF", 0, 0}, {6, "QUARTER", 0, 0}, {6, "HALF", 0, 0}, {6, "THREE QUARTERS", 0, 0}, {6, "FULL", 0, 0},
+    {7, "OFF", 0, 0}, {7, "QUARTER", 0, 0}, {7, "HALF", 0, 0}, {7, "THREE QUARTERS", 0, 0}, {7, "FULL", 0, 0}};
 #define X_N (int)(sizeof x_items / sizeof x_items[0])
 #define X_SPEED0 13                                  /* (first items of the submenus: the launcher's choices) */
 #define X_PANEL0 18
 #define X_NPANEL 7
-#define X_VOL0   25                                  /* music, game sounds, system sounds: 5 each */
+#define X_VOL0   25                                  /* music, game sounds, system sounds, the ew, purchases: 5 each */
+#define X_NVOL   5
 static const double x_speeds[5] = {10000, 12500, 15000, 20000, 40000}, x_panels[X_NPANEL] = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
 static const double x_vols[5] = {0, 0.25, 0.5, 0.75, 1.0};
-static const char *const x_vol_keys[3] = {"MusicVolume", "GameSoundVolume", "SystemSoundVolume"};
+static const char *const x_vol_keys[X_NVOL] = {"MusicVolume", "GameSoundVolume", "SystemSoundVolume", "EwVolume", "PurchaseVolume"};
 double tp_game_sound_volume = 1, tp_system_sound_volume = 1;   /* (H_START_SAMPLE scales each effect by its kind) */
 static uint32_t x_game_tab; static int x_on = -1, x_tick;
 static long x_get(const char *k, long d) { return tp_extras_get ? tp_extras_get(k) : d; }
@@ -206,11 +213,11 @@ static double x_getf(const char *k, double d) { return tp_extras_getf ? tp_extra
 static void x_flags(uint8_t *m) {
     long px = x_get("SmoothPixels", 0); double cyc = tp_host_cycles(), ps = x_getf("PanelScale", 1.0);
     uint8_t f[X_N]; memset(f, 0, sizeof f);
-    f[0] = ride_music != 0; f[1] = park_tune != 0; f[2] = ew_gap >= 0; f[3] = cash_gap >= 0; f[9] = tp_view_pacing() != 0;
+    f[0] = ride_music != 0; f[1] = park_tune != 0; f[9] = tp_view_pacing() != 0;
     f[10] = px == 1; f[11] = px == 2; f[12] = x_get("ShowMacCursor", 0) != 0;
     for (int i = 0; i < 5; i++) f[X_SPEED0 + i] = fabs(cyc - x_speeds[i]) < 1;
     for (int i = 0; i < X_NPANEL; i++) f[X_PANEL0 + i] = fabs(ps - x_panels[i]) < 0.01;
-    for (int v = 0; v < 3; v++) { double cur = v == 0 ? x_getf("MusicVolume", 0.8) : v == 1 ? tp_game_sound_volume : tp_system_sound_volume;
+    for (int v = 0; v < X_NVOL; v++) { double cur = v == 0 ? x_getf("MusicVolume", 0.8) : v == 1 ? tp_game_sound_volume : v == 2 ? tp_system_sound_volume : v == 3 ? ew_volume : cash_volume;
         int best = 0; for (int i = 1; i < 5; i++) if (fabs(cur - x_vols[i]) < fabs(cur - x_vols[best])) best = i;
         f[X_VOL0 + v * 5 + best] = 1; }
     memcpy(m + X_FLAGS, f, X_N);
@@ -251,9 +258,6 @@ static void x_choose(uint8_t *m, int k) {
     switch (k) {
     case 0: ride_music = !ride_music; x_set("RideMusic", ride_music); break;
     case 1: { static int last = 1; if (park_tune) { last = park_tune; park_tune = 0; } else park_tune = last > 0 ? last : 1; x_set("ParkTune", park_tune); break; }
-    /* (the ew and the purchases: on, as often as the launcher says, or none) */
-    case 2: { static double last = 0; if (ew_gap >= 0) { last = ew_gap; ew_gap = -1; } else ew_gap = last; x_set("GrossOutGap", (long)ew_gap); break; }
-    case 3: { static double last = 0; if (cash_gap >= 0) { last = cash_gap; cash_gap = -1; } else cash_gap = last; x_set("PurchaseGap", (long)cash_gap); break; }
     case 9: { int on = !tp_view_pacing(); tp_view_set_pacing(on); x_set("SteadyPacing", on); break; }
     case 10: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 1 ? 0 : 1); break;
     case 11: x_set("SmoothPixels", x_get("SmoothPixels", 0) == 2 ? 0 : 2); break;
@@ -261,12 +265,12 @@ static void x_choose(uint8_t *m, int k) {
     default:
         if (k >= X_SPEED0 && k < X_SPEED0 + 5) { tp_host_set_cycles(x_speeds[k - X_SPEED0]); x_set("Cycles", (long)x_speeds[k - X_SPEED0]); }
         else if (k >= X_PANEL0 && k < X_PANEL0 + X_NPANEL) { tp_view_set_ui_scale(x_panels[k - X_PANEL0]); if (tp_extras_setf) tp_extras_setf("PanelScale", x_panels[k - X_PANEL0]); }
-        else if (k >= X_VOL0 && k < X_VOL0 + 15) { int v = (k - X_VOL0) / 5; double vol = x_vols[(k - X_VOL0) % 5];
-            if (v == 1) tp_game_sound_volume = vol; else if (v == 2) tp_system_sound_volume = vol;
+        else if (k >= X_VOL0 && k < X_VOL0 + 5 * X_NVOL) { int v = (k - X_VOL0) / 5; double vol = x_vols[(k - X_VOL0) % 5];
+            if (v == 1) tp_game_sound_volume = vol; else if (v == 2) tp_system_sound_volume = vol; else if (v == 3) ew_volume = vol; else if (v == 4) cash_volume = vol;
             if (tp_extras_setf) tp_extras_setf(x_vol_keys[v], vol); }   /* (main.m applies the music's at once) */
     }
     x_flags(m);
-    static const char *const menus[6] = {"", "game speed ", "panel size ", "music volume ", "game sounds ", "system sounds "};
+    static const char *const menus[8] = {"", "game speed ", "panel size ", "music volume ", "game sounds ", "system sounds ", "ew sounds ", "purchase sounds "};
     if (log_sounds || getenv("TP_EXTRAS_LOG")) fprintf(stderr, "extras: %s%s chosen\n", menus[x_items[k].menu], x_items[k].text);
 }
 
@@ -281,7 +285,7 @@ void tp_qol_hook(int nested) {
          * the driver adds its samples together and clips, so several at once came out harsh; sb16.c makes the
          * level up on output in floating point, and the app limits the whole mix (audio.m). */
         if (!nested) { uint32_t rec = r32(m, sp + 8);
-            if (rec > 0x1000 && rec < 0x4000000u) { double v = (sfx_kind ? tp_system_sound_volume : tp_game_sound_volume) * SFX_HEADROOM;
+            if (rec > 0x1000 && rec < 0x4000000u) { double v = (sfx_kind == 1 ? tp_system_sound_volume : tp_game_sound_volume * (sfx_kind == 2 ? ew_volume : sfx_kind == 3 ? cash_volume : 1)) * SFX_HEADROOM;
                 int vol = (int16_t)r16(m, rec + 0x10); if (vol > 0) w16(m, rec + 0x10, (uint16_t)(int)(vol * v)); } }
         sfx_kind = 0;
         return;
@@ -329,6 +333,9 @@ void tp_qol_hook(int nested) {
         if (log_sounds) fprintf(stderr, "sound %.3f fn %06x bank %d sample %d from %06x%s\n", now(), pc, (int16_t)a1, (int16_t)a2, ret, nested ? " (pass)" : "");
         if (nested) { skip_call(); return; }          /* a pass drawing another part of the park */
         sfx_kind = (int16_t)a1 == 0 && ((int16_t)a2 == 1 || (int16_t)a2 == 25 || (int16_t)a2 == 26);   /* (BUTTON, BUTTON2, BUTTON3: system sounds) */
+        if (k == H_SFX_PARK && (int16_t)a1 == 0 && (int16_t)a2 == 13) sfx_kind = 2;                        /* (the ew) */
+        if (k == H_SFX && (int16_t)a1 == 0 && (int16_t)a2 == 16 && ret == CASH_RET) sfx_kind = 3;        /* (a guest's purchase) */
+        if ((sfx_kind == 2 && ew_volume <= 0) || (sfx_kind == 3 && cash_volume <= 0)) { sfx_kind = 0; skip_call(); return; }   /* (turned off) */
         if (k == H_SFX_PARK && (int16_t)a1 == 0 && (int16_t)a2 == 13 && ew_gap) {   /* grossed out */
             double t = now();
             if (ew_gap < 0 || t - ew_last < ew_gap) { if (log_sounds) fprintf(stderr, "sound: ew skipped\n"); skip_call(); return; }
