@@ -1062,6 +1062,9 @@ static uint32_t key_of_char(unichar c) {
             uint8_t *m = tp_host_memory(); uint32_t a = (uint32_t)strtoul([p[1] UTF8String], NULL, 16); int len = p.count > 2 ? [p[2] intValue] : 4;
             fprintf(stderr, "peek %06x:", a); for (int i = 0; i < len && i < 64; i++) fprintf(stderr, " %02x", m[a + i]); fprintf(stderr, "\n");
         }
+        else if ([op isEqual:@"coverage"] && p.count > 1) {   /* coverage PATH: the block coverage so far, added into PATH (TP_COVERAGE=1) */
+            extern void tp_coverage_dump(const char *); tp_coverage_dump([p[1] fileSystemRepresentation]);
+        }
         else if ([op isEqual:@"dump"] && p.count > 3) {  /* dump ADDR(hex) LEN PATH: guest memory to a file (survey diffs) */
             uint8_t *m = tp_host_memory(); uint32_t a = (uint32_t)strtoul([p[1] UTF8String], NULL, 16); uint32_t len = (uint32_t)strtoul([p[2] UTF8String], NULL, 0);
             FILE *f = len <= 0x400000 ? fopen([p[3] fileSystemRepresentation], "wb") : NULL; if (f) { fwrite(m + a, 1, len, f); fclose(f); }
