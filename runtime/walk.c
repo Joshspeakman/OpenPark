@@ -75,8 +75,8 @@ extern uint32_t tp_map_w, tp_map_ext;
 #define NTH         16384          /* room for the largest things pool (bigmap.c) */
 #define THING_LAST  0x1d3b78u      /* -> the pool's last record (1200 records, more in a 128x128 park) */
 #define GAME_CX0 4
-#define GAME_CX1 51
-#define GAME_CY1 51
+#define GAME_CX1 (MAPE - 13)                         /* (51 for the 64x64 park, as view.c) */
+#define GAME_CY1 (MAPE - 13)
 
 static const uint8_t *M;
 static int r16(uint32_t a) { int16_t v; memcpy(&v, M + a, 2); return v; }
@@ -485,7 +485,7 @@ int tp_walk_start(double wx, double wy) {
     Geom g; if (!M || !geom(&g) || !r32(MAP_PTR)) return 0;
     pthread_mutex_lock(&lock);
     memset(&W, 0, sizeof W);
-    W.on = 1; W.x = wx < 0.5 ? 0.5 : wx > 63.5 ? 63.5 : wx; W.y = wy < 0.5 ? 0.5 : wy > 63.5 ? 63.5 : wy;
+    W.on = 1; W.x = wx < 0.5 ? 0.5 : wx > MAPE - 0.5 ? MAPE - 0.5 : wx; W.y = wy < 0.5 ? 0.5 : wy > MAPE - 0.5 ? MAPE - 0.5 : wy;
     W.yaw = ART_YAW; W.mode = getenv("TP_WALK_DIORAMA") ? MODE_DIORAMA : MODE_STREET;
     W.hscale = getenv("TP_WALK_SCALE") ? atof(getenv("TP_WALK_SCALE")) : 1; if (W.hscale < 0.25 || W.hscale > 4) W.hscale = 1;
     snaps[0].valid = snaps[1].valid = 0; last_snap = 0;     /* (front stays: the emulation thread may be swapping) */
@@ -605,7 +605,7 @@ void tp_walk_input(double fwd, double strafe, double turn, double look_yaw, doub
             if (!blocked(s, W.x + dx + (dx > 0 ? 0.2 : -0.2), W.y)) W.x += dx;
             if (!blocked(s, W.x, W.y + dy + (dy > 0 ? 0.2 : -0.2))) W.y += dy;
         } else { W.x += dx; W.y += dy; }
-        W.x = W.x < 0.2 ? 0.2 : W.x > 63.8 ? 63.8 : W.x; W.y = W.y < 0.2 ? 0.2 : W.y > 63.8 ? 63.8 : W.y;
+        W.x = W.x < 0.2 ? 0.2 : W.x > MAPE - 0.2 ? MAPE - 0.2 : W.x; W.y = W.y < 0.2 ? 0.2 : W.y > MAPE - 0.2 ? MAPE - 0.2 : W.y;
         W.cam_x = W.x; W.cam_y = W.y; W.cam_z = eye; W.cam_yaw = W.yaw; W.cam_pitch = W.pitch;
     }
     if (W.mode == MODE_DIORAMA) {                         /* above and behind, near the art's own angle */
