@@ -197,6 +197,19 @@ int main(void) {
     for (uint32_t a = 0; a < (64u << 20); a++) if (mem[a] != before[a] && !(a >= 0x1d667a && a < 0x1d667c) && !(a >= 0x1d6666 && a < 0x1d6668) && !(a >= 0x1d666e && a < 0x1d6670)) changed++;
     CHECK(changed == 0, "walking changed %ld bytes of game memory", changed);
 
+    /* a 128x128 park: the walker, its walking and the game camera reach the far half (issue #1) */
+    tp_map_w = tp_map_ext = 128;
+    CHECK(tp_walk_start(100.5, 110.5), "start in a 128x128 park");
+    usleep(20000); tp_walk_frame(); tp_walk_input(0, 0, 0, 0, 0, 0, 0.016);
+    tp_walk_position(&px, &py);
+    CHECK(fabs(px - 100.5) < 1e-6 && fabs(py - 110.5) < 1e-6, "128x128: dropped at 100.5,110.5, walker at %.2f,%.2f", px, py);
+    CHECK(r16(0x1d667a) > 51 && r16(0x1d6666) > 51, "128x128: game camera %d,%d held to the 64x64 park's limits", r16(0x1d667a), r16(0x1d6666));
+    tp_walk_teleport(126.5, 100.5, 0);
+    for (int i = 0; i < 60; i++) tp_walk_input(1, 0, 0, 0, 0, 0, 0.05);
+    tp_walk_position(&px, &py);
+    CHECK(px > 126.5 && px <= 127.8 + 1e-9, "128x128: walking east from 126.5 ended at %.2f (want past it, at most 127.8)", px);
+    tp_map_w = tp_map_ext = 64;
+
     free(before); free(mem);
     printf(fails ? "walk test: %d failed\n" : "walk test: all passed\n", fails);
     return fails != 0;
