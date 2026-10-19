@@ -685,6 +685,15 @@ smaller as well as larger with a slider, rail rides cannot be laid.
   +0x63f) less (6, 7); the landscape is marked for redrawing for 8 more ticks, as the first frame's own clears
   it. Checked in new 64x64 and 128x128 parks. TP_GAME_CAMERA=1 keeps the game's (the golden first-park check).
 - Panel Size defaults to 0.75x.
+- Ew and purchase sound levels (the player: sliders with a few levels and off): EwVolume, PurchaseVolume (0, 1/4,
+  1/2, 3/4, 1, of the game sounds' level; TP_EW_VOL, TP_CASH_VOL percent). EXTRAS: EW SOUNDS and PURCHASE SOUNDS
+  open submenus OFF .. FULL (drop-downs 32672, 32673; X_FLAGS moved to +0x1c00, texts +0x1c80, table +0x2400 for
+  eight drop-downs). Off: the call returns at once. The launcher's Sound page has eight rows now, drawn compact.
+  The Tweaks rows for how often (every time .. 30 s, off) stay.
+- Button clicks breaking up (the player, clicking between panel tabs): no dropouts and no skipping ahead in the
+  output ring (TP_RING_LOG), but every click took the final mix to the limiter (a full-scale BUTTON over the
+  ambience and music), whose gain dip and recovery could be heard. Effects come out at half the level now
+  (OUT_GAIN 2): one at full volume peaks at half scale; the clicks test peaked at 0.57 before the mix, 0.92 out.
 - Ride placement stall: not seen in TESTPARK (Big Dipper placed, 60 frames a second throughout, one 50 ms frame).
 - Exploding rides: wear is ride thing +0x2e, added at each cycle's end (0x131ed3, +0x3a cycles); past twice the
   ride type's +0xa8 the ride explodes (0x16662d, EXPLOD3 from 0x166674). Forced in TESTPARK (poke +0x2e to

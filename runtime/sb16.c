@@ -283,7 +283,8 @@ float sb16_peak(void) { float p = peak; peak = 0; return p; }
  * of its volume (four at full volume fit in the driver's 16-bit sum); here that is given back in floating point and
  * a gentle low-pass (2nd order, 9 kHz) takes the stair-steps' edge off. Nothing clips here: whatever passes full
  * scale meets the app's look-ahead peak limiter (audio.m). TP_SOUND_RAW=1: the card's output as it was. */
-#define OUT_GAIN 4.0f                   /* (qol.c starts every effect at a quarter: SFX_HEADROOM) */
+#define OUT_GAIN 2.0f                   /* (qol.c starts every effect at a quarter, SFX_HEADROOM: one at full volume peaks at half
+                                           scale here, so effects, ambience and music together seldom reach the limiter) */
 static int raw_out = -1; static double lp_rate; static float lp_b0, lp_b1, lp_b2, lp_a1, lp_a2, lp_x1[2], lp_x2[2], lp_y1[2], lp_y2[2];
 static float shape(float x, int ch) {
     if (raw_out) return x;
@@ -331,7 +332,7 @@ static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
 static double pumped;
 static long underruns;
 void sb16_pump(double t) {
-    if (pumped == 0 || t < pumped || t - pumped > 0.25) { pumped = t; return; }   /* (a long stall is not replayed) */
+    if (pumped == 0 || t < pumped || t - pumped > 0.25) { if (pumped && getenv("TP_RING_LOG")) fprintf(stderr, "sb16: stall of %.0f ms not replayed\n", (t - pumped) * 1e3); pumped = t; return; }   /* (a long stall is not replayed) */
     int frames = (int)((t - pumped) * 44100);
     if (frames < 16) return;
     if (frames > 4096) frames = 4096;
@@ -347,11 +348,12 @@ void sb16_play(float *out, int frames) {
     pthread_mutex_lock(&ring_lock);
     unsigned avail = r_head - r_tail;
     if (!primed && avail >= 1024) primed = 1;
-    if (primed && avail > 4096) r_tail = r_head - 1536;   /* (far behind, the game ran ahead of the device: catch up) */
+    static int rlog = -1; if (rlog < 0) rlog = getenv("TP_RING_LOG") != NULL;
+    if (primed && avail > 4096) { if (rlog) fprintf(stderr, "sb16: skipped ahead %u frames\n", avail - 1536); r_tail = r_head - 1536; }   /* (far behind, the game ran ahead of the device: catch up) */
     int i = 0;
     if (primed) for (; i < frames && r_tail != r_head; i++, r_tail++) { out[2 * i] = ring[(r_tail % RING) * 2]; out[2 * i + 1] = ring[(r_tail % RING) * 2 + 1]; }
     if (i < frames) {                                    /* (ran dry: silence, and fill up again before playing on) */
-        if (primed) { primed = 0; underruns++; if (getenv("TP_DEBUG")) fprintf(stderr, "sb16: output ran dry (%ld)\n", underruns); }
+        if (primed) { primed = 0; underruns++; if (getenv("TP_DEBUG") || rlog) fprintf(stderr, "sb16: output ran dry (%ld)\n", underruns); }
         for (; i < frames; i++) out[2 * i] = out[2 * i + 1] = 0;
     }
     pthread_mutex_unlock(&ring_lock);
