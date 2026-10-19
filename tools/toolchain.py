@@ -17,7 +17,7 @@ def cc():
 
 def shared():
     """Flags that make a shared library (the file name the callers choose is kept: loading does not mind)."""
-    return ['-dynamiclib'] if sys.platform == 'darwin' else ['-shared']
+    return ['-dynamiclib'] if sys.platform == 'darwin' else ['-shared', '-fPIC']   # (position-independent by default on macOS)
 
 
 def static_lib(out, objects):
