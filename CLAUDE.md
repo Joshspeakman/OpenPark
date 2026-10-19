@@ -1,7 +1,6 @@
 # Theme Park native macOS recompilation
 
 - Use only the user's owned Theme Park package. Downloads and installed games are read-only.
-- No DRM/copy-protection removal, CD-key work, or leaked source.
 - Final product: native Apple Silicon code, no DOSBox, Wine, Rosetta or CPU interpreter at runtime. Unicorn is permitted as a development-only differential oracle.
 - Keep package contents, executables, generated C, screenshots, saves and traces under ignored work/ or build/. Never commit game-derived material. Stage explicit paths only.
 - Work locally on nightly. Do not change main, rewrite history, create a remote repository, publish, or install an app without the user's instruction.
