@@ -29,21 +29,21 @@ int  tp_host_png(const char *path, char sha256_hex[65]);
 
 /* Input (any thread). key = scan<<8 | ascii, as INT 16h returns it. */
 void tp_host_key(uint32_t key);
-void tp_host_shift(uint32_t flags);
-void tp_host_key_raw(uint8_t scan, int down);  /* make/break codes for programs with their own INT 9 */       /* BIOS shift-state byte (INT 16h AH=2) */
+void tp_host_shift(uint32_t flags);                    /* BIOS shift-state byte (INT 16h AH=2) */
+void tp_host_key_raw(uint8_t scan, int down);  /* make/break codes for programs with their own INT 9 */
 void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
 void tp_host_mouse_delta(double dx, double dy, uint32_t buttons); /* pixels at 320x200 */
 void tp_host_quit(void);
-void tp_host_pause(int on);
+void tp_host_pause(int on);                             /* hold the game (window hidden or minimised) */
 void tp_host_set_image(const char *path);     /* the LE image tp_host_init loads (instead of TP_IMAGE) */
-void tp_host_set_args(const char *args);      /* the program's command tail, before tp_host_init (" -l1": German) */                   /* hold the game (window hidden or minimised) */
-void tp_host_set_realtime(void);
+void tp_host_set_args(const char *args);      /* the program's command tail, before tp_host_init (" -l1": German) */
+void tp_host_set_realtime(void);              /* switch a deterministic run to real time (tests) */
 /* Sound: the app attaches an output and pulls PCM; MIDI bytes go to tp_audio_midi (weak). */
 void tp_host_audio_attached(int on);
 void sb16_render(float *out, int frames, double out_rate);
 void sb16_play(float *out, int frames);   /* the audio output: what sb16_pump made in the game's time */
 void sb16_pump(double t);
-void tp_audio_midi(uint8_t byte);   /* switch a deterministic run to real time (tests) */
+void tp_audio_midi(uint8_t byte);   /* MIDI bytes to the app's synthesizer (weak: none in headless runs) */
 /* Emulated CPU speed in thousands of x86 instructions per second (DOSBox "cycles"); 0 = unthrottled. */
 void tp_host_set_cycles(double per_ms);
 

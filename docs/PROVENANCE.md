@@ -10,9 +10,12 @@ Existing ports reviewed read-only:
 
 - Freedom Force: executable analysis/lifting, the CPU context and flags, test
   harness, background/muted runs, and overlay architecture. `prove_native.py`
-  imports its lifter and includes its runtime headers without copying
-  or changing that project. `config/reference.json` pins the exact commit and
-  hashes of all five files used. All game hooks and overrides are empty in this
+  and the build import its lifter and include its runtime headers. Since
+  2026-10-19 (issue #8) the six files used are vendored unchanged in
+  `vendor/freedom-force-recomp/recomp/` (both projects are the user's own);
+  `config/reference.json` pins the source commit and their hashes, checked
+  before every use (`flow_targets.py`, imported lazily by `lift.py`, was missing
+  from the pins and is now included). All game hooks and overrides are empty in this
   proof; the lifter's game-specific command-line build is not invoked.
   The DOS adapter now also reuses only its generic instruction emitters. It
   replaces collection/dispatch, segment accesses, DOS boundaries and string

@@ -3,7 +3,17 @@
 Target: the user's GOG `theme_park_enUS_1_0_33010.pkg`, recompiled into native
 Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
-## Current milestone — 2026-10-16 (evening): sound, intro, launcher, save/load
+## Current state — 2026-10-18
+
+Played by the player daily on the Nightly app (their reports drive the dated sections below). Since the
+2026-10-16 milestone: SVGA 640x480; a zoomable widescreen view with native park passes; 128x128 sandbox parks
+(12,000 things, 10,000 visitors) with Endless and True Freeplay rules; Visitor View (experimental); the EXTRAS
+menu in the game's own top bar; steady frame pacing; an audio overhaul (headroom, cleaned sample ends, a
+look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port-audit.md). Open: the GitHub
+issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
+Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
+
+## Milestone — 2026-10-16 (evening): sound, intro, launcher, save/load
 
 **Theme Park Nightly.app** runs INTRO.EXE and MAIN.EXE as native ARM64 code
 in a Cocoa window with a launch window, keyboard/mouse, Sound Blaster 16
@@ -30,7 +40,7 @@ What is verified, and how:
   synth. Measured: IRQ 7 at 5.5/s (44,100 Hz / 8,000-sample blocks), effect
   and ambience levels 0.2–0.9 in the park, MIDI 27–153 bytes/s in the intro.
   The hardware model itself is checked only by these measurements, not
-  against real hardware; **nobody has listened to it yet**. The main game sent
+  against real hardware; nobody had listened to it yet (since: the player plays with sound; see the audio sections). The main game sent
   no MIDI in the parts of play exercised (its park audio is digital).
 - **Intro**: INTRO.EXE traced (no self-modifying code in 30M blocks) and
   compiled with an `intro_` prefix; plays with sound, Escape skips (its own
@@ -57,9 +67,8 @@ Known limits:
   fix; not explained.
 - Driver images are game-derived files in work/, made by the procedure in
   `tools/dump_drivers.md`; a different sound configuration needs new images.
-- No VESA/SVGA mode; the game runs in 320x200 as GOG's default does.
-- The NSEvent key table, window mouse mapping, on-screen drawing and audio
-  output have only been exercised by automated tests, not by a person.
+- (Then: no VESA/SVGA mode, and nothing tried by a person. Both done since: SVGA 2026-10-17; the player's
+  sessions from 2026-10-17 on.)
 
 ## Confirmed input survey
 
@@ -104,7 +113,7 @@ every apparent service found in a speculative decode.
 | 2 | ARM64 routine proofs using the shared lifter | Two integer/memory slices pass | Small initial proof; broad CPU coverage still needed |
 | 3 | Verified startup analysis and differential trace to first DOS service | Passed through player details | Synthetic DOS4G launch contract; original-vs-native CPU agreement |
 | 4 | DOS/DPMI services: memory, process environment, files, time and callbacks | Observed startup services implemented | Keyboard, timer and far mouse callbacks tested |
-| 5 | Framebuffer/palette presentation in a native window, then menus | Cocoa window (CoreAnimation, 4:3, full screen) | VESA modes remain |
+| 5 | Framebuffer/palette presentation in a native window, then menus | Cocoa window (CoreAnimation, 4:3, full screen); VESA 640x480 (2026-10-17) | Done |
 | 6 | Native input and simulation pacing; new park, build operations, save/load | Real-time input, governor, save/continue verified | Build operations covered by fuzzing only |
 | 7 | Intro playback and HMI audio through native output | Done: intro, SB16 effects, General MIDI | Hardware model checked by measurement only |
 | 8 | Soak, original-behavior comparisons, launcher and packaging | App builds and installs (user authorised 2026-10-16); fuzz + checkpoint oracle | Launcher window, fuzz faults above |
@@ -233,9 +242,9 @@ Later: the native renderer replaces passes; widescreen, hi-res UI, simulation.
 
 ## Next concrete step
 
-1. The user's first session: keyboard, mouse, full screen, sound balance.
+1. (Done: the player's sessions; SVGA mode.)
 2. Regenerate driver images automatically (script the dump/mask procedure).
-3. SVGA mode (the game's "toggle screen mode"), and a longer real-time soak.
+3. A longer real-time soak.
 
 ## Quality of life and free mode (runtime/qol.c) — 2026-10-17
 

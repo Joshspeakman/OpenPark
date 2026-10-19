@@ -2,13 +2,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export DS_TEST=1 W32_AUDIO_MUTE=1 PYTHONDONTWRITEBYTECODE=1
-PYTHON=${TP_PYTHON:-python3}
+if [[ -n ${TP_PYTHON:-} ]]; then PYTHON=$TP_PYTHON                     # (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
+elif [[ -x .venv/bin/python3 ]]; then PYTHON=.venv/bin/python3
+else PYTHON=python3; fi
 if [[ $(uname -m) != arm64 ]]; then
   echo 'Native verification requires Apple Silicon.' >&2
   exit 1
 fi
 if [[ $# -lt 2 || $# -gt 3 || ( $# -eq 3 && "${3:-}" != --park ) ]]; then
-  echo 'usage: tests/check_macos.sh owned-GAME/MAIN.EXE reference-checkout [--park]' >&2
+  echo 'usage: tests/check_macos.sh owned-GAME/MAIN.EXE reference-checkout [--park]   (reference: vendor/freedom-force-recomp)' >&2
   exit 2
 fi
 "$PYTHON" -m unittest discover -s tests -v
