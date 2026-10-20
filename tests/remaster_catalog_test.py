@@ -28,6 +28,21 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(ledger['source_problems'][0]['table'],'shop_action_sprite_offsets')
         self.assertIn('shop_customer_substitution',ledger['runtime_channels'])
 
+    def test_direct_frame_ownership_does_not_follow_animation_index(self):
+        frame=dict(id=1,next=0,parts=[dict(sprite_index=1,sprite_offset=6,rider_marker=False)],
+                   element_termination='end')
+        catalog=dict(snapshot_sha256='synthetic',files=[],assets=[
+            dict(id='guest:0',references=[],frame_references=[dict(field='slot:11',frame=1)])],
+            families={'M':dict(chains=[],frames=[dict(id=0),frame],unreachable_frames=[1])})
+        parts=[dict(id='MSPR-0:1',empty=False,owners=[],frame_uses=[],seated_uses=[])]
+        with patch('remaster_catalog.build',return_value=catalog), \
+             patch('remaster_catalog.bank_records',side_effect=[parts,[]]):
+            ledger=make_ledger(Path('unused'),Path('unused'))
+        self.assertEqual(ledger['frames'][0]['owners'],['guest:0'])
+        self.assertEqual(parts[0]['owners'],['guest:0'])
+        self.assertEqual(ledger['animations'],[])
+        self.assertEqual(ledger['source_problems'],[])
+
     def test_original_fallback_and_concepts_never_complete(self):
         ledger=dict(parts=[dict(id='sprite:1',required=True,source_hash='00')],
                     assets=[dict(id='guest:0')],animations=[],resources=[],source_problems=[])

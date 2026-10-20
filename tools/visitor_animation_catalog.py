@@ -69,13 +69,18 @@ def build(memory, data):
         refs = [dict(field=f'+0x{o:x}', animation=word(at+o), role='staff definition animation; directional/activity variants need mapping')
                 for o in (48, 50, 52) if word(at+o)]
         assets.append(dict(id=f'staff:{i}', name=name, category='staff', references=refs, replacement='not animation validated'))
-    # Eight variants are exercised in the copied park. Preserve all eighteen
-    # entries rather than assigning unverified behavior names from appearance.
+    # Preserve all eighteen table entries, distinguishing direct frame values
+    # from animation indices before assigning behavior names.
     for i in range(8):
         refs = [dict(field=f'slot:{slot}', animation=word(0x1b49f4 + i*36 + slot*2),
-                     role='guest animation table; action/direction not yet named') for slot in range(18)]
+                     role='guest animation table; action/direction not yet named') for slot in range(18) if slot != 11]
+        # 0x14222d/0x142363/0x143d36 copy slot 11 straight to word 10.
+        # Treating it as an animation index invents unrelated frame ownership.
+        frame_refs = [dict(field='slot:11', frame=word(0x1b49f4+i*36+22),
+                           role='direct composite frame; native assignments 0x14222d, 0x142363, 0x143d36')]
         seated = [word(0x1b9a78 + i*94 + p*2) for p in range(47)]
         assets.append(dict(id=f'guest:{i}', name=f'Guest variant {i}', category='guest', references=refs,
+                           frame_references=frame_refs,
                            seated_sprite_offsets=seated, alternate_seated_sprite_offsets=[word(0x1b9a58+i*4+p*2) for p in range(2)],
                            shop_action_sprite_offsets=[word(0x1b9d68+i*46+p*2) for p in range(23)],
                            replacement='same canonical model required walking/seated; not animation validated'))
@@ -85,6 +90,10 @@ def build(memory, data):
         refs.extend(dict(field=f'walk_direction:{d}', animation=refs[0]['animation']+d,
                          role=f'walking {direction}; native state 8')
                     for d,direction in enumerate(('north','east','south','west')))
+        # 0x125c11/0x125caf/0x13067a add byte 0x12 before the animation lookup.
+        refs.extend(dict(field=f'action_direction:12:{d}', animation=word(0x1b49f4+i*36+24)+d,
+                         role='directional action group; native lookup 0x125c11; action name unverified')
+                    for d in range(4))
     owners = defaultdict(list)
     for a in assets:
         for ref in a['references']:
@@ -150,7 +159,7 @@ function advance(){if(!selected)return;if(index+1<selected.frames.length)index++
 $('play').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('play').textContent='Play'}else{timer=setInterval(advance,1000/Math.max(1,Math.min(30,+$('fps').value)));$('play').textContent='Pause'}};$('step').onclick=advance;$('position').oninput=()=>{index=+$('position').value;show()};
 const button=i=>`<button data-animation="${i}">${i}</button>`;
 function render(){const q=$('search').value.toLowerCase(),scope=$('scope').value;let rows=[];
-if(scope==='assets'){$('head').innerHTML='<tr><th>ID</th><th>Asset</th><th>Definition animation refs</th><th>Status</th></tr>';for(const a of catalog.assets)if(JSON.stringify(a).toLowerCase().includes(q))rows.push(`<tr><td>${esc(a.id)}</td><td>${esc(a.name)}</td><td>${a.references.map(r=>button(r.animation)).join(' ')||'Placed composite required'}</td><td>${esc(a.replacement)}<details><summary>Motion checks</summary>${a.acceptance_checks.map(c=>`<p>${esc(c.check)} — ${esc(c.status)}</p>`).join('')}</details></td></tr>`)}
+if(scope==='assets'){$('head').innerHTML='<tr><th>ID</th><th>Asset</th><th>Animation / direct frame refs</th><th>Status</th></tr>';for(const a of catalog.assets)if(JSON.stringify(a).toLowerCase().includes(q))rows.push(`<tr><td>${esc(a.id)}</td><td>${esc(a.name)}</td><td>${a.references.map(r=>button(r.animation)).join(' ')||'Placed composite required'} ${(a.frame_references||[]).map(r=>`<span>Frame ${esc(r.frame)} (${esc(r.field)})</span>`).join(' ')}</td><td>${esc(a.replacement)}<details><summary>Motion checks</summary>${a.acceptance_checks.map(c=>`<p>${esc(c.check)} — ${esc(c.status)}</p>`).join('')}</details></td></tr>`)}
 else if(scope==='animations'){$('head').innerHTML='<tr><th>Animation</th><th>Frames</th><th>Termination</th><th>Owners</th></tr>';for(const c of catalog.families[$('family').value].chains)if(JSON.stringify(c).toLowerCase().includes(q))rows.push(`<tr><td>${button(c.id)}</td><td>${c.frames.length}</td><td>${esc(c.termination)} ${c.loop_start??''}</td><td>${esc((c.definition_owners||[]).map(o=>o.asset).join(', '))||'No definition owner; still in catalog'}</td></tr>`)}
 else{$('head').innerHTML='<tr><th>File</th><th>Bytes</th><th>Records</th><th>Role</th></tr>';for(const f of catalog.files)if(JSON.stringify(f).toLowerCase().includes(q))rows.push(`<tr><td>${esc(f.name)}</td><td>${f.bytes}</td><td>${f.records??''}</td><td>${esc(f.role)}</td></tr>`)}
 $('rows').innerHTML=rows.join('');$('counts').textContent=`${rows.length} rows · ${catalog.assets.length} definition/guest records · ${catalog.files.length} resource files`;

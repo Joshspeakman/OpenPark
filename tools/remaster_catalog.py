@@ -61,6 +61,11 @@ def make_ledger(memory, data):
                     if ref['animation'] < len(graph['chains']):
                         for f in graph['chains'][ref['animation']]['frames']:
                             owners[f].add(a['id'])
+                for ref in a.get('frame_references', []):
+                    if 0 < ref['frame'] < len(graph['frames']):
+                        owners[ref['frame']].add(a['id'])
+                    else:
+                        problems.append(dict(id=a['id'], problem='invalid direct frame reference', field=ref['field']))
         for frame in graph['frames']:
             if frame['id'] == 0:
                 continue

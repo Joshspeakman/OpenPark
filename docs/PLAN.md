@@ -5,6 +5,21 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Reimagined character candidates and corrected source references
+(Codex, `codex/reimagined-full-remaster`): eight articulated guest identities
+and 128 keyed walking candidates now have 512 sanitized inspection renders.
+These are not accepted animation coverage. Source silhouettes and phase
+alignment still need refinement. Overscan checks show the new feet extending
+beyond legacy crops, requiring expanded normal-view replacement bounds.
+
+Code evidence corrected guest table slot 11 from an animation index to a
+direct composite-frame reference; slot 12 now includes all four directional
+animation references. Source operands were checked against copied executable
+bytes. Three native sanitizer tests and ten Python tests pass; the catalog
+has zero malformed references. The full remaster remains incomplete with
+3,847 audit blockers, no accepted assets and no new installation. Details:
+`docs/reports/2026-10-20-remaster-characters.md`.
+
 2026-10-20, Reimagined shops and character binding inventory (Codex,
 `codex/reimagined-full-remaster`): 12 shop base-state candidates now share
 canonical geometry between native perspective captures and park bakes.
