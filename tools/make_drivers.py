@@ -79,6 +79,7 @@ def main():
     ap.add_argument('--trace', type=Path, default=ROOT / 'work/check-startup/trace.json')
     ap.add_argument('--survey', type=Path, default=ROOT / 'work/main-survey.json')
     ap.add_argument('--rounds', type=int, default=12)
+    ap.add_argument('--allow-unpinned', action='store_true', help='keep images whose hashes differ from config/drivers.json')
     args = ap.parse_args()
     game = args.exe.resolve().parent
     setup = game.parent / 'THEME.CD' / 'SNDSETUP.INF'
@@ -144,6 +145,11 @@ def main():
         status = re.search(r'"status": "([^"]*)"', r.stdout)
         status = status.group(1) if status else 'no report'
         if not ckpt.exists():
+            # Converged only when the run reached its block bound: a crash, a DOS exit or an init failure also
+            # leave no checkpoint, and took this branch with the images of the round before.
+            if r.returncode != 0 or status != 'block bound':
+                sys.exit('round %d: the run ended without reaching its bound (%s, exit %d):\n%s'
+                         % (round_no, status, r.returncode, r.stderr[-2000:]))
             print('round %d: %s: converged' % (round_no, status))
             break
         mem = checkpoint_memory(ckpt)
@@ -190,6 +196,8 @@ def main():
         shutil.copy(f, args.out / f.name)
     print(json.dumps(report, indent=2))
     print('driver images in %s%s' % (args.out, '' if ok else ' (hash differences above)'))
+    if not ok and not args.allow_unpinned:
+        sys.exit('driver images differ from config/drivers.json (--allow-unpinned to keep them)')
 
 
 if __name__ == '__main__':

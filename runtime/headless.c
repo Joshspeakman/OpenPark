@@ -15,6 +15,7 @@ static int parse(const char *s, uint32_t *out, int width, int max) {
         for (int k = 0; k < width; k++) {
             char *end;
             out[n * width + k] = (uint32_t)strtoul(s, &end, k == 1 && width == 2 ? 16 : 10);
+            if (end == s) return n;                       /* (not a number: no progress, stop) */
             s = end;
             if (*s == ':' || *s == ',') s++;
         }
@@ -22,6 +23,10 @@ static int parse(const char *s, uint32_t *out, int width, int max) {
     }
     return n;
 }
+/* The next field of a spec ("...:N"): parsed when a ':' comes next, else 0 with the spec left where it was (a
+ * malformed spec reads no further than its end). */
+static double fld(char **e) { if (**e != ':') return 0; return strtod(*e + 1, e); }
+static unsigned long fldu(char **e, int base) { if (**e != ':') return 0; return strtoul(*e + 1, e, base); }
 static void saved(const char *rel, const char *hex, void *ctx) {
     int *first = ctx;
     printf("%s\n    \"%s\": \"%s\"", *first ? "" : ",", rel, hex);
@@ -34,10 +39,11 @@ static void saved(const char *rel, const char *hex, void *ctx) {
 #include <math.h>
 extern uint8_t *G_MEM;
 uint32_t tp_get(unsigned i);
-static void on_fault(int sig, siginfo_t *si, void *uc) {
-    (void)uc;
-    fprintf(stderr, "signal %d at host %p (guest offset %#llx), guest block %08x esp %08x\n", sig, si->si_addr,
-            (unsigned long long)((uint8_t *)si->si_addr - G_MEM), tp_get(9), tp_get(4));
+static void on_fault(int sig, siginfo_t *si, void *uc) {   /* (async-signal-safe: snprintf into a buffer, write) */
+    (void)uc; char m[200];
+    int n = snprintf(m, sizeof m, "signal %d at host %p (guest offset %#llx), guest block %08x esp %08x\n", sig, si->si_addr,
+                     G_MEM ? (unsigned long long)((uint8_t *)si->si_addr - G_MEM) : 0ull, tp_get(9), tp_get(4));
+    if (n > 0) write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
     _exit(3);
 }
 
@@ -50,7 +56,7 @@ struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 static double hl_wide = 1;   /* the z step's widescreen factor (s steps compose at it) */
 int main(int argc, char **argv) {
-    struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO;
+    struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
     uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
@@ -85,9 +91,10 @@ int main(int argc, char **argv) {
     /* block:x:y[:buttons] */
     for (const char *q = block_clicks; q && *q && s.nblock_clicks < 4096; ) {
         char *e; int i = s.nblock_clicks++;
-        s.block_clicks[i].at = (uint32_t)strtoul(q, &e, 10); s.block_clicks[i].x = (uint32_t)strtoul(e + 1, &e, 10);
-        s.block_clicks[i].y = (uint32_t)strtoul(e + 1, &e, 10);
-        if (*e == ':') s.block_clicks[i].buttons = (uint32_t)strtoul(e + 1, &e, 10);
+        s.block_clicks[i].at = (uint32_t)strtoul(q, &e, 10); s.block_clicks[i].x = (uint32_t)fldu(&e, 10);
+        s.block_clicks[i].y = (uint32_t)fldu(&e, 10);
+        if (*e == ':') s.block_clicks[i].buttons = (uint32_t)fldu(&e, 10);
+        if (e == q) break;                                /* (no progress: not a number) */
         q = *e ? e + 1 : e;
     }
     mkdir(out, 0755);
@@ -118,20 +125,20 @@ int main(int argc, char **argv) {
                 walk_last = el;
             }
             while (*k && strtod(k, NULL) <= el) {
-                char *e; strtod(k, &e); e++;
+                char *e; strtod(k, &e); if (*e != ':') break; e++;
                 if (*e == 'm' || *e == 'v') {           /* m: the game's mouse; v: through the zoomed view (view.c) */
                     int via = *e == 'v';
-                    double x = strtod(e + 2, &e); double y = strtod(e + 1, &e); unsigned b = (unsigned)strtoul(e + 1, &e, 10);
+                    double x = (e++, fld(&e)); double y = fld(&e); unsigned b = (unsigned)fldu(&e, 10);
                     if (via) tp_view_mouse(x / 640, y / 400, b); else tp_host_mouse(x / 640, y / 400, b);
                 } else if (*e == 'z') {                  /* z:zoom:cx:cy[:wide] (canvas; cx < 0: the game's view centre;
                                                             wide: layout width over screen width, e.g. 1.33 for 16:9) */
-                    double z = strtod(e + 2, &e), cx = strtod(e + 1, &e), cy = strtod(e + 1, &e), wide = 1;
-                    if (*e == ':' && e[1] != ',' && e[1]) wide = strtod(e + 1, &e);
+                    double z = (e++, fld(&e)), cx = fld(&e), cy = fld(&e), wide = 1;
+                    if (*e == ':' && e[1] != ',' && e[1]) wide = fld(&e);
                     int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh);
                     if (cx < 0) tp_view_camera_center(&cx, &cy);
                     tp_view_enable(1); tp_view_set(z != 1 || wide > 1, cx, cy, z, sw * wide); hl_wide = wide;
                 } else if (*e == 's') {                  /* s:name: the composited zoomed picture, 1280x800 */
-                    char name[256]; int n = 0; e += 2; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
+                    char name[256]; int n = 0; e += e[1] ? 2 : 1; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
                     static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
                     tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
                     int oh = fw == 640 ? 960 : 800, ow = (int)lround(oh * 4.0 / 3.0 * hl_wide * (fw == 640 ? 1 : 1.0)) ;
@@ -154,7 +161,7 @@ int main(int argc, char **argv) {
                         free(o2);
                     }
                 } else if (*e == 'w') {                  /* w:X:Y: the Visitor View at map point X,Y (X < 0: the middle of the game's view) */
-                    double x = strtod(e + 2, &e), y = strtod(e + 1, &e);
+                    double x = (e++, fld(&e)), y = fld(&e);
                     if (x < 0 && !tp_view_point_to_world(0.5, 0.45, &x, &y)) x = y = 32;
                     fprintf(stderr, "walk: start at %.2f,%.2f: %d\n", x, y, tp_walk_start(x, y));
                 } else if (*e == 'p' || *e == 'r' || *e == 'o' || *e == 'n') {   /* p follow (possess), r ride along, o view, n noclip */
@@ -162,13 +169,13 @@ int main(int argc, char **argv) {
                     tp_walk_command(c == 'p' ? TP_WALK_FOLLOW : c == 'r' ? TP_WALK_RIDE : c == 'o' ? TP_WALK_VIEW : TP_WALK_NOCLIP);
                     char st[256]; tp_walk_status(st, sizeof st); fprintf(stderr, "walk: %s\n", st);
                 } else if (*e == 't') {                  /* t:X:Y:YAW: put the walker there, looking YAW degrees (0 east, -90 north) */
-                    double x = strtod(e + 2, &e), y = strtod(e + 1, &e), yaw = strtod(e + 1, &e);
+                    double x = (e++, fld(&e)), y = fld(&e), yaw = fld(&e);
                     tp_walk_teleport(x, y, yaw * M_PI / 180);
                 } else if (*e == 'i') {                  /* i:FWD:STRAFE:TURN:SECONDS: hold walking input */
-                    walk_in[0] = strtod(e + 2, &e); walk_in[1] = strtod(e + 1, &e); walk_in[2] = strtod(e + 1, &e);
-                    walk_until = el + strtod(e + 1, &e);
+                    walk_in[0] = (e++, fld(&e)); walk_in[1] = fld(&e); walk_in[2] = fld(&e);
+                    walk_until = el + fld(&e);
                 } else if (*e == 'g') {                  /* g:name: the Visitor View, 960x600, to out/name.png */
-                    char name[256]; int n = 0; e += 2; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
+                    char name[256]; int n = 0; e += e[1] ? 2 : 1; while (*e && *e != ',' && n < 255) name[n++] = *e++; name[n] = 0;
                     static uint32_t img[960 * 600];
                     tp_walk_input(0, 0, 0, 0, 0, 0, 0);
                     int ok = tp_walk_render(img, 960, 600);
@@ -183,12 +190,16 @@ int main(int argc, char **argv) {
             {   /* development: TP_DUMP="t:path:addr:len" writes guest memory once at t seconds */
                 static int dumped; static const char *d; if (!d) d = getenv("TP_DUMP");   /* (several: "t:path:addr:len;t:...") */
                 if (d && *d && !dumped && strtod(d, NULL) <= el) {
-                    char path[512]; const char *a = strchr(d, ':') + 1, *b = strchr(a, ':'); snprintf(path, sizeof path, "%.*s", (int)(b - a), a);
-                    char *e; unsigned at = strtoul(b + 1, &e, 16); unsigned len = strtoul(e + 1, NULL, 16);
+                    const char *a = strchr(d, ':'), *b = a ? strchr(a + 1, ':') : NULL;
+                    if (!b) { fprintf(stderr, "TP_DUMP: t:path:addr:len\n"); dumped = 1; goto no_dump; }
+                    a++; char path[512]; snprintf(path, sizeof path, "%.*s", (int)(b - a), a);
+                    char *e; unsigned at = strtoul(b + 1, &e, 16); unsigned len = *e == ':' ? strtoul(e + 1, NULL, 16) : 0;
+                    if ((uint64_t)at + len > (64u << 20)) len = at < (64u << 20) ? (64u << 20) - at : 0;
                     uint8_t *tp_host_memory(void); FILE *f = fopen(path, "wb"); if (f) { fwrite(tp_host_memory() + at, 1, len, f); fclose(f); }
                     fprintf(stderr, "dump %s %#x+%#x\n", path, at, len);
                     const char *nx = strchr(d, ';'); if (nx) d = nx + 1; else dumped = 1;
                 }
+                no_dump:;
             }
             static double next_fz; static int held;
             if (!*k && getenv("TP_RT_FUZZ") && el >= next_fz) {     /* random clicks after the script */

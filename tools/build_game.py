@@ -373,12 +373,17 @@ def main():
             # Blocks over bytes the driver rewrites (generated/patched code)
             # are checked against the compiled bytes on every execution.
             guard = length if m and any(m[off + j] == 0 for j in range(length) if off + j < len(m)) else 0
-            region_entries[k].append('{0x%xu, %s, %d, %d},' % (off, variants[0][0], min(255, variants[0][2]), guard))
+            # (both are uint8_t in the table: a longer guard wrapped and checked a short prefix, or nothing)
+            if guard > 255 or variants[0][2] > 255:
+                sys.exit('region block 0x%x: guard %d bytes, %d instructions: past the table\'s 8-bit fields' % (a, guard, variants[0][2]))
+            region_entries[k].append('{0x%xu, %s, %d, %d},' % (off, variants[0][0], variants[0][2], guard))
             decls.append('void %s(Ctx *c);' % variants[0][0])
             continue
         for name, _, _ in variants:
             decls.append('void %s(Ctx *c);' % name)
-        count = min(255, max(n for _, _, n in variants))
+        count = max(n for _, _, n in variants)
+        if count > 255:                       # (counts[] is uint8_t: the governor's measure would be short)
+            sys.exit('block 0x%x: %d instructions, past the 8-bit count' % (a, count))
         if len(variants) == 1:
             entries.append('{0x%xu, %s, %d},' % (a, variants[0][0], count))
         else:
@@ -430,15 +435,20 @@ int tp_dispatch(Ctx *c) {
 
     inc = str(args.reference.resolve() / 'recomp/runtime')
 
+    # Objects are reused only when built with the same compiler and options (a stamp beside them).
+    stamp_path, stamp = out / 'objects.stamp', ' '.join([*toolchain.cc(), args.opt, inc])
+    same = stamp_path.exists() and stamp_path.read_text() == stamp
+
     def compile_one(path):
         obj = path.with_suffix('.o')
-        if obj.exists() and obj.stat().st_mtime >= path.stat().st_mtime:
+        if same and obj.exists() and obj.stat().st_mtime >= path.stat().st_mtime:
             return obj
         subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(path), '-o', str(obj)], check=True)
         return obj
 
     with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as pool:
         objects = list(pool.map(compile_one, files))
+    stamp_path.write_text(stamp)
     runtime = out / 'runtime.o'
     subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
     library = out / 'game.dylib'
