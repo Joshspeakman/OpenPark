@@ -66,12 +66,13 @@ static void entry(Entry *e, const uint8_t *b) {
 }
 static void codebook(Entry *book, const uint8_t *b, const uint8_t *end, int partial) {
     int k = 0;
-    while (b < end && k < 256) {
+    while (k < 256) {                                     /* (whole entries and flag words only: a chunk cut short reads no further) */
         if (partial) {
+            if (end - b < 4) break;
             uint32_t flags = be32(b); b += 4;
-            for (int bit = 0; bit < 32 && b < end && k < 256; bit++, k++)
-                if (flags & (0x80000000u >> bit)) { entry(&book[k], b); b += 6; }
-        } else { entry(&book[k++], b); b += 6; }
+            for (int bit = 0; bit < 32 && k < 256; bit++, k++)
+                if (flags & (0x80000000u >> bit)) { if (end - b < 6) return; entry(&book[k], b); b += 6; }
+        } else { if (end - b < 6) break; entry(&book[k++], b); b += 6; }
     }
 }
 static void put2x2(TpVideo *v, int x, int y, const uint8_t c[3]) {

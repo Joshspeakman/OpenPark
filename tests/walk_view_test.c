@@ -26,6 +26,8 @@ void sb16_pump(double t) { (void)t; }
 double tp_dbg_run, tp_dbg_gov; int tp_host_timer_behind(void) { return 0; }
 void tp_hooks_changed(void) {}
 volatile double tp_frame_paced_at; double tp_host_cycles(void) { return 10000; }   /* (nightly's pacing) */
+double tp_host_card_clock(void) { return 0; } volatile int tp_frame_paced_park;   /* (the card's clock; long park passes) */
+char tp_file_note[160]; double tp_file_time; long tp_file_bytes;                  /* (the long-frame log's file activity) */
 int tp_view_point_to_world(double fx, double fy, double *wx, double *wy);
 void tp_view_geometry(int *sw, int *sh, int *wh);
 void tp_view_enable(int main_game);

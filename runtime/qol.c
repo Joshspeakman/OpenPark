@@ -434,7 +434,10 @@ void tp_qol_hook(int nested) {
     }
     case H_MUSIC_END:                                 /* the renderer's music step (not stopping): no music ride seen at all? */
         if (log_sounds) { static int n; if (n++ < 5) fprintf(stderr, "music: step state %d current %d%s\n", (int16_t)r16(m, MUSIC_STATE), r16(m, CUR_TUNE), nested ? " (pass)" : ""); }
-        if (!nested && park_tune && (int16_t)r16(m, MUSIC_STATE) == 0 && r16(m, CUR_TUNE) != park_tune) play((uint32_t)park_tune);
+        /* (asked once until the current tune changes: with the game's music off nothing plays, and it was asked again
+         * every frame. The 100 play() sets is the tune's own level, as the game passes after its own tunes: 0x14535d.) */
+        { static int asked_at = -2; int cur = r16(m, CUR_TUNE);
+          if (!nested && park_tune && (int16_t)r16(m, MUSIC_STATE) == 0 && cur != park_tune && cur != asked_at) { play((uint32_t)park_tune); asked_at = r16(m, CUR_TUNE); } }
         return;
     }
 }

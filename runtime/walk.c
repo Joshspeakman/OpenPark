@@ -435,14 +435,16 @@ static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
     for (int i = 0; i < s->ncards; i++) if (s->cards[i].cls == 2) hs[nh++] = (float)(s->cards[i].h * g->aspect / g->tws);
     if (nh) { qsort(hs, (size_t)nh, sizeof *hs, cmp_float); s->eye = hs[nh / 2] * 0.92f; } else s->eye = 0.7f;
     /* the visitor followed */
-    s->f_idx = follow; s->f_ok = 0; s->f_cont = 0; s->f_name[0] = 0; s->f_type = -1; s->f_elev = 0;
+    s->f_idx = follow; s->f_ok = 0; s->f_cont = 0; s->f_name[0] = 0; s->f_type = -1; s->f_elev = 0; s->f_x = s->f_y = 0;
     if (valid_idx(follow)) {
         const uint8_t *t = M + r32(THINGS) + (uint32_t)follow * 0xc8;
         int cont = s->riding[follow];
         if (cont) {
             const uint8_t *c = M + r32(THINGS) + (uint32_t)cont * 0xc8;
             s->f_ok = 1; s->f_cont = cont; s->f_cls = c[4];
-            for (int k = 0; k < s->nconts; k++) if (s->conts[k].idx == cont) { s->f_x = s->conts[k].x; s->f_y = s->conts[k].y; }
+            int found = 0;
+            for (int k = 0; k < s->nconts; k++) if (s->conts[k].idx == cont) { s->f_x = s->conts[k].x; s->f_y = s->conts[k].y; found = 1; }
+            if (!found) { s->f_x = (float)(c[7] + c[6] / 256.0); s->f_y = (float)(c[9] + c[8] / 256.0); }   /* (past the 256 containers kept: its own place) */
             s->f_type = ride_type(cont); s->f_elev = (float)car_lift(g, cont);
             if (s->f_type >= 0) snprintf(s->f_name, sizeof s->f_name, "%.39s", (const char *)M + RIDE_TYPES + (uint32_t)s->f_type * 0xc8);
         } else if (t[4] == 2 && t[7] < MAPE && t[9] < MAPE) {
@@ -495,9 +497,14 @@ int tp_walk_start(double wx, double wy) {
     return 1;
 }
 void tp_walk_stop(void) { pthread_mutex_lock(&lock); W.on = 0; pthread_mutex_unlock(&lock); }
+/* Where the walker is (cells): the visitor followed, or where you walk; the camera can be behind it (diorama). */
+static void walker_at(double *x, double *y) { if (W.follow && W.have_f) { *x = W.fx; *y = W.fy; } else { *x = W.x; *y = W.y; } }
+/* Letting go of a visitor: on from where they were (if they were ever seen: before the first snapshot about them, from
+ * where you stood). */
+static void let_go(const char *why) { if (W.have_f) { W.x = W.fx; W.y = W.fy; } W.yaw = W.cam_yaw; W.follow = 0; set_note(why); }
 /* Where the walker is (cells), for the overhead view to return to. */
 void tp_walk_position(double *x, double *y) {
-    pthread_mutex_lock(&lock); *x = W.cam_x; *y = W.cam_y; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); walker_at(x, y); pthread_mutex_unlock(&lock);
 }
 
 static int blocked(const Snap *s, double x, double y) {
@@ -523,9 +530,9 @@ void tp_walk_command(int cmd) {
     pthread_mutex_lock(&lock);
     const Snap *s = front >= 0 ? &snaps[front] : NULL;
     if (!W.on || !s || !s->valid) { pthread_mutex_unlock(&lock); return; }
-    double x = W.cam_x, y = W.cam_y;
+    double x, y; walker_at(&x, &y);
     if (cmd == WALK_FOLLOW) {
-        if (W.follow) { W.x = W.fx; W.y = W.fy; W.yaw = W.cam_yaw; W.follow = 0; set_note("Walking on your own"); }
+        if (W.follow) let_go("Walking on your own");
         else {
             int v = nearest_visitor(s, x, y, W.cam_yaw, 6, -2, 0);
             if (v) { W.follow = v; W.have_f = 0; W.head = 0; set_note("Following a visitor: Space hops to another, R joins a ride, F lets go"); }
@@ -563,14 +570,10 @@ void tp_walk_input(double fwd, double strafe, double turn, double look_yaw, doub
     double eye = s && s->valid ? s->eye : 0.7;
     W.pitch += look_pitch; W.pitch = W.pitch < -0.7 ? -0.7 : W.pitch > 0.9 ? 0.9 : W.pitch;
     if (W.follow && s && s->valid) {
-        if (fwd || strafe) {                              /* walking yourself lets go */
-            W.x = W.fx; W.y = W.fy; W.yaw = W.cam_yaw; W.follow = 0; set_note("Walking on your own");
-        }
+        if (fwd || strafe) let_go("Walking on your own");   /* walking yourself lets go */
     }
     if (W.follow && s && s->valid) {
-        if (s->f_idx == W.follow && !s->f_ok) {           /* gone (left the park) */
-            W.x = W.fx; W.y = W.fy; W.yaw = W.cam_yaw; W.follow = 0; set_note("The visitor has gone");
-        }
+        if (s->f_idx == W.follow && !s->f_ok) let_go("The visitor has gone");   /* gone (left the park) */
     }
     if (W.follow && s && s->valid && s->f_idx == W.follow && s->f_ok) {
         double tx = s->f_x, ty = s->f_y;
@@ -592,6 +595,10 @@ void tp_walk_input(double fwd, double strafe, double turn, double look_yaw, doub
             }
         } else W.ride_t = 0;
         W.cam_z = z; W.cam_pitch = W.pitch;
+    } else if (W.follow && s && s->valid) {
+        /* a new visitor (F, a hop, a ride-along) the snapshot is not about yet: the camera stays where it is (it went
+         * back to where you stood before following, for a frame) */
+        pthread_mutex_unlock(&lock); return;
     } else {
         W.yaw = wrap(W.yaw + look_yaw + turn * 1.8 * dt);
         double sp = (run ? 5.0 : 2.5) * dt;
@@ -642,8 +649,9 @@ int tp_walk_status(char *buf, int n) {
     if (W.follow && s && s->valid && s->f_cont) snprintf(what, sizeof what, "On %s with a visitor", s->f_name[0] ? s->f_name : "a ride");
     else if (W.follow) snprintf(what, sizeof what, "Following a visitor");
     else snprintf(what, sizeof what, "Walking");
+    double wx, wy; walker_at(&wx, &wy);
     if (now() < note_until) snprintf(buf, (size_t)n, "%s   ·   %s", what, note);
-    else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  Space hop  R ride along  V view  Esc leave", what, (int)W.cam_x, (int)W.cam_y);
+    else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  Space hop  R ride along  V view  Esc leave", what, (int)wx, (int)wy);
     pthread_mutex_unlock(&lock);
     return 1;
 }

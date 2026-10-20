@@ -92,8 +92,8 @@ void tp_bigmap_set(int w, int ext) {
             orig[t][k][i] = rd16(m, OFFSETS[t].at + (uint32_t)(k * OFFSETS[t].size) + OFFSETS[t].f[i]);
         saved = 1;
     }
-    tp_map_w = (uint32_t)w; tp_map_shift = w == 128 ? 7 : 6; tp_map_ext = (uint32_t)ext;
     if (w > alloc_n) { fprintf(stderr, "bigmap: no room for %dx%d (the map block is %dx%d)\n", w, w, alloc_n, alloc_n); w = ext = 64; }
+    tp_map_w = (uint32_t)w; tp_map_shift = w == 128 ? 7 : 6; tp_map_ext = (uint32_t)ext;   /* (after the room check: what the game addresses) */
     tp_map_bytes = (uint32_t)(alloc_n * alloc_n * 4);   /* (the block, cleared whole for a new park) */
     wr32(m, SAVE_SIZE, (uint32_t)(w * w * 4));           /* (a 64x64 park saves exactly as the game does) */
     for (int t = 0; t < NTABLES; t++) for (int k = 0; k < OFFSETS[t].n; k++) for (int i = 0; i < OFFSETS[t].nf; i++)
