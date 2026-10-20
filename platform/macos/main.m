@@ -102,9 +102,12 @@ int tp_audio_video_play(const char *path); void tp_audio_video_stop(void);
 - (void)walkHold:(double)fwd :(double)strafe :(double)turn :(double)seconds;
 - (void)walkPad:(double)fwd :(double)strafe :(double)lookX :(double)lookY;
 - (void)setCornerGuard:(BOOL)on;
+- (void)releaseInput;
+- (BOOL)playing3DO;
 @end
 
 static GameView *game_view;                         /* (the 3DO ride videos: ride_video_3do) */
+static void refresh_hold(void);                     /* (AppDelegate refreshHold: paused while away or under a 3DO video) */
 @implementation GameView {
     CALayer *_screen;
     uint32_t _pixels[640 * 480];
@@ -136,6 +139,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     uint32_t *_clean; int _cleanW, _cleanH; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
     TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
     BOOL _cornerGuard, _held; NSPoint _virt;   /* full screen: the pointer kept out of the corners (pointOf:) */
+    double _lastFx, _lastFy; uint8_t _keyDown[128]; BOOL _fastForward;   /* what the game was last told: releaseInput */
 }
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
@@ -385,15 +389,21 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
  * the Mac (its menus need the real pointer), as are the Visitor View and the tests. (The first version moved the
  * Mac's pointer with every event, and macOS ignores the mouse and trackpad for a quarter of a second after each such
  * move: the pointer barely moved in full screen.) */
-- (void)setCornerGuard:(BOOL)on {
-    static BOOL watching;
-    if (!watching) {
-        watching = YES;
-        for (NSString *n in @[NSApplicationDidResignActiveNotification, NSWindowDidResignKeyNotification])
-            [NSNotificationCenter.defaultCenter addObserverForName:n object:nil queue:nil usingBlock:^(NSNotification *note) { [game_view releasePointer]; }];
+- (void)setCornerGuard:(BOOL)on { _cornerGuard = on; if (!on) [self releasePointer]; }   /* (let go when the app or window loses focus: releaseInput) */
+/* The window lost the keyboard (another app, another window): what the game was told is held is let go, since the
+ * releases will go elsewhere — a mouse button (a drag that never ends), Shift, Ctrl, Alt, keys, Tab's fast forward. */
+- (void)releaseInput {
+    [self releasePointer];
+    _panning = NO;
+    if (_buttons) { _buttons = 0; if (_live) tp_view_mouse(_lastFx, _lastFy, 0); else tp_host_mouse(_lastFx, _lastFy, 0); }
+    tp_host_shift(0);
+    for (int k = 0; k < 128; k++) if (_keyDown[k]) { _keyDown[k] = 0; tp_host_key_raw((uint8_t)k, 0); }
+    if (_fastForward) {
+        _fastForward = NO; self.window.subtitle = @"";
+        if (!getenv("TP_CYCLES")) tp_host_set_cycles([NSUserDefaults.standardUserDefaults doubleForKey:@"Cycles"]);
     }
-    _cornerGuard = on; if (!on) [self releasePointer];
 }
+- (BOOL)playing3DO { return _v3 != NULL; }
 - (void)releasePointer {
     if (!_held) return;
     _held = NO;
@@ -457,6 +467,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     if (_menuWide) [self menuMapX:&fx y:&fy];
+    _lastFx = fx; _lastFy = fy;
     if (_live) tp_view_mouse(fx, fy, _buttons);      /* mapped into the park */
     else tp_host_mouse(fx, fy, _buttons);            /* the game's own screen */
 }
@@ -638,7 +649,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     [self sendMouse:e];
 }
 - (void)mouseUp:(NSEvent *)e {
-    if (tp_walk_active() || _walkDrop) { if (tp_walk_active()) [NSCursor.openHandCursor set]; return; }
+    if (tp_walk_active() || _walkDrop) { _buttons &= ~3u;   /* (the Visitor View came during a drag: no button left held) */ if (tp_walk_active()) [NSCursor.openHandCursor set]; return; }
     if (_panning) { _panning = NO; return; } _buttons &= ~3u; [self sendMouse:e]; }
 - (void)rightMouseDown:(NSEvent *)e { if (_v3) { [self end3DO]; return; } if (tp_walk_active() || _walkDrop) return; _buttons |= 2; [self sendMouse:e]; }
 - (void)rightMouseUp:(NSEvent *)e { _buttons &= ~2u; [self sendMouse:e]; }
@@ -660,7 +671,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     if (kc == 0x30) {                                   /* Tab, held: fast forward (the game does not use Tab) */
         if (!e.isARepeat && !getenv("TP_CYCLES")) {
             tp_host_set_cycles([NSUserDefaults.standardUserDefaults doubleForKey:@"Cycles"] * 4);
-            self.window.subtitle = @"Fast forward";
+            self.window.subtitle = @"Fast forward"; _fastForward = YES;
         }
         return;
     }
@@ -682,20 +693,20 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         if (ch < 128 && !(e.modifierFlags & NSEventModifierFlagOption)) ascii = ch;
     }
     if (kc == 0x75) ascii = 0;                  /* forward delete */
-    if (!e.isARepeat) tp_host_key_raw(scan, 1);
+    if (!e.isARepeat) { tp_host_key_raw(scan, 1); _keyDown[scan & 127] = 1; }
     if (ascii) tp_host_key((uint32_t)scan << 8 | ascii);
     else tp_host_key(function_key(scan, e.modifierFlags));
 }
 - (void)keyUp:(NSEvent *)e {
     if (e.keyCode == 0x30) {
         if (!getenv("TP_CYCLES")) tp_host_set_cycles([NSUserDefaults.standardUserDefaults doubleForKey:@"Cycles"]);
-        self.window.subtitle = @"";
+        self.window.subtitle = @""; _fastForward = NO;
         return;
     }
     if (e.modifierFlags & NSEventModifierFlagCommand) return;
     if (tp_walk_active()) { [self walkKey:e.keyCode down:NO]; return; }
     uint8_t scan = e.keyCode < 128 ? scan_of[e.keyCode] : 0;
-    if (scan) tp_host_key_raw(scan, 0);
+    if (scan) { tp_host_key_raw(scan, 0); _keyDown[scan & 127] = 0; }
 }
 - (void)flagsChanged:(NSEvent *)e {
     NSEventModifierFlags m = e.modifierFlags; uint32_t f = 0;
@@ -822,7 +833,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 - (void)play3DO:(NSString *)stream sound:(NSString *)wav done:(dispatch_semaphore_t)done {
     if (_v3) [self end3DO];
     _v3 = tp_video_open(stream.fileSystemRepresentation);
-    if (!_v3) { tp_host_pause(0); if (done) dispatch_semaphore_signal(done); return; }
+    if (!_v3) { refresh_hold(); if (done) dispatch_semaphore_signal(done); return; }
     _v3done = done; _v3shown = 0; _v3t0 = CACurrentMediaTime();
     _v3Layer = [CALayer layer];
     _v3Layer.backgroundColor = NSColor.blackColor.CGColor;     /* (black around the picture, which is 4:3 at the full height: video3DOTick) */
@@ -860,7 +871,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     tp_video_close(_v3); _v3 = NULL;
     [_v3Layer removeFromSuperlayer]; _v3Layer = nil; _v3Pic = nil;
     if (_v3done) { dispatch_semaphore_signal(_v3done); _v3done = nil; }
-    if (!self.window.miniaturized && self.window.visible) tp_host_pause(0);   /* (still hidden: holdGame resumes it) */
+    refresh_hold();                                     /* (on, unless the window is away) */
 }
 - (void)stopRideVideo {
     if (_video) { [_video pause]; [_videoLayer removeFromSuperlayer]; }
@@ -916,7 +927,7 @@ static int ride_video_3do(int ride) {
     FILE *_log;
 }
 static AppDelegate *app;
-static volatile int game_done, game_result;
+static volatile int game_done, game_result, game_started;
 static volatile int main_running;                 /* MAIN.EXE is the image (not the intro): its music words are valid */
 
 /* The launcher's settings into the environment, where the C modules read them (qol.c, freemode.c, bigmap.c,
@@ -1077,7 +1088,7 @@ static void *game_thread(void *arg) {
     pthread_attr_t attr; pthread_attr_init(&attr);
     pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
     pthread_attr_setstacksize(&attr, 8 << 20);
-    pthread_create(&t, &attr, game_thread, (__bridge void *)self);
+    game_started = pthread_create(&t, &attr, game_thread, (__bridge void *)self) == 0;
     /* The display's refresh drives presentation (and tells the game thread its timing, for steady pacing). */
     if (@available(macOS 14.0, *)) {
         _link = [_view displayLinkWithTarget:self selector:@selector(displayTick:)];
@@ -1385,11 +1396,14 @@ static uint32_t key_of_char(unichar c) {
     }
 }
 
-/* Hidden or minimised, the park waits (and is silent) until it is back. */
-- (void)holdGame:(BOOL)hold {
-    tp_host_pause(hold);
+/* Hidden or minimised, the park waits (and is silent) until it is back; under a 3DO ride video it waits too (the
+ * video's sound plays). Worked out from all three each time: one event alone resumed a game still minimised, or
+ * under a video. */
+- (void)refreshHold {
+    BOOL away = NSApp.isHidden || _window.miniaturized;
+    tp_host_pause(away || [_view playing3DO]);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    if (hold) tp_audio_set_volumes(0, 0);
+    if (away) tp_audio_set_volumes(0, 0);
     else tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
 }
 /* The Dock icon brings the window back (a test run's hidden window too). */
@@ -1397,15 +1411,17 @@ static uint32_t key_of_char(unichar c) {
     if (_window && !_window.isVisible) [_window makeKeyAndOrderFront:nil];
     return YES;
 }
-- (void)applicationDidHide:(NSNotification *)n { [self holdGame:YES]; }
-- (void)applicationDidUnhide:(NSNotification *)n { [self holdGame:NO]; }
-- (void)windowDidMiniaturize:(NSNotification *)n { [self holdGame:YES]; }
-- (void)windowDidDeminiaturize:(NSNotification *)n { [self holdGame:NO]; }
+- (void)applicationDidHide:(NSNotification *)n { [self refreshHold]; }
+- (void)applicationDidUnhide:(NSNotification *)n { [self refreshHold]; }
+- (void)windowDidMiniaturize:(NSNotification *)n { [self refreshHold]; }
+- (void)windowDidDeminiaturize:(NSNotification *)n { [self refreshHold]; }
+- (void)windowDidResignKey:(NSNotification *)n { [_view releaseInput]; }
+- (void)applicationDidResignActive:(NSNotification *)n { [_view releaseInput]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a { return YES; }
 - (void)applicationWillTerminate:(NSNotification *)n {
     tp_host_quit();
+    if (game_started) for (int i = 0; i < 100 && !game_done; i++) usleep(10000);   /* (the game thread out first: it sends the synth MIDI) */
     tp_audio_stop();
-    for (int i = 0; i < 100 && !game_done; i++) usleep(10000);
     fflush(stderr);
 }
 /* Full screen: the window borderless over the whole display, the Dock and menu bar hidden (not macOS's full-
@@ -1415,6 +1431,7 @@ static uint32_t key_of_char(unichar c) {
     NSScreen *sc = _window.screen ?: NSScreen.mainScreen;
     if (!_full) {
         _windowedFrame = _window.frame;
+        [_window setFrameAutosaveName:@""];              /* (the screen-sized frame is not the window's to remember) */
         [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
         _window.styleMask = NSWindowStyleMaskBorderless;
         _window.contentAspectRatio = NSZeroSize; _window.resizeIncrements = NSMakeSize(1, 1);
@@ -1428,6 +1445,7 @@ static uint32_t key_of_char(unichar c) {
         _window.styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
         _window.title = @"Theme Park";
         if (![NSUserDefaults.standardUserDefaults boolForKey:@"Widescreen"]) _window.contentAspectRatio = NSMakeSize(4, 3);
+        [_window setFrameAutosaveName:@"ThemeParkWindow"];
         [_window setFrame:_windowedFrame display:YES];
         _view.frame = _container.bounds;
         _full = NO;
@@ -1545,3 +1563,5 @@ int main(int argc, const char **argv) {
     }
     return 0;
 }
+
+static void refresh_hold(void) { [(AppDelegate *)NSApp.delegate refreshHold]; }
