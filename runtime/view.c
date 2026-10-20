@@ -904,12 +904,13 @@ static volatile int hires_wanted, poster_wanted;   /* (below) */
 void tp_walk_frame(void); int tp_walk_active(void);   /* the Visitor View (walk.c) */
 /* Called by the host when the game reaches a hooked address. */
 double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace;                  /* development (qol.c's tick gaps): where the game thread's time went */
-/* A park frame that took more than three frames' time, in the log (always): where its time went. */
+/* A park frame that took more than three frames' time, in the log (always): where its time went. (Not a menu in
+ * between, the game's load dialog: governed, its time is the player's.) */
 static void long_frame(uint64_t insns) {
     extern double tp_dbg_run, tp_dbg_gov, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
     static double run0, pass0, gov0, lock0, file0; static uint64_t ins0; static int logged; static long screen0;
     double t = now(), took = t - park_paced_at; if (!tp_view_t0) tp_view_t0 = t;
-    if (park_paced_at && screen_paces == screen0 && took > 0.05 && took < 30 && logged < 500) {
+    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && took > 0.05 && took < 30 && logged < 500) {
         logged++;
         fprintf(stderr, "long frame at %.1f s: %.0f ms (game code %.0f ms for %.1fM instructions, of which the view's passes %.0f; "
                 "governor %.0f, view lock %.0f; files %.0f ms, %ld KB%s%s), weather %#x\n", t - tp_view_t0, took * 1e3,
