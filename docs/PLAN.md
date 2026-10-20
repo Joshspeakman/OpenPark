@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, shared scene placement (Codex, isolated remaster branch): canonical
+model eligibility, placement, occupied poses, car state and track components
+now resolve through a pixel-independent descriptor shared by coordinate systems.
+Visitor View consumes it; the live normal drawing layer is still unconnected.
+Ride seat rotation and shop attachments now retain actual entity IDs as well
+as appearance, including distinct guests with the same variant.
+
+Both coordinate references agree for 7,838 eligible occurrences across 904
+recorded-park passes; original events/pixels and memory remain unchanged.
+Eleven native remaster checks, 21 Python tests, both walk modes, 17,808 view
+checks, compile/signature and 72 unchanged occupied-carousel captures pass.
+All 112 source hashes and 114 candidate model hashes are unchanged. No app
+launch, installation or art acceptance. Next: draw complete descriptors into
+the normal surface with world depth, native clipping, nested ordering, cache
+ownership and UI/picking behavior handled explicitly. Remaining artwork,
+non-car ride cameras and final headed acceptance remain unfinished. See
+`docs/reports/2026-10-20-remaster-shared-placement.md`.
+
 2026-10-20, normal-view metadata (Codex, isolated remaster branch): native
 passes can now emit balanced/nested object scopes, selected frames, actual
 passenger poses, track components and car bindings without changing normal

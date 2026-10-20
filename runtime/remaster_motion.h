@@ -14,8 +14,8 @@
 #include <math.h>
 #include <float.h>
 #include <limits.h>
+#include "remaster_assembly.h"
 #define RM_ROUTE_POINTS 129
-typedef struct {uint8_t family,shape,level,direction,track_x,track_y,car_x,car_y,frac_x,frac_y,bounce;} TPRMVehicle;
 typedef struct {unsigned cls,type,bone;float pivot[3];} RMMotionBody;
 typedef struct {unsigned family,shape,n;float base,step,p[RM_ROUTE_POINTS][6];} RMRoute;
 typedef struct {RMMotionBody*bodies;RMRoute*routes;unsigned nb,nr;} RMMotion;

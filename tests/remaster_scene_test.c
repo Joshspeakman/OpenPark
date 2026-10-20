@@ -2,7 +2,7 @@
  * entrance and sign exceptions must not leak into the normal draw stream. */
 #include "../runtime/native_draw.c"
 #include "../runtime/native_scene.h"
-#include "../runtime/remaster_capture.h"
+#include "../runtime/remaster_scene.h"
 uint32_t tp_map_w=64,tp_map_ext=64;
 extern const uint8_t *tp_native_text;
 extern int tp_native_stable_rng;
@@ -12,11 +12,40 @@ typedef struct {
     Event events[32768];int n,overflow,metadata,begins,ends,frames,depth,maxdepth,bad;
     int stack[64],classes[64],colour,signs;
     TPRMCapture objects[64];int captured_frames;
+    TPRMProjection projection;int cell_x[64],cell_y[64],placements;
     NDTarget target;
 } Capture;
 static uint8_t *memory;
 static void put16(unsigned p,unsigned v){memory[p]=v;memory[p+1]=v>>8;}
 static void put32(unsigned p,unsigned v){put16(p,v);put16(p+2,v>>16);}
+/* Normal passes use one camera origin; Visitor capture places each cell in a
+ * scratch image. Both must resolve the same physical model and attachments. */
+static int placement_matches(Capture*s,int level){
+    TPRMCapture local=s->objects[level];TPRMProjection normal=s->projection;
+    normal.cell_y=s->cell_y[level];TPRMSceneObject a,b;
+    int ok=tp_remaster_scene_resolve(memory,64u<<20,tp_map_ext,s->stack[level],
+                                    &s->objects[level],&normal,&a);
+    float cell_x,cell_y;tp_rm_scene_position(&normal,s->cell_x[level],s->cell_y[level],&cell_x,&cell_y);
+    TPRMProjection shifted=normal;shifted.world_x=cell_x;shifted.world_y=cell_y;
+    shifted.origin_x=200;shifted.origin_y=320;shifted.cell_y=320<<normal.lo;
+    int dx=(200<<normal.lo)-(int16_t)s->cell_x[level],dy=(320<<normal.lo)-(int16_t)s->cell_y[level];
+    local.frame_x=(int16_t)(local.frame_x+dx);local.frame_y=(int16_t)(local.frame_y+dy);
+    local.car_origin.x=(int16_t)(local.car_origin.x+dx);local.car_origin.y=(int16_t)(local.car_origin.y+dy);
+    for(int i=0;i<local.ncomponents;i++){
+        local.components[i].x=(int16_t)(local.components[i].x+dx);
+        local.components[i].y=(int16_t)(local.components[i].y+dy);
+    }
+    if(ok!=tp_remaster_scene_resolve(memory,64u<<20,tp_map_ext,s->stack[level],&local,&shifted,&b) ||
+       a.cls!=b.cls || a.type!=b.type || a.frame!=b.frame || a.rig_ok!=b.rig_ok || a.ncomponents!=b.ncomponents ||
+       memcmp(a.seats,b.seats,sizeof a.seats) || memcmp(a.riders,b.riders,sizeof a.riders) ||
+       memcmp(a.rider_ids,b.rider_ids,sizeof a.rider_ids) || memcmp(&a.vehicle,&b.vehicle,sizeof a.vehicle))return 0;
+    if(a.rig_ok && (fabsf(a.x-b.x)>3e-5f || fabsf(a.y-b.y)>3e-5f || fabsf(a.z-b.z)>3e-5f))return 0;
+    for(unsigned i=0;i<a.ncomponents;i++){
+        const TPRMPlacedComponent*p=&a.components[i],*q=&b.components[i];
+        if(p->frame!=q->frame || fabsf(p->x-q->x)>3e-5f || fabsf(p->y-q->y)>3e-5f || p->z!=q->z)return 0;
+    }
+    s->placements+=ok;return 1;
+}
 static void log_call(int kind,int a,int b,int c,uint32_t d,int e,void *ctx){
     Capture*s=ctx;
     if(kind>=6){
@@ -24,11 +53,15 @@ static void log_call(int kind,int a,int b,int c,uint32_t d,int e,void *ctx){
         if(kind==6){
             if(s->depth>=64){s->bad=1;return;}
             tp_remaster_capture_begin(&s->objects[s->depth],b);
+            s->cell_x[s->depth]=c;s->cell_y[s->depth]=(int32_t)d;
             s->stack[s->depth]=a;s->classes[s->depth++]=b;s->begins++;
             if(s->depth>s->maxdepth)s->maxdepth=s->depth;
         }else if(kind==12){
             if(!s->depth || s->stack[s->depth-1]!=a || s->classes[s->depth-1]!=b)s->bad=1;
-            else {s->captured_frames+=s->objects[s->depth-1].frame_count;s->depth--;}
+            else {
+                if(!placement_matches(s,s->depth-1))s->bad=1;
+                s->captured_frames+=s->objects[s->depth-1].frame_count;s->depth--;
+            }
             s->ends++;
         }else{
             if(kind==8)s->frames++;
@@ -52,6 +85,10 @@ static void log_call(int kind,int a,int b,int c,uint32_t d,int e,void *ctx){
 static void reset(Capture*s,uint8_t*p,int lo){
     memset(s,0,sizeof *s);memset(p,17,640*480);
     s->target=(NDTarget){p,640*480,0,640,640,480,639,lo,NULL,0};
+    int tw=tp_rm_scene_u16(memory,0x1d663a),th=tp_rm_scene_u16(memory,0x1d6654);
+    int off=(int16_t)tp_rm_scene_u16(memory,0x1d6624);
+    s->projection=(TPRMProjection){lo,tw>>lo,th>>lo,(tw/3)>>lo,lo?1.2:1,
+        0,0,(640-tw*((640-off)/tw))>>lo,0,0};
 }
 int main(void){
     memory=calloc(64u<<20,1);uint8_t*before=malloc(64u<<20);
@@ -89,10 +126,11 @@ int main(void){
         put16(gate+10,orientation?0x140:0x13f);tp_native_stable_rng=stable;
         int cx=orientation?22:11;memcpy(before,memory,64u<<20);
         reset(a,pa,!mode);reset(b,pb,!mode);
+        b->projection.world_x=cx;b->projection.world_y=cy;
         tp_native_things(memory,cx,cy,8,log_call,a);
         tp_native_things_metadata(memory,cx,cy,8,log_call,b);
         CHECK(!a->metadata&&!a->bad&&!b->bad&&!a->overflow&&!b->overflow);
-        CHECK(b->begins&&b->begins==b->ends&&!b->depth&&b->frames&&b->captured_frames==b->frames);
+        CHECK(b->begins&&b->begins==b->ends&&!b->depth&&b->frames&&b->captured_frames==b->frames&&b->placements);
         CHECK(a->n==b->n&&!memcmp(a->events,b->events,(size_t)a->n*sizeof(Event)));
         CHECK(!memcmp(pa,pb,640*480));CHECK(!memcmp(before,memory,64u<<20));
         nested+=b->maxdepth>1;signs+=b->signs;cases++;
@@ -122,7 +160,22 @@ int main(void){
     tp_remaster_capture_begin(&capture,4);
     CHECK(tp_remaster_capture_event(&capture,NULL,0,7,0,3,65536,1,128));CHECK(capture.rig_rider_error);
     tp_remaster_capture_begin(&capture,4);CHECK(!capture.rig_rider_error&&!capture.rig_riders[0].present);
+    TPRMSceneObject placed;
+    TPRMProjection projection={0,48,32,16,1,12,14,200,320,320};
+    tp_remaster_capture_begin(&capture,-1);capture.frame_count=1;capture.drawn_frame=3;
+    capture.frame_x=228;capture.frame_y=328;
+    CHECK(tp_remaster_scene_resolve(memory,64u<<20,64,-1,&capture,&projection,&placed));
+    CHECK(placed.cls==255&&placed.type==7&&placed.frame==3&&placed.x==12.5f&&placed.y==14.25f);
+    CHECK(!tp_remaster_scene_resolve(memory,128,64,-1,&capture,&projection,&placed));CHECK(!placed.rig_ok&&!placed.ncomponents);
+    projection.tws=0;CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,-1,&capture,&projection,&placed));
+    projection.tws=48;projection.world_x=NAN;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,-1,&capture,&projection,&placed));projection.world_x=12;
+    capture.drawn_frame=65536;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,-1,&capture,&projection,&placed));capture.drawn_frame=3;
+    capture.ncomponents=TP_RM_ASSEMBLY_MAX+1;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,-1,&capture,&projection,&placed));capture.ncomponents=0;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,0,&capture,&projection,&placed));
     free(memory);free(before);free(a);free(b);free(pa);free(pb);
-    printf("remaster scene: %d unchanged native passes, %d nested entrance passes, sign bounds, balanced objects, pixels and read-only memory passed\n",cases,nested);
+    printf("remaster scene: %d unchanged native passes, %d nested entrance passes, shared world placement, malformed descriptors, sign bounds, scopes and read-only memory passed\n",cases,nested);
     return 0;
 }

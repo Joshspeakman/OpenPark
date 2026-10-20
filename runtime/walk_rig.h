@@ -176,17 +176,4 @@ static void rm_draw(WMRender*r,const RMRig*rig,const RMPose*pose,float x,float y
         wm_triangle(r,transformed[t->a],transformed[t->b],transformed[t->c]);}
     r->palette=oldpal;r->texture=oldtex;r->tw=tw;r->th=th;r->side_fill=fill;r->rgba=oldrgba;r->texture_tint=oldtint;
 }
-/* Same descending slot order as native_land.c:ride_draw. 255 is an empty seat. */
-static int rm_seat_order(const uint8_t*guests,int n,int cap,int kind,unsigned phase,uint8_t out[40]){
-    memset(out,255,40);if(n<0||n>36||cap<1||cap>40 || !(kind==0||kind==1||kind==5||kind==7||kind==9))return 0;
-    int slots[40]={0},count=n,start=n;
-    for(int i=0;i<n;i++)slots[i]=(int)guests[i]+1;
-    int rot=kind<=1?(int)(phase%(unsigned)cap):0;start=kind<=1?n-cap+rot:n;
-    if(n>cap){for(int i=n-cap-1;i>=0;i--)slots[i]=0;}
-    else if(n<cap){if(kind<=1)start=(n+rot)%cap;for(;count<cap;count++)slots[count]=-1;}
-    for(int seat=0;seat<cap;seat++){
-        int v=0;for(int k=0;k<41;k++){if(start==0)start=40;start--;v=slots[start];if(v)break;}
-        if(!v)return 0;slots[start]=0;if(v>0)out[seat]=(uint8_t)(v-1);
-    }return 1;
-}
 #endif

@@ -8,6 +8,7 @@
 #define TP_RM_COMPONENT_POOL 32768
 typedef struct { uint16_t frame; uint8_t family; int16_t x,y,height; } TPRMComponent;
 typedef struct { uint16_t frame; float x,y,z; } TPRMPlacedComponent;
+typedef struct {uint8_t family,shape,level,direction,track_x,track_y,car_x,car_y,frac_x,frac_y,bounce;} TPRMVehicle;
 static inline int tp_remaster_component_valid(int frame,int family,int height){
     return frame>0 && frame<=65535 && family>=1 && family<=3 &&
            height>=-24 && height<=24*256;

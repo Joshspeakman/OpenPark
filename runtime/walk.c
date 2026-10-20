@@ -52,7 +52,7 @@
 #include "art_mode.h"
 #include "remaster_art.h"
 #include "remaster_assembly.h"
-#include "remaster_capture.h"
+#include "remaster_scene.h"
 #include "native_scene.h"
 
 uint8_t *tp_host_memory(void);
@@ -258,157 +258,43 @@ static void finish(Build *B) {
         c->frame=0;c->rig_ok=0;c->layer_ok=0;c->nriders=(uint8_t)B->nriders;
         c->component_first=0;c->ncomponents=0;
         memcpy(c->riders,B->riders,(size_t)B->nriders*sizeof(LPRider));memset(c->seats,255,sizeof c->seats);
-        memcpy(c->rig_riders,B->capture.rig_riders,sizeof c->rig_riders);memset(c->rider_ids,0,sizeof c->rider_ids);
-        if(t) {
-            uint32_t at=(uint32_t)(t-M);c->frame=(uint16_t)r16(at+10);
-            if(B->cls==2) {
-                c->type=t[0x59];
-                /* The native common path supplies one complete body frame.
-                 * Bind its actual key/origin for walking and reactions alike.
-                 * Substituted riders and attached overlays require separate
-                 * composite placement, not a body-only rig. Vertical offsets
-                 * on the direct/common paths are separated below. */
-                c->rig_ok=c->type<8 &&
-                    B->capture.frame_count==1 && B->capture.drawn_frame==c->frame &&
-                    !r16(at+0x52) && !t[0xb9] &&
-                    !((M[0x1b14cc]&7) && (t[5]&0x80)) && B->idx!=(uint16_t)r16(0x1d6678);
-            } else if(B->cls==8) {
-                c->type=t[0x59];
-                /* Staff IDs include Shark Man at zero and Guard at eight.
-                 * Job/selection/special overlays add native frames; a body
-                 * pose alone must not consume those composite states. */
-                c->rig_ok=c->type<9 && B->capture.frame_count==1 && B->capture.drawn_frame==c->frame;
-            }
+        TPRMProjection projection={g->lo,g->tws,g->ths,g->shear,g->aspect,
+            B->cx,B->cy,OXS,OYS,OYS<<g->lo};
+        TPRMSceneObject object;
+        tp_remaster_scene_resolve(M,64u<<20,MAPE,B->idx,&B->capture,&projection,&object);
+        c->type=(int16_t)object.type;c->frame=object.frame;c->rig_ok=(uint8_t)object.rig_ok;
+        memcpy(c->seats,object.seats,sizeof c->seats);
+        memcpy(c->rig_riders,object.riders,sizeof c->rig_riders);
+        memcpy(c->rider_ids,object.rider_ids,sizeof c->rider_ids);
+        c->vehicle=object.vehicle;
+        if(c->rig_ok){c->rig_x=object.x;c->rig_y=object.y;c->rig_z=object.z;}
+        if(object.ncomponents && s->ncomponents<=TP_RM_COMPONENT_POOL &&
+           object.ncomponents<=TP_RM_COMPONENT_POOL-s->ncomponents){
+            c->component_first=s->ncomponents;c->ncomponents=(uint16_t)object.ncomponents;
+            memcpy(s->components+s->ncomponents,object.components,
+                   object.ncomponents*sizeof *object.components);
+            s->ncomponents+=object.ncomponents;
         }
-        if (t && B->cls == 4) {
-            int type = (uint16_t)r16((uint32_t)(t-M)+0x16)/0xc8;
-            if (type<29) c->type=(int16_t)type;
-            if(type<29) {
+        /* Faithful/card-only presentation keeps its legacy silhouette and
+         * layered-ride rules; canonical placement above is shared by views. */
+        if(t && B->cls==4){
+            int type=c->type;
+            if(type>=0 && type<29){
                 uint32_t at=(uint32_t)(t-M),rec=0x1cced0+(uint32_t)type*200;
-                int cap=(uint16_t)r16(rec+0xa6),kind=M[rec+0xb3],n=0;
-                c->layer_ok=!B->rider_error && (kind==0 || kind==1 || kind==5 || kind==7 || kind==9) && (t[12]==2 || t[12]==4 || t[12]==6) && (uint16_t)r16(at+0x2e)<M[rec+0xa8];
-                uint8_t guests[36];uint32_t pool=r32(THINGS),last=r32(THING_LAST);
-                int next=(uint16_t)r16(at+0x47),valid=1;
-                while(next && n<36) {
-                    uint64_t p=(uint64_t)pool+(unsigned)next*200;
-                    if(next>=NTH || p>last || p+200>(64u<<20) || M[p+4]!=2){valid=0;break;}
-                    guests[n++]=M[p+0x59];next=(uint16_t)r16((uint32_t)p+0x47);
-                }
-                if(next)valid=0;
-                /* The castle's loading/unloading dispatch draws its body
-                 * without substituted riders until word 0x32 is set. Linked
-                 * guests alone do not mean occupied attachment geometry. */
-                int seated_n=(kind==9 && !r16(at+0x32))?0:n;
-                c->rig_ok=valid && !B->capture.rig_rider_error &&
-                    B->capture.frame_count==1 && B->capture.drawn_frame==c->frame &&
-                    (t[12]==2 || t[12]==4 || t[12]==6) &&
-                    /* The overlay key can stay populated while inactive.
-                     * Native speed dispatch and frame_count decide whether
-                     * an overlay was actually drawn. */
-                    (uint16_t)r16(at+0x2e)<M[rec+0xa8] &&
-                    rm_seat_order(guests,seated_n,cap,kind,r32(at+0x20),c->seats);
+                int kind=M[rec+0xb3];
+                c->layer_ok=!B->rider_error && (kind==0 || kind==1 || kind==5 || kind==7 || kind==9) &&
+                    (t[12]==2 || t[12]==4 || t[12]==6) && (uint16_t)r16(at+0x2e)<M[rec+0xa8];
             }
             c->shape=WM_ROUND;
-            if(type==0 || type==1 || type==5 || type==6 || type==14 || (type>=22 && type<=25)) c->shape=WM_BOX;
-            if(type==2 || type==3 || type==10 || type==11 || type==12 || type==15 || type==17 || type==19 || type==21 || type==26 || type==28) c->shape=WM_OPEN;
-            if(type==4) c->shape=WM_GROUND;
-        } else if (B->cls==0xa || B->cls==0x14 || B->cls==6 || B->cls==0x1c) {
-            c->shape=WM_BOX;
-            if(t && B->cls==0xa) {
-                uint32_t at=(uint32_t)(t-M);
-                int offset=(uint16_t)r16(at+0x16),type=offset/107;
-                if(type<17 && offset%107==0)c->type=(int16_t)type;
-                /* Every actually drawn customer part needs the actual guest
-                 * and source posture. A linked but undrawn guest adds no body.
-                 * The render path additionally requires all attachment poses
-                 * and enough authored seat matrices before consuming the card. */
-                unsigned customer=(uint16_t)r16(at+0x47);
-                uint64_t person=(uint64_t)r32(THINGS)+customer*200u;
-                int valid=!B->capture.rig_rider_error && r16(0x1d667cu)!=8;
-                if(customer && (customer>=NTH || person>r32(THING_LAST) ||
-                   person+200>(64u<<20) || M[person+4]!=2 || M[person+0x59]>=8))valid=0;
-                for(int i=0;i<40;i++)if(c->rig_riders[i].present){
-                    if(!valid || !customer || c->rig_riders[i].variant!=M[person+0x59] ||
-                       !tp_remaster_shop_key_valid(c->rig_riders[i].pose)){valid=0;break;}
-                    c->seats[i]=c->rig_riders[i].variant;
-                }
-                c->rig_ok=c->type>=0 && (t[12]==2 || t[12]==4) &&
-                    valid && !r16(at+0x5f) && B->capture.frame_count==1;
-            }
-        }
-        else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;
-        else if (B->idx<0 || B->cls==0x18) c->shape=WM_TREE;
-        if(t && B->cls==0xe && (t[12]==8 || t[12]==0xa || t[12]==0x22) &&
-           B->capture.car_origins==1 && B->capture.car_tracks==1 && !B->capture.car_error && !B->capture.rig_rider_error &&
-           !r16(0x1d667cu) && B->capture.frame_count==1 && B->capture.car_origin.frame==B->capture.drawn_frame){
-            uint8_t guests[40];uint16_t ids[40];int n=0,valid=1;
-            const uint8_t*track=M+r32(THINGS)+(unsigned)B->capture.car_track*200u;
-            if(track[7]>=MAPE || track[9]>=MAPE || t[7]>=MAPE || t[9]>=MAPE || t[0x12]>3 ||
-               (uint16_t)r16((uint32_t)(track-M)+0x16)!=B->capture.car_origin.family)valid=0;
-            unsigned next=(uint16_t)r16((uint32_t)(t-M)+0x47);
-            while(next && n<40){
-                uint64_t person=(uint64_t)r32(THINGS)+next*200u;
-                if(next>=NTH || person>r32(THING_LAST) || person+200>(64u<<20) ||
-                   M[person+4]!=2 || M[person+0x59]>=8){valid=0;break;}
-                ids[n]=(uint16_t)next;guests[n++]=M[person+0x59];next=(uint16_t)r16((uint32_t)person+0x47);
-            }
-            if(next)valid=0;
-            for(int i=0;i<40;i++)if(c->rig_riders[i].present){
-                const TPRMRider *r=&c->rig_riders[i];
-                if(i>=n || r->variant!=guests[i] || !tp_remaster_car_pose_valid(r->pose,r->visible))valid=0;
-                else c->rider_ids[i]=ids[i];
-                c->seats[i]=r->variant;
-            }
-            if(valid){
-                const TPRMComponent *p=&B->capture.car_origin;
-                double vy=((p->y>>g->lo)-OYS)/g->ths;
-                double vx=((p->x>>g->lo)-OXS-vy*g->shear)/g->tws;
-                c->rig_x=(float)(B->cx+vx);c->rig_y=(float)(B->cy+vy);c->rig_z=p->height/40.0f;
-                c->frame=p->frame;c->type=p->family;c->rig_ok=1;
-                c->vehicle=(TPRMVehicle){p->family,track[0x44],track[0x79],t[0x12],
-                    track[7],track[9],t[7],t[9],t[6],t[8],(uint8_t)B->capture.car_bounce};
-            }
-        }
-        if(t && B->cls==0x12 && !r16(0x1d667cu) && t[12]!=0x13 && t[12]!=0x15 &&
-           !B->capture.component_error && B->capture.ncomponents>0 && B->capture.ncomponents==B->capture.frame_count &&
-           s->ncomponents<=TP_RM_COMPONENT_POOL-(unsigned)B->capture.ncomponents){
-            int valid=!B->capture.rig_rider_error;
-            for(int i=0;i<40;i++)if(B->capture.rig_riders[i].present)valid=0;
-            for(int i=0;i<B->capture.ncomponents;i++)
-                if(B->capture.components[i].family!=(uint16_t)r16((uint32_t)(t-M)+0x16))valid=0;
-            if(valid){
-                c->component_first=s->ncomponents;c->ncomponents=(uint16_t)B->capture.ncomponents;
-                for(int i=0;i<B->capture.ncomponents;i++){
-                    const TPRMComponent *p=&B->capture.components[i];
-                    double vy=((p->y>>g->lo)-OYS)/g->ths;
-                    double vx=((p->x>>g->lo)-OXS-vy*g->shear)/g->tws;
-                    s->components[s->ncomponents++]=(TPRMPlacedComponent){p->frame,
-                        (float)(B->cx+vx),(float)(B->cy+vy),p->height/40.0f};
-                }
-            }
-        }
-        if(B->idx<0) {
-            int animation=(uint16_t)r16(0x1b44c1+(uint32_t)(-B->idx)*2);
-            c->type=(int16_t)animation; /* stable scenery key for authored models */
-            if(animation==431) c->shape=WM_GROUND; /* lake */
-            if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
-        }
-        if((B->idx<0 || B->cls==0x18 || ((B->cls==0xa || B->cls==2 || B->cls==4 || B->cls==8) && c->rig_ok)) && B->capture.frame_count==1) {
-            /* The model is authored around the native frame origin. The old
-             * card's cropped bottom is only a billboard placement heuristic. */
-            double sy=((int16_t)B->capture.frame_y>>g->lo)-OYS;
-            double sx=((int16_t)B->capture.frame_x>>g->lo)-OXS;
-            if(t && B->cls==2 && (t[12]==0x0c || t[12]==0x32)){
-                /* Native bench/elevated states raise the frame on screen.
-                 * Preserve that as height, not a slide across the ground. */
-                int hires=r16(SCREEN_MODE)==8;
-                int base_y=((OYS<<g->lo)+(hires?(t[8]>>3)>>1:t[8]>>3))>>g->lo;
-                c->rig_z=(float)((base_y-(((int16_t)B->capture.frame_y)>>g->lo))*g->aspect/g->tws);
-                sy=base_y-OYS;
-            }
-            double vy=sy/g->ths,vx=(sx-vy*g->shear)/g->tws;
-            c->rig_x=(float)(B->cx+vx);c->rig_y=(float)(B->cy+vy);
-            c->frame=(uint16_t)B->capture.drawn_frame;c->rig_ok=1;
+            if(type==0 || type==1 || type==5 || type==6 || type==14 || (type>=22 && type<=25))c->shape=WM_BOX;
+            if(type==2 || type==3 || type==10 || type==11 || type==12 || type==15 || type==17 || type==19 || type==21 || type==26 || type==28)c->shape=WM_OPEN;
+            if(type==4)c->shape=WM_GROUND;
+        }else if(B->cls==10 || B->cls==20 || B->cls==6 || B->cls==28)c->shape=WM_BOX;
+        else if(B->cls==18 || B->cls==14)c->shape=WM_TRACK;
+        else if(B->idx<0 || B->cls==24)c->shape=WM_TREE;
+        if(B->idx<0){
+            if(c->type==431)c->shape=WM_GROUND;
+            if(c->type==427 || c->type==428 || c->type==429 || c->type==434)c->shape=WM_BOX;
         }
         const LPLayer*layer=c->layer_ok?lp_find(c->cls,c->type):NULL;
         if(layer && (!lp_pose(layer,c->frame)||!lp_valid_riders(layer,c->riders,c->nriders)))layer=NULL;

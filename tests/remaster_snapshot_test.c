@@ -191,6 +191,7 @@ int main(void){
     put16(0x1b9a78 + 3*0x5e + 1*2,12);put16(0x1b9a78 + 7*0x5e + 2*2,6);
     CHECK(capture(s,1));c=s->cards[0];
     CHECK(c.rig_ok && c.type==0 && c.seats[0]==3 && c.seats[1]==7);
+    CHECK(c.rider_ids[0]==3 && c.rider_ids[1]==2);
     CHECK(c.nriders==0); /* no Faithful layer loaded; 3-D metadata is independent */
     CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
     CHECK(c.rig_riders[0].pose==65025 && c.rig_riders[1].pose==65090);
@@ -201,9 +202,17 @@ int main(void){
     for(unsigned phase=0;phase<8;phase++){
         put32(thing+0x20,phase);CHECK(capture(s,1));c=s->cards[0];
         CHECK(c.rig_ok && c.seats[0]==(phase%2?7:3) && c.seats[1]==(phase%2?3:7));
+        CHECK(c.rider_ids[0]==(phase%2?2:3) && c.rider_ids[1]==(phase%2?3:2));
         CHECK(c.rig_riders[0].variant==c.seats[0] && c.rig_riders[1].variant==c.seats[1]);
         CHECK(c.rig_riders[0].pose==65025 && c.rig_riders[1].pose==65090);
     }
+    memory[thing+200+0x59]=3;
+    for(unsigned phase=0;phase<4;phase++){
+        put32(thing+0x20,phase);CHECK(capture(s,1));c=s->cards[0];
+        CHECK(c.rig_ok && c.seats[0]==3 && c.seats[1]==3);
+        CHECK(c.rider_ids[0]==(phase%2?2:3) && c.rider_ids[1]==(phase%2?3:2));
+    }
+    memory[thing+200+0x59]=7;
     memory[0x1cced0+0xb3]=5;put32(thing+0x20,0);
     /* Different body/rider crops and either screen mode preserve the ride's
      * native origin. Occupancy must not move the entire authored ride. */
@@ -219,6 +228,7 @@ int main(void){
         }
         put16(thing+0x47,0);CHECK(capture(s,1));c=s->cards[0];
         CHECK(c.rig_ok && c.rig_x==12.5f && c.rig_y==(mode?14.25f:14.5f));
+        for(int seat=0;seat<40;seat++)CHECK(!c.rider_ids[seat]);
         CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
         put16(thing+0x47,2);
     }
@@ -278,6 +288,7 @@ int main(void){
                 for(int flip=0;flip<4;flip++){
                     put16(0x510000+20+6,0x80+flip);CHECK(capture(s,1));c=s->cards[0];
                     CHECK(c.rig_ok && c.type==12 && c.seats[0]==variant);
+                    CHECK(c.rider_ids[0]==2);
                     CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.25f:14.5f));
                     CHECK(c.rig_riders[0].pose==65312+flip*32+slot);
                     CHECK(c.rig_riders[0].visible && c.rig_riders[0].present);
