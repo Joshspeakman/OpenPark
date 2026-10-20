@@ -758,6 +758,33 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         (void)budget;   /* every visible pass, every frame: a pass left for a later frame shows that area from another
                          * moment (people and rides jump when it catches up: flashing chunks); the frame rate gives instead */
     }
+    /* Off the view, in a small budget: the app moves the view at the display's rate, so a quick zoom out or
+     * scroll shows canvas the next game frame has yet to draw (never drawn: black flashes at the borders).
+     * Never-drawn passes first, nearest the view; then a round of those within a view's size of it. */
+    if (!all) {
+        static int mr; double mt = now(), cxv = vx + vw / 2, cyv = vy + vh / 2;
+        for (int n = 0; n < 64 && now() - mt < 0.002; n++) {
+            int best = -1; double bd = 1e300;
+            for (int k = 0; k < ngrid; k++) {
+                if (drawn[k]) continue;
+                double dx = (grid[k].x0 + grid[k].x1) / 2.0 - cxv, dy = (grid[k].y0 + grid[k].y1) / 2.0 - cyv, d = dx * dx + dy * dy;
+                if (d < bd) { bd = d; best = k; }
+            }
+            if (best < 0) {
+                if (now() - mt >= 0.0005) break;         /* (the round: a quarter of the budget, fresh to within a few frames) */
+                for (int i = 0; i < ngrid; i++) {
+                    int k = (mr + i) % ngrid; Pass *p = &grid[k];
+                    if (p->x1 < vx - vw || p->x0 > vx + 2 * vw || p->y1 < vy - vh || p->y0 > vy + 2 * vh) continue;
+                    if (!(p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8)) continue;   /* (on screen: done above) */
+                    best = k; break;
+                }
+                if (best < 0) break;
+                mr = (best + 1) % ngrid;
+            }
+            pass_blit(grid[best].cx, grid[best].cy);
+            pass_src = NULL; drawn[best] = 1;
+        }
+    }
     if (getenv("TP_VIEW_DEBUG")) { static double l; static long fr, partial, vis_total, done_total;
         int vis = 0, done = 0;
         for (int k = 0; k < ngrid; k++) { Pass *p = &grid[k]; if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue; vis++; }

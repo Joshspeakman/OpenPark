@@ -13,6 +13,13 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-20, dark flashes at the borders on a quick zoom out or scroll: the app moves the view at the display's rate,
+so canvas the next game frame had yet to draw showed for a moment (never drawn: black). render_visible now also draws
+passes off the view in a small budget: never-drawn ones nearest first (2 ms a frame until the canvas is whole), then a
+round of those within a view's size of it (0.5 ms a frame). Verified on TESTPARK: zoom 3 for 6 s, then straight to the
+minimum and a shot before the next game frame: 6d20cd2 mostly black, now the whole park. Cost at zoom 2: passes 40 to
+76 ms a second, 60 fps kept. At the minimum zoom the black beside the canvas (it is narrower than the view) stays.
+
 2026-10-20, Fable's audit (issues #12 to #35), worked through (single agent):
 - App (#18 to #23): focus loss lets go of buttons, modifiers, keys and Tab's fast forward; the pause is worked out from
   hidden, minimised and a 3DO video together; at quit the game thread stops before the audio engine and synth go; the
