@@ -71,7 +71,8 @@ bash tools/build_app.sh                    # installs ~/Applications/Theme Park 
   installer or its scripts.
 - **The build:** copies the game files to `~/Games/ThemeParkNative/game` (no DOS executables). Saves go to
   `~/Games/ThemeParkNative/saves`, and the log is `~/Games/ThemeParkNative/theme-park.log`.
-- **Locations:** set `TP_DATA` and `TP_INSTALL_DIR` to use other folders.
+- **Locations:** set `TP_DATA` and `TP_INSTALL_DIR` to use other folders; `TP_NO_INSTALL=1` builds into
+  `build/app` without installing.
 - **Python:** the scripts use `TP_PYTHON` if it is set, else `.venv/bin/python3`, else `python3`.
 - **The lifter:** the static lifter and its runtime headers are vendored in `vendor/freedom-force-recomp`. Their
   hashes are pinned in `config/reference.json` and checked before use.
@@ -125,9 +126,10 @@ python3 tools/extras.py --list                                            # what
   memory, registers, port traffic and frames of the recompiled code are compared with the x86 original. See
   [DOS contract](docs/DOS-CONTRACT.md) and [provenance](docs/PROVENANCE.md).
 
-`tests/check.sh` runs synthetic parser and instruction tests with no game files. `tests/check_macos.sh` adds the
-2,000-routine comparison, a scripted startup and, with `--park`, eight million blocks through buying land and
-entering the first park. The native-only runner then reproduces the same result.
+`tests/check.sh` runs the parser and Python-host unit tests with no game files; the instruction tests
+(`tools/check_cpu.py`) run in CI and in `tests/check_macos.sh`. `tests/check_macos.sh` adds the native-routine
+comparison (two routines, 1,000 cases each), a scripted startup and, with `--park`, eight million blocks through
+buying land and entering the first park. The native-only runner then reproduces the same result.
 
 ## Legal
 

@@ -8,8 +8,8 @@
 static AVAudioEngine *engine;
 static AVAudioUnitMIDIInstrument *synth;
 static float sfx_volume = 1.0f, music_volume = 1.0f;
-/* CD-audio music (Launcher > Sound > Music Type): a track imported from the owner's Amiga CD32 disc
- * (tools/extras.py) plays in place of the game's General MIDI tune, which goes silent meanwhile. */
+/* CD-audio music (Launcher > Sound > Music Type): a track imported from the owner's Amiga CD32 disc, or a 3DO
+ * recording (tools/extras.py), plays in place of the game's General MIDI tune, which goes silent meanwhile. */
 static AVAudioPlayerNode *cd, *vid;
 static int cd_playing, vid_playing;                 /* (a 3DO ride video's sound: the music silent meanwhile) */
 static void apply_music(void) {
@@ -111,7 +111,6 @@ void tp_audio_video_stop(void) {
     if (vid) [vid stop];
     vid_playing = 0; apply_music();
 }
-int tp_audio_cd_busy(void) { return cd && cd.isPlaying; }
 
 /* Drops, in the log (theme-park.log) whatever the settings, once a second at most: output callbacks that came late
  * (the device ran on without the game's sound), the output ring run dry, and game-thread stalls longer than the

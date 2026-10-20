@@ -13,6 +13,33 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-20, Fable's audit (issues #12 to #35), worked through (single agent):
+- App (#18 to #23): focus loss lets go of buttons, modifiers, keys and Tab's fast forward; the pause is worked out from
+  hidden, minimised and a 3DO video together; at quit the game thread stops before the audio engine and synth go; the
+  real-time policy's computation is at most 0.45 of the period (refused past 37,500 cycles before) and set again when
+  the speed changes; the render block fills buffers over 4096 frames; CD32/3DO tracks decode on a queue; the
+  full-screen frame is not autosaved.
+- DOS host: file errors return DOS errors (#24); VBE info 256 bytes with its strings in host memory (#25); the
+  mouse queue keeps button changes (#26, in part: interrupts cannot be delivered inside a blocking key wait, which
+  is now logged); the DOS time follows the emulated clock (#27); #28's nine items (write bounds, INT 10h 0Fh in
+  VESA, DAC read-back, INT 33h reset as DOSBox's, DPMI 0001h reuse, block count before hooks, status suffix, PIC
+  mask, sb16's pointer).
+- Runtime: bigmap's room checks before the layout (#29); the park tune asked once (#30; the 100 to 0x180e40 is the
+  tune's own level, as the game passes at 0x14535d: kept); geo() no longer sets geo_ext, so a change of park size
+  in a session resets the view (#31); a fallback pass fills its rectangle from game passes a cell lower (#32); the
+  Visitor View's let-go, hop, container and position fixes (#33); cinepak reads whole entries (#35); development
+  paths: no silent 64 MiB fallback, headless spec parsers bounded, an async-signal-safe fault handler, NaN refused
+  by the walker (#34).
+- Tools and docs: build_app.sh stops with a message on codesign failure, tolerates the title render, requires the
+  --park trace, shows make_drivers' output and stops when it fails (#12, #14); make_drivers needs the bound for
+  convergence and fails on unpinned hashes (#13); build_game.py refuses 8-bit overflows (none in this build:
+  guards at most 146 bytes, no block at 255 instructions) and stamps its objects (#15); tools/cinepak.py cannot
+  loop (#16); README and comments, LSMinimumSystemVersion from the deployment target (#17).
+- #6: the remaining view state (top bar, drag, restore, geometry, cursor) also reset on a new game; still not
+  exercised by a test (no in-game action found that exits with errorlevel 10).
+- tests/walk_view_test.c did not link since the sound work (#10): stubs added. All checks pass (check_macos.sh
+  --park, check_walk, check_portable, check.sh); a TESTPARK smoke run (rating screen, shop, quit) clean.
+
 2026-10-19, the player again (d0f1753, full screen, trackpad): no clicks on the panel or in the park, the game left
 open. Read from the running process (lldb, attached and detached): the host's mouse (buttons 0, nothing queued), the
 view (no button held, no drag, no top-bar or restore state) and the app (no buttons, not in the Visitor View's drop

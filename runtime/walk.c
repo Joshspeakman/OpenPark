@@ -483,6 +483,7 @@ void tp_walk_frame(void) {
 
 /* ---- the app's side ---- */
 int tp_walk_start(double wx, double wy) {
+    if (isnan(wx) || isnan(wy)) return 0;                 /* (NaN passed the clamps and indexed outside the map) */
     M = tp_host_memory();
     Geom g; if (!M || !geom(&g) || !r32(MAP_PTR)) return 0;
     pthread_mutex_lock(&lock);
@@ -625,6 +626,7 @@ void tp_walk_input(double fwd, double strafe, double turn, double look_yaw, doub
 }
 /* Development and tests: put the walker somewhere, looking along yaw (radians; NAN keeps it). */
 void tp_walk_teleport(double x, double y, double yaw) {
+    if (isnan(x) || isnan(y)) return;
     pthread_mutex_lock(&lock);
     W.x = x; W.y = y; if (!isnan(yaw)) W.yaw = yaw; W.follow = 0; W.placed = 1;
     W.cam_x = x; W.cam_y = y; W.cam_yaw = W.yaw;

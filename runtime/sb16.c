@@ -423,14 +423,16 @@ void tp_sound_bank_read(const char *path, long pos, uint8_t *buf, long n) {
     for (int k = 1; k < tab[t].n; k++) {                  /* (entry 0: the whole bank) */
         long s = tab[t].off[k], len = tab[t].len[k], e = s + len, N = len / bps;
         if (N < 2 * fade + 32 || e - (fade + 32) * bps < pos || e > pos + n) continue;   /* (its end in this read) */
-        uint8_t *p = buf + (s - pos);                     /* (only its last fade + 32 samples are touched) */
-        #define SV(i) (bps == 2 ? (int)(int16_t)(p[2 * (i)] | p[2 * (i) + 1] << 8) : ((int)p[i] - 128) << 8)
+        long T = N - (fade + 32);                         /* (only its last fade + 32 samples are touched: based there, not */
+        if (s + T * bps < pos) continue;                  /*  before buf where the sample began in an earlier read) */
+        uint8_t *p = buf + (s + T * bps - pos);           /* sample i at p[(i - T) * bps] */
+        #define SV(i) (bps == 2 ? (int)(int16_t)(p[2 * ((i) - T)] | p[2 * ((i) - T) + 1] << 8) : ((int)p[(i) - T] - 128) << 8)
         long cut = N;
         for (long i = N - 16 / bps; i < N; i++) if (abs(SV(i) - SV(i - 1)) > 16000) { cut = i; break; }
         done++; junk += cut < N;
         for (long i = cut - fade; i < N; i++) {
             int x = i < cut ? (int)((long)SV(i) * (cut - i) / fade) : 0;
-            if (bps == 2) { p[2 * i] = (uint8_t)x; p[2 * i + 1] = (uint8_t)(x >> 8); } else p[i] = (uint8_t)((x >> 8) + 128);
+            if (bps == 2) { p[2 * (i - T)] = (uint8_t)x; p[2 * (i - T) + 1] = (uint8_t)(x >> 8); } else p[i - T] = (uint8_t)((x >> 8) + 128);
         }
         #undef SV
     }

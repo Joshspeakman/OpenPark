@@ -25,12 +25,15 @@ OUT=build/app
 # allocation variant; build it with tests/check_macos.sh ... --park first.
 TRACE=work/check-startup/trace.json
 [[ -f $TRACE ]] || { echo "missing $TRACE: run tests/check_macos.sh $EXE $REF --park" >&2; exit 1; }
+# (the --park scenario's: a check run without --park writes the same file with a trace that never enters a park)
+"$PYTHON" -c 'import json,sys; t=json.load(open(sys.argv[1])); sys.exit(0 if t.get("quantum") == 1000 and t.get("executed_blocks") == 8000000 else 1)' "$TRACE" \
+  || { echo "$TRACE is not the --park trace: run tests/check_macos.sh $EXE $REF --park" >&2; exit 1; }
 # HMI sound drivers the game loads at run time (work/drv-ADDR-MODE-NAME.bin,
 # see tools/dump_drivers.md): compiled at their load addresses. Made from the owned
 # package on the first build (tools/make_drivers.py, a few minutes); TP_NO_SOUND=1 skips them.
 if [[ -z ${TP_NO_SOUND:-} ]] && ! ls work/drv-*-*-*.bin >/dev/null 2>&1; then
   echo "== making the sound driver images from the game (once, a few minutes)"
-  "$PYTHON" tools/make_drivers.py "$EXE" --reference "$REF" --out work | tail -1 || echo "   (failed: building without sound)" >&2
+  "$PYTHON" tools/make_drivers.py "$EXE" --reference "$REF" --out work | tail -5 || { echo "   (the sound driver images could not be made: see above; TP_NO_SOUND=1 builds without sound)" >&2; exit 1; }
 fi
 HAVE_DRIVERS=0; [[ -z ${TP_NO_SOUND:-} ]] && ls work/drv-*-*-*.bin >/dev/null 2>&1 && HAVE_DRIVERS=1
 [[ $HAVE_DRIVERS == 1 ]] || echo "warning: no sound driver images; the app will run with sound off" >&2
@@ -58,7 +61,8 @@ clang -arch arm64 -O2 -w -I "$INC" -I runtime platform/macos/platform_macos.c ru
   work/app-release/game.a -lz -o "$OUT/tp-headless"
 ART=$(mktemp -d "$OUT/art-XXXXXXXX")
 DS_TEST=1 W32_AUDIO_MUTE=1 "$OUT/tp-headless" --game "$GAMEDIR/GAME" --overlay "$PWD/$ART/o1" \
-  --image "$APP.new/Contents/Resources/MAIN.TPIMG" --out "$ART/title" --quantum 1000 --blocks 6000000 >/dev/null
+  --image "$APP.new/Contents/Resources/MAIN.TPIMG" --out "$ART/title" --quantum 1000 --blocks 6000000 >/dev/null \
+  || echo "   (the title render stopped: the launcher goes without its banner)" >&2
 [[ -f $ART/title/frame.png ]] && cp "$ART/title/frame.png" "$APP.new/Contents/Resources/banner.png"
 mv "$ART" "$HOME/.Trash/theme-park-art-$(date +%s)"
 # Theme Park's store art (key art, logo, box art) from GOG's public store API, for the launch window
@@ -102,6 +106,9 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP.new/Contents/Resources/AppIcon.icns"
 COMMIT=$(git rev-parse --short HEAD)
+# The oldest macOS it runs on: the one it was built for (the deployment target, else this Mac's), so an older
+# macOS refuses it cleanly instead of failing in dyld.
+MINOS=${MACOSX_DEPLOYMENT_TARGET:-$(sw_vers -productVersion | cut -d. -f1).0}
 cat > "$APP.new/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -114,12 +121,12 @@ cat > "$APP.new/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1 nightly ($COMMIT)</string>
   <key>CFBundleVersion</key><string>$COMMIT</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>$MINOS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.simulation-games</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign - "$APP.new" >/dev/null 2>&1
+codesign --force --sign - "$APP.new" >/dev/null || { echo "codesign failed on $APP.new" >&2; exit 1; }
 if [[ -e "$APP" ]]; then mv "$APP" "$HOME/.Trash/$NAME-build-$(date +%s).app"; fi
 mv "$APP.new" "$APP"
 # Game data: the GAME folder of the verified extraction (DATA, SAVE, drivers).

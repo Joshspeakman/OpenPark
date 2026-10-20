@@ -87,7 +87,10 @@ class Decoder:
             self.books.append([[None] * 256, [None] * 256])
         for s in range(nstrips):
             while int.from_bytes(b[off:off + 2], 'big') not in (0x1000, 0x1100):   # (3DO's 0xfe00 chunk)
-                off += int.from_bytes(b[off + 2:off + 4], 'big')
+                size = int.from_bytes(b[off + 2:off + 4], 'big')
+                if off + 4 > len(b) or size == 0:          # (past the frame, or a chunk of no size: it never advanced)
+                    raise ValueError('bad strip at %d in a frame of %d bytes' % (off, len(b)))
+                off += size
             sid, ssize = struct.unpack_from('>HH', b, off)
             y1, x1, y2, x2 = struct.unpack_from('>HHHH', b, off + 4)
             if s and not (flags & 1):                # a strip starts from the previous strip's codebooks

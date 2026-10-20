@@ -16,9 +16,8 @@ static NSImage *planet(NSImage *ico, CGFloat cx, CGFloat cy, CGFloat r0, CGFloat
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef g = CGBitmapContextCreate(px, w, h, 8, w * 4, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
     CGContextDrawImage(g, CGRectMake(0, 0, w, h), c);
-    CGFloat k = 1;
     for (size_t y = 0; y < h; y++) for (size_t x = 0; x < w; x++) {   /* rows run top-down in the buffer */
-        CGFloat d = hypot((x + 0.5) / k - cx, (y + 0.5) / k - cy), a = d <= r0 ? 1 : d >= r1 ? 0 : (r1 - d) / (r1 - r0);
+        CGFloat d = hypot(x + 0.5 - cx, y + 0.5 - cy), a = d <= r0 ? 1 : d >= r1 ? 0 : (r1 - d) / (r1 - r0);
         for (int i = 0; i < 4; i++) px[(y * w + x) * 4 + i] = (uint8_t)lround(px[(y * w + x) * 4 + i] * a);
     }
     CGImageRef out = CGBitmapContextCreateImage(g);

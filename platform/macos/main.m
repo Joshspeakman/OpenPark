@@ -1,7 +1,7 @@
 /* Theme Park for macOS: a Cocoa window around the recompiled ARM64 game code
  * and the native DOS host (runtime/host.c). The game runs on its own thread;
- * the window shows the game's frame (320x200 or its 640x480 SVGA mode) at 4:3
- * and forwards keyboard/mouse.
+ * the window shows the park view (runtime/view.c: wide and zoomable by default) or the game's own frame
+ * (320x200 or its 640x480 SVGA mode) at 4:3, and forwards keyboard/mouse.
  * Data: ~/Games/ThemeParkNative/{game,saves} (game files copied from the
  * user's own GOG package by tools/build_app.sh). */
 #import <Cocoa/Cocoa.h>
@@ -879,7 +879,6 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
 }
 @end
 
-/* A window that can be key without a title bar (the borderless full screen). */
 /* The ride panel's view button (qol.c's tp_ride_video, on the game thread). Ride Videos (Launcher > Display):
  * 0 the PC's (data/rideani.NNN) only; 1 the PC's, and the 3DO's for rides the PC has none for (Space Shuttle,
  * Tree House); 2 the 3DO's wherever there is one. */
@@ -905,6 +904,7 @@ static int ride_video_3do(int ride) {
     return 1;
 }
 
+/* A window that can be key without a title bar (the borderless full screen). */
 @interface GameWindow : NSWindow
 @end
 @implementation GameWindow
@@ -1137,7 +1137,7 @@ static void *game_thread(void *arg) {
             tp_view_mouse(x, y, 0); tp_view_mouse(x, y, 1);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ tp_view_mouse(x, y, 0); });
         }
-        else if ([op isEqual:@"vshot"]) {       /* what the window shows (zoomed or not), 1280x800 */
+        else if ([op isEqual:@"vshot"]) {       /* what the window shows (zoomed or not), 960 high (1280 at 4:3, wider in the wide view) */
             static uint32_t frame[640 * 480]; int fw = 320, fh = 200;
             tp_host_frame_size(&fw, &fh); tp_host_frame_rgba_any(frame, 640 * 480);
             NSRect vb = _view.bounds; int oh = 960, ow = 1280;

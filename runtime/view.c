@@ -1513,6 +1513,8 @@ void tp_view_enable(int main_game) {
     /* (a new game, also THEME.BAT's in-process restart: nothing of the last one's frame survives, issue #6) */
     sentinel_on = 0; world_ok = 0; coherent = 0; ngrid = 0; rr = rr_done = 0; seen_cx = seen_cy = -999;
     memset(date_box, 0, sizeof date_box); date_fixed = 0; memset(prev_overlay, 0, sizeof prev_overlay);
+    topbar = 0; drag_held = 0; restore = 0; G.s = 0;     /* (the top bar, a drag, a camera to put back; the geometry made again) */
+    pthread_mutex_lock(&lock); pub_cur_ok = 0; pub_straddle = 0; pthread_mutex_unlock(&lock);
 }
 void tp_view_geometry(int *sw, int *sh, int *wh);
 int tp_view_set(int on, double cx, double cy, double zoom, double layout_w) {

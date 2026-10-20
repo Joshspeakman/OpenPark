@@ -176,7 +176,7 @@ int tp_bigmap_things(int n); int tp_bigmap_things_room(void); extern uint32_t tp
 static uint64_t ticks;
 static uint32_t video_mode;
 static uint8_t port_val[65536]; static uint8_t port_known[65536];
-static uint8_t palette[768]; static uint32_t dac_index;
+static uint8_t palette[768]; static uint32_t dac_index, dac_read;
 static uint32_t poll_count, irq_count, time_calls, retrace_reads, int_calls;
 static uint64_t blocks;
 static int64_t release_due = -1;
@@ -321,6 +321,7 @@ static int port_in(unsigned port, unsigned size) {
     if (size != 1) stop("unsupported port input width at %x", port);
     if (port_known[port]) return port_val[port];
     if (port == 0x3da) { retrace_reads++; return vretrace(); }
+    if (port == 0x3c9) { unsigned v = palette[dac_read]; dac_read = (dac_read + 1) % 768; return v; }   /* the DAC read back (not floating: white) */
     if (port == 0x330 || port == 0x331) return mpu_in(port);
     if (port == 0x60) return port60;                    /* keyboard controller data */
     if (port == 0x61) return port_val[0x61];
@@ -341,6 +342,7 @@ static void port_out(unsigned port, unsigned size, unsigned value) {
     else if (port == 0x330 || port == 0x331) mpu_out(port, value);
     else if (port == 0x61) port_val[0x61] = value;      /* keyboard acknowledge strobe */
     else if (port == 0x3c8) dac_index = value * 3;
+    else if (port == 0x3c7) dac_read = value * 3;
     else if (port == 0x3c9) { palette[dac_index] = value & 63; dac_index = (dac_index + 1) % 768; }
     else if (sb16_port_out(port, value)) {}
     else if (floating_port(port)) {}
@@ -351,10 +353,11 @@ static void port_out(unsigned port, unsigned size, unsigned value) {
 extern uint64_t tp_insns, tp_rep;
 static uint64_t io_cost;
 static double gov_rate;   /* the governor's instruction rate (below) */
+static int io_stopped;                                     /* (a stop in a port access: the status says so) */
 static int io_cb(int output, unsigned port, unsigned size, unsigned value) {
     if (gov_rate > 0) { unsigned d = (unsigned)(gov_rate / 1000.0 / (output ? 1365 : 1024)); tp_insns += d; io_cost += d; }
     jmp_buf saved; memcpy(saved, stop_jb, sizeof saved);
-    if (setjmp(stop_jb)) { memcpy(stop_jb, saved, sizeof saved); stopped = 1; return -1; }
+    if (setjmp(stop_jb)) { memcpy(stop_jb, saved, sizeof saved); stopped = 1; io_stopped = 1; return -1; }
     int r = 0;
     if (output) port_out(port, size, value); else r = port_in(port, size);
     memcpy(stop_jb, saved, sizeof saved);
@@ -686,9 +689,15 @@ static void dos_time(uint32_t a) {
     /* DOS reads the time from the BIOS tick count, so it steps at 18.2 Hz (DOSBox the same): the ride videos'
      * frame wait (0x16123d: 2 or 8 hundredths) lasts a whole tick or two. A clock exact to the hundredth played
      * them about three times too fast. */
-    struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
-    struct tm tm; localtime_r(&ts.tv_sec, &tm);
-    double day = tm.tm_hour * 3600.0 + tm.tm_min * 60.0 + tm.tm_sec + ts.tv_nsec / 1e9;
+    /* On the emulated clock (emu_now), as the timer and the retrace are: the time of day when first asked, then
+     * the game's own time (it was the wall clock: host work between the game's instructions shortened its waits). */
+    static double day_off; static int have_off;
+    if (!have_off) {
+        struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
+        struct tm tm; localtime_r(&ts.tv_sec, &tm);
+        day_off = tm.tm_hour * 3600.0 + tm.tm_min * 60.0 + tm.tm_sec + ts.tv_nsec / 1e9 - emu_now(); have_off = 1;
+    }
+    double day = fmod(emu_now() + day_off, 86400.0); if (day < 0) day += 86400.0;
     double tick = 65536.0 / 1193180.0;
     uint32_t cs = (uint32_t)(floor(day / tick) * tick * 100.0);
     S(ECX, ((cs / 360000) << 8) | (cs / 6000 % 60));
@@ -744,16 +753,19 @@ static void svga_set_bank(int bank) {
     memcpy(mem + 0xa0000, svga_fb + bank * 65536u, bank_bytes(bank));
 }
 static void vbe_controller_info(uint32_t at) {          /* 4F00h: VbeInfoBlock (VESA 1.2) */
+    /* 256 bytes, as VBE 1.2's block is (512 when the caller asks for VBE 2: "VBE2" in its buffer); the OEM string
+     * and the mode list in the host's own low memory beside the stubs (0xf100), the pointers there: written inside
+     * the caller's buffer, they overran a 256-byte one into whatever was allocated next. */
+    int vbe2 = (uint64_t)at + 4 <= MEMORY && !memcmp(mem + at, "VBE2", 4);
     uint8_t b[512] = {0};
     memcpy(b, "VESA", 4); b[4] = 2; b[5] = 1;            /* version 1.2 */
-    uint16_t seg = (uint16_t)(at >> 4), off = (uint16_t)(at & 15);
-    uint16_t oem = off + 0x100, modes = off + 0x120;
+    uint16_t seg = 0x0f00, oem = 0x100, modes = 0x120;
     memcpy(b + 6, &oem, 2); memcpy(b + 8, &seg, 2);       /* OEM string far pointer */
     memcpy(b + 14, &modes, 2); memcpy(b + 16, &seg, 2);   /* mode list far pointer */
     uint16_t mem64k = 16; memcpy(b + 18, &mem64k, 2);     /* 1 MiB */
-    memcpy(b + 0x100, "Theme Park native SVGA", 23);
-    uint16_t list[2] = {0x101, 0xffff}; memcpy(b + 0x120, list, 4);
-    mwrite(at, b, sizeof b);
+    memcpy(mem + 0xf100, "Theme Park native SVGA", 23);
+    uint16_t list[2] = {0x101, 0xffff}; memcpy(mem + 0xf120, list, 4);
+    mwrite(at, b, vbe2 ? 512 : 256);
 }
 static int vbe_mode_info(uint32_t at, uint32_t mode) {  /* 4F01h: ModeInfoBlock */
     if ((mode & 0x1ff) != 0x101) return 0;
@@ -901,7 +913,7 @@ static void interrupt(uint32_t number) {
               if (got > 0) tp_sound_bank_read(handles_path[b], (long)lseek(handles_fd[b], 0, SEEK_CUR) - got, mem + at, got); }
             if (things_grow) { uint32_t tp; memcpy(&tp, mem + 0x1d3b10, 4);   /* a 128x128 park's things read: the rest of the pool, empty, in play */
                 if (tp && at == tp) { uint32_t room = (uint32_t)tp_bigmap_things_room() * 0xc8u;
-                    if ((uint32_t)got < room) memset(mem + at + got, 0, room - (uint32_t)got);
+                    if ((uint32_t)got < room && (uint64_t)at + room <= MEMORY) memset(mem + at + got, 0, room - (uint32_t)got);
                     tp_bigmap_things(tp_bigmap_things_room()); things_grow = 0; } }
             if (getenv("TP_DEBUG_READ")) { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);   /* (development: reads into the map) */
                 if (mp && at < mp + 0x10000 && at + c > mp) fprintf(stderr, "read into the map: handle %u, +%#x, %u bytes (got %zd)\n", b, at - mp, c, got); }
@@ -927,12 +939,14 @@ static void interrupt(uint32_t number) {
         }
         if (ah == 0x25) { uint32_t n = a & 255; vec_sel[n] = G(DS); vec_pc[n] = d; vec_set[n] = 1; return; }
         if (ah == 0x40 && (b == 1 || b == 2)) {
+            if ((uint64_t)address(DS, d) + c > MEMORY) { carry(5); return; }
             fwrite(mem + address(DS, d), 1, c, stderr);
             S(EAX, c); carry(0); return;
         }
         if (ah == 0x40) {
             if (b >= 20 || handles_fd[b] < 0) { carry(6); return; }
             if (!handles_writable[b]) { carry(5); return; }
+            if ((uint64_t)address(DS, d) + c > MEMORY) { carry(5); return; }   /* (a count past guest memory: refused, as the read is) */
             uint32_t count = 0;
             if (c) {
                 { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);
@@ -952,7 +966,11 @@ static void interrupt(uint32_t number) {
     if (number == 0x33) {
         if (ax == 0x2f) return;
         if (ax == 0x0f || ax == 0x1a || ax == 0x1d) return;   /* mickey ratio, sensitivity, display page: no effect here */
-        if (ax == 0) { S(EAX, 0xffff); S(EBX, 3); return; }
+        if (ax == 0) {                                    /* reset: no handler, hidden, the whole screen (as DOSBox's driver) */
+            mouse.has_cb = 0; mouse.cb_mask = 0; mouse.cb_sel = 0; mouse.cb_pc = 0; mouse.visible = 0;
+            mouse.rx0 = 0; mouse.rx1 = 639; mouse.ry0 = 0; mouse.ry1 = 479;   /* (the ranges the host starts with) */
+            S(EAX, 0xffff); S(EBX, 3); return;
+        }
         if (ax == 1 || ax == 2) { mouse.visible = ax == 1; return; }
         if (ax == 3) { S(EBX, mouse.buttons); S(ECX, mouse.x); S(EDX, mouse.y); return; }
         if (ax == 4) { mouse.x = c & 65535; mouse.y = d & 65535; return; }
@@ -969,7 +987,7 @@ static void interrupt(uint32_t number) {
             if ((ax & 0xff) == 5) S(EDX, (d & 0xffff0000u) | r_dx);
             return;
         }
-        if (ah == 0xf) { S(EAX, (a & 0xffff0000u) | 0x5000 | (video_mode & 0x7f)); S(EBX, b & ~0xff00u); return; }
+        if (ah == 0xf) { S(EAX, (a & 0xffff0000u) | 0x5000 | (video_mode == 0x101 ? 0x13 : video_mode & 0x7f)); S(EBX, b & ~0xff00u); return; }   /* (VESA 101h: the BIOS mode before it) */
         if (ah == 0) {
             video_mode = a & 127;
             if (video_mode != 3 && video_mode != 0x13) stop("unsupported VGA mode %x", video_mode);
@@ -1002,7 +1020,11 @@ static void interrupt(uint32_t number) {
             next_selector += 8 * n;
             S(EAX, (a & 0xffff0000u) | first); carry(0); return;
         }
-        if (ax == 0x0001) { carry(0); return; }  /* free descriptor: kept mapped */
+        if (ax == 0x0001) {                      /* free a descriptor: reused (DOS memory's own go through 0101h) */
+            uint32_t sel = b & 0xfff8u;
+            if (sel >= 40 && sel < 4096 && has_base[sel] && !is_alloc_sel[sel] && nfree_selectors < 4096) { has_base[sel] = 0; free_selectors[nfree_selectors++] = sel; }
+            carry(0); return;
+        }
         if (ax == 0x0003) { S(EAX, (a & 0xffff0000u) | 8); carry(0); return; }
         if (ax == 0x0007) {
             uint32_t sel = b & 65535;
@@ -1259,16 +1281,16 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
             if (blocks >= blocks_limit) return 0;
             if (blocks_limit - blocks < budget) budget = (uint32_t)(blocks_limit - blocks);
         }
-        double tr0 = now_s(); int n = tp_run(budget); tp_dbg_run += now_s() - tr0;
+        double tr0 = now_s(); int n = tp_run(budget); tp_dbg_run += now_s() - tr0; uint64_t ran = tp_blocks();   /* (before a hook's own runs) */
         if (n == -3) { extern int tp_hook_armed, tp_hook_which; void tp_qol_hook(int nested);
                       if (tp_hook_which >= 12) tp_qol_hook(0); else tp_view_hook(); tp_hook_armed = 0; n = 0; }   /* view.c's points, or qol.c's */
-        if (stopped) { snprintf(status + strlen(status), sizeof status - strlen(status), " (port I/O)"); return -1; }
+        if (stopped) { if (io_stopped) snprintf(status + strlen(status), sizeof status - strlen(status), " (port I/O)"); return -1; }
         if (n < 0 || (n == 0 && !quantum)) {
             snprintf(status, sizeof status, "native %d at %08x: %s", n, G(EIP), n == -2 ? "no compiled block" : tp_error());
             stopped = 1; return -1;
         }
         if (n) interrupt((uint32_t)n);
-        advance_blocks(tp_blocks());
+        advance_blocks(ran);
         if (!deterministic) {
             govern();
             realtime_events();
@@ -1404,19 +1426,9 @@ void tp_host_mouse(double fx, double fy, uint32_t buttons) {
     int x = clampi((int)(fx * 640.0), x0, x1), y = clampi((int)(fy * (video_mode == 0x101 ? 480.0 : 400.0)), y0, y1);
     push_mouse(x, y, buttons);
 }
-static double acc_x, acc_y;
-void tp_host_mouse_delta(double dx, double dy, uint32_t buttons) {
-    pthread_mutex_lock(&input_lock);
-    int bx = mq_head != mq_tail ? mouse_q[(mq_tail + 255) % 256].x : mouse.x;
-    int by = mq_head != mq_tail ? mouse_q[(mq_tail + 255) % 256].y : mouse.y;
-    pthread_mutex_unlock(&input_lock);
-    acc_x += dx * 2; acc_y += dy * 2;
-    int ix = (int)acc_x, iy = (int)acc_y; acc_x -= ix; acc_y -= iy;
-    push_mouse(clampi(bx + ix, mouse.rx0, mouse.rx1), clampi(by + iy, mouse.ry0, mouse.ry1), buttons);
-}
 void tp_host_mouse_pos(int *x, int *y) { *x = mouse.x; *y = mouse.y; }   /* the driver's 640x400 space */
 void tp_host_quit(void) { quit_requested = 1; }
-void tp_host_set_realtime(void) { deterministic = 0; rt_start = now_s(); timer_next = emu_now(); gov_t0 = 0; }
+void tp_host_set_realtime(void) { deterministic = 0; rt_start = now_s(); timer_next = emu_now(); gov_t0 = 0; port_val[0x21] = 0xb8; }   /* (the PIC as a real-time start sets it) */
 
 static void list_dir(const char *dir, const char *rel, void (*fn)(const char *, const char *, void *), void *ctx) {
     DIR *d = opendir(dir); if (!d) return;
