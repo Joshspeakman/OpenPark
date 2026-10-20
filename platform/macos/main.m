@@ -138,7 +138,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
     uint32_t *_clean; int _cleanW, _cleanH; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
     TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
-    BOOL _cornerGuard, _held; NSPoint _virt;   /* full screen: the pointer kept out of the corners (pointOf:) */
+    BOOL _cornerGuard, _held; NSPoint _virt; NSTimeInterval _letGoAt, _warpAt; CGFloat _warpDX, _warpDY;   /* full screen: the pointer kept out of the corners (pointOf:) */
     double _lastFx, _lastFy; uint8_t _keyDown[128]; BOOL _fastForward;   /* what the game was last told: releaseInput */
 }
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -385,8 +385,10 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
  * by the game's edge scrolling). There the Mac's pointer is detached from the mouse (CGAssociateMouseAndMouseCursor-
  * Position) and left where it was, hidden; the game is given the mouse's own place from its movements, corners
  * included, and its cursor is drawn by the view (tp_view_hw_cursor off). When it is let go (the menu bar's row, other
- * apps, leaving full screen) the Mac's pointer is put there, 6 points from any corner. The menu bar's row is left to
- * the Mac (its menus need the real pointer), as are the Visitor View and the tests. (The first version moved the
+ * apps, leaving full screen) the Mac's pointer is put there, 6 points from any corner. The menu bar's row is held
+ * too (letting go there, the top edge's scrolling, put the pointer back in the middle: events queued before the let-go
+ * carried the middle as their place, and the next hold started there), so in full screen the menu bar is reached
+ * from the keyboard; the Visitor View and the tests are left to the Mac. (The first version moved the
  * Mac's pointer with every event, and macOS ignores the mouse and trackpad for a quarter of a second after each such
  * move: the pointer barely moved in full screen.) */
 - (void)setCornerGuard:(BOOL)on { _cornerGuard = on; if (!on) [self releasePointer]; }   /* (let go when the app or window loses focus: releaseInput) */
@@ -406,7 +408,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
 - (BOOL)playing3DO { return _v3 != NULL; }
 - (void)releasePointer {
     if (!_held) return;
-    _held = NO;
+    _held = NO; _letGoAt = NSProcessInfo.processInfo.systemUptime;
     NSScreen *sc = self.window.screen;
     if (sc) {                                             /* (the Mac's pointer where the mouse is, off the corners) */
         NSRect s = sc.frame; const CGFloat k = 6; NSPoint c = _virt;
@@ -421,13 +423,15 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     NSScreen *sc = self.window.screen;
     static int test = -1; if (test < 0) test = getenv("DS_TEST") && !getenv("TP_CORNER_GUARD");   /* (TP_CORNER_GUARD=1: in tests too) */
     if (!_cornerGuard || !sc || test || !self.window.isKeyWindow || !NSApp.isActive || tp_walk_active() || _walkDrop) {
-        [self releasePointer]; return [self convertPoint:loc fromView:nil];
+        [self releasePointer];
+        if (e.timestamp < _letGoAt && sc) loc = [self.window convertPointFromScreen:_virt];   /* (queued while held) */
+        return [self convertPoint:loc fromView:nil];
     }
-    NSRect s = sc.frame; const CGFloat k = 6;
+    NSRect s = sc.frame;
     if (!_held) {
-        NSPoint g = [self.window convertPointToScreen:loc];
-        BOOL nearX = g.x < NSMinX(s) + k || g.x > NSMaxX(s) - 1 - k;
-        if (g.y >= NSMaxY(s) - 2 && !nearX) return [self convertPoint:loc fromView:nil];   /* (the menu bar's row) */
+        /* (an event from before the last let-go has the held pointer's place, the window's middle: where the mouse
+         * was is _virt) */
+        NSPoint g = e.timestamp < _letGoAt ? _virt : [self.window convertPointToScreen:loc];
         /* The Mac's pointer, hidden, to the middle of the window: clicks go to the window under it, and where the
          * mouse was can be outside it (the strip beside the notch above a window that keeps clear of it: every
          * click went there and the game took none). (Associated again right after the move: no quarter second of
@@ -436,18 +440,26 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
         CGWarpMouseCursorPosition(CGPointMake(NSMidX(wf), NSMaxY(NSScreen.screens[0].frame) - NSMidY(wf)));
         CGAssociateMouseAndMouseCursorPosition(true);
         _virt = g; _held = YES; CGAssociateMouseAndMouseCursorPosition(false);
+        _warpAt = NSProcessInfo.processInfo.systemUptime; _warpDX = NSMidX(wf) - g.x; _warpDY = g.y - NSMidY(wf);
+        fprintf(stderr, "mouse: held at %.0f,%.0f\n", g.x, g.y);
     } else {
         NSEventType t = e.type;
         if (t == NSEventTypeMouseMoved || t == NSEventTypeLeftMouseDragged || t == NSEventTypeRightMouseDragged || t == NSEventTypeOtherMouseDragged) {
-            _virt.x += e.deltaX; _virt.y -= e.deltaY;
+            CGFloat dx = e.deltaX, dy = e.deltaY;
+            /* The first move after the hold's warp can carry the warp's own jump (to the window's middle): left out. */
+            if (_warpAt && fabs(_warpDX) + fabs(_warpDY) > 16 && e.timestamp - _warpAt < 0.5 &&
+                fabs(dx - _warpDX) < 0.25 * fabs(_warpDX) + 24 && fabs(dy - _warpDY) < 0.25 * fabs(_warpDY) + 24) {
+                fprintf(stderr, "mouse: the hold's warp (%.0f,%.0f) left out of a move (%.0f,%.0f)\n", _warpDX, _warpDY, dx, dy);
+                dx -= _warpDX; dy -= _warpDY;
+            }
+            _warpAt = 0;
+            if (fabs(dx) + fabs(dy) > 300) fprintf(stderr, "mouse: a move of %.0f,%.0f in one event\n", dx, dy);
+            _virt.x += dx; _virt.y -= dy;
         }
     }
     _virt.x = fmin(fmax(_virt.x, NSMinX(s)), NSMaxX(s) - 1);
     _virt.y = fmin(fmax(_virt.y, NSMinY(s)), NSMaxY(s) - 1);
-    BOOL ex = _virt.x < NSMinX(s) + k || _virt.x > NSMaxX(s) - 1 - k;
-    NSPoint v = _virt;
-    if (_virt.y >= NSMaxY(s) - 1 && !ex) [self releasePointer];               /* (up into the menu bar's row) */
-    return [self convertPoint:[self.window convertPointFromScreen:v] fromView:nil];
+    return [self convertPoint:[self.window convertPointFromScreen:_virt] fromView:nil];
 }
 - (void)sendMouse:(NSEvent *)e {
     /* The Mac sends a plain move only while no button is down: a button still held here then lost its release (the
