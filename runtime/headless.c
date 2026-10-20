@@ -49,6 +49,7 @@ struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 #endif
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 static double hl_wide = 1;   /* the z step's widescreen factor (s steps compose at it) */
+#include "animation_trace.h"
 int main(int argc, char **argv) {
     struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
@@ -112,6 +113,7 @@ int main(int argc, char **argv) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double el = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9;
             if (r || el >= seconds) break;
+            tp_animation_trace_sample(el);
             if (tp_walk_active()) {                     /* the walker moves on the app's side: here, every step */
                 int held = el < walk_until;
                 tp_walk_input(held ? walk_in[0] : 0, held ? walk_in[1] : 0, held ? walk_in[2] : 0, 0, 0, 0, walk_last ? el - walk_last : 0.02);
@@ -174,6 +176,16 @@ int main(int argc, char **argv) {
                     int ok = tp_walk_render(img, 960, 600);
                     char p[1024], st[256]; snprintf(p, sizeof p, "%s/%s.png", out, name);
                     int tp_host_png_rgba(const char *, const uint32_t *, int, int); if (ok) tp_host_png_rgba(p, img, 960, 600);
+                    /* Same simulation snapshot/camera; original mode disables
+                     * both authored models and experimental shells for A/B. */
+                    const char *art=getenv("TP_ART_MODE");
+                    if(ok && getenv("TP_WALK_CAPTURE_COMPARE") && art && !strcmp(art,"reimagined")) {
+                        setenv("TP_ART_MODE","original",1);
+                        int original=tp_walk_render(img,960,600);
+                        setenv("TP_ART_MODE","reimagined",1);
+                        snprintf(p,sizeof p,"%s/%s-original.png",out,name);
+                        if(original)tp_host_png_rgba(p,img,960,600);
+                    }
                     tp_walk_status(st, sizeof st); double wx, wy; tp_walk_position(&wx, &wy);
                     int type = -1; char ride[64] = ""; int on = tp_walk_ride(&type, ride, sizeof ride);
                     fprintf(stderr, "walk shot %s drawn=%d at %.2f,%.2f riding=%d type %d '%s' | %s\n", p, ok, wx, wy, on, type, ride, st);

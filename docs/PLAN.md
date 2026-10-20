@@ -5,6 +5,52 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, Reimagined animation mapping (Codex,
+`codex/reimagined-animation-study`, separate worktree/install): the user accepted
+the sharper concept direction and requested a full animation map plus a running
+review. `tools/visitor_animation_catalog.py` inventories 81 definition/guest
+records (29 rides, 17 shops, 19 scenery, eight staff, eight guest variants),
+694 primary and 686 secondary animation slots, their linked frames/elements,
+rider markers, and all 112 DATA resources. The 15 first-person FLIC ride videos
+are identified separately. Every asset has pending motion acceptance checks;
+structural enumeration does not prove the semantics or timing of every state.
+Primary native-blitter export: 5,704 records, 3,918 nonempty and 1,786 empty.
+Secondary-family images and complete state naming remain open.
+
+The first Reimagined runtime slice is two guest rigs: 16 walking frame keys and
+one shared-mesh seated pose each. Pose lookup follows the actual source frame;
+there is no independent animation clock/interpolation. Missing assets/poses,
+non-walking states, carried items and selection markers retain complete original
+composites. The generic rig format also carries seat transforms; seat ordering
+mirrors the native capacity/phase algorithm and refuses incomplete rider models.
+No Reimagined ride rigs or in-game boarding/seating validation are claimed yet.
+The new meshes are technical prototypes, not exact finished translations of the
+accepted imagegen art. Stride, proportions, posture and fallback transitions
+need further visual work. Overhead replacement and launcher selection remain open.
+
+Evidence: `work/reimagined/motion-review/index.html` links the searchable map,
+136 sanitized pose/angle renders, and 120 paired PNGs from a bounded 37-second
+native run (six seconds at a requested 20 captures/s). Each pair has the same
+simulation snapshot/camera with Reimagined/original art. All 120 pairs differ;
+74 Reimagined images are unique. A 120-frame comparison GIF is verified. The
+50 Hz observer recorded 104,775 changed records across 43 raw/asset groups;
+sampled timing is evidence, not a universal playback rate. All walk/view tests,
+17,808 view checks, mesh/model/rig tests under ASan/UBSan, three synthetic graph
+tests and review JavaScript syntax checks pass. The first capture exposed
+speckled depth fighting between overlapping original sprite cards. A tiny
+relative depth tolerance now preserves stable ownership for coplanar surfaces;
+a regression test checks different triangulations one float step apart while
+still allowing truly nearer surfaces. The current capture includes this fix.
+Repeated capture frames mean this recording is not a frame-pacing benchmark.
+
+Installed **OpenPark Reimagined Study.app**, identity
+`com.joshspeakman.openpark.reimaginedstudy`, own `work/reimagined/profile` with
+copied saves; build/signature checks pass. Faithful Study and the user's Nightly
+checkout/install are separate. The headed attempt `headed-cg1qnczz` exited -6
+in 0.11 s before a window/capture, so headed quality remains unverified. The
+captured running sequence is explicitly headless, not a substitute headed pass.
+Details: `docs/reports/2026-10-19-reimagined-animation.md`.
+
 2026-10-19, Reimagined visual correction: the user rejected the first concepts
 as too soft and round. Require angular chunky forms, the original exaggerated
 silhouettes and proportions, and original character identities. Walking and

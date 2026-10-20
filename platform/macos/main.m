@@ -903,6 +903,8 @@ static void *game_thread(void *arg) {
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     NSNumber *studyMapSize = [NSBundle.mainBundle objectForInfoDictionaryKey:@"TPStudyMapSize"] ?: @64;
+    NSString *studyArtMode = [NSBundle.mainBundle objectForInfoDictionaryKey:@"TPStudyArtMode"];
+    if ([studyArtMode isEqualToString:@"reimagined"]) setenv("TP_ART_MODE", "reimagined", 1);
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"RideVideos": @1, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
                           @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": studyMapSize, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
                           @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];

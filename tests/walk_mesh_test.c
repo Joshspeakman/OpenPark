@@ -37,6 +37,14 @@ int main(void) {
         (WMVertex){.4f,-.1f,1,15,0},(WMVertex){0,.4f,1,8,15});
     CHECK(count(palette[21])>0);
     for(int i=0;i<128*96;i++)if(pixels[i])CHECK(isfinite(depth[i]) && depth[i]>=.079f);
-    puts("pixel mesh: palette, depth order, transparency, animation, side volume, near clipping passed");
+    /* Overlapping cards with different triangulation keep stable ownership,
+     * even when equivalent depths round one float step apart. */
+    clear();WMVertex a={-1,-1,4,0,0},b={1,-1,4,0,0},c={1,1,4,0,0},d={-1,1,4,0,0};
+    wm_quad(&r,a,b,c,d);uint32_t before[128*96];memcpy(before,pixels,sizeof before);
+    for(int i=0;i<256;i++)texture[i]=13;
+    a.z=b.z=c.z=d.z=nextafterf(4,0);wm_triangle(&r,a,b,d);wm_triangle(&r,b,c,d);
+    for(int i=0;i<128*96;i++)if(before[i])CHECK(pixels[i]==before[i]);
+    a.z=b.z=c.z=d.z=3.9f;wm_quad(&r,a,b,c,d);CHECK(pixels[48*128+64]==palette[13]);
+    puts("pixel mesh: palette, depth order, coplanar stability, transparency, animation, side volume, near clipping passed");
     return 0;
 }

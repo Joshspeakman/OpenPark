@@ -18,18 +18,26 @@ import time
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    app = Path.home() / "Applications/OpenPark Visitor 3D Study.app"
+    reimagined = sys.argv[1:] == ['--reimagined']
+    if sys.argv[1:] and not reimagined:
+        raise SystemExit('usage: check_visitor_headed.py [--reimagined]')
+    name = 'OpenPark Reimagined Study' if reimagined else 'OpenPark Visitor 3D Study'
+    identity = 'com.joshspeakman.openpark.reimaginedstudy' if reimagined else 'com.joshspeakman.openpark.visitor3dstudy'
+    app = Path.home() / f"Applications/{name}.app"
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
-    if info.get("CFBundleIdentifier") != "com.joshspeakman.openpark.visitor3dstudy":
+    if info.get("CFBundleIdentifier") != identity:
         raise RuntimeError("Refusing to test a different app")
-    source = root / "work/visitor-3d/profile"
-    out = Path(tempfile.mkdtemp(prefix="headed-", dir=root / "work/visitor-3d"))
+    study = root / ('work/reimagined' if reimagined else 'work/visitor-3d')
+    source = study / 'profile'
+    out = Path(tempfile.mkdtemp(prefix="headed-", dir=study))
     profile = out / "profile"
     profile.mkdir()
     (profile / "game").symlink_to(source / "game", target_is_directory=True)
     shutil.copytree(source / "saves", profile / "saves")
     if (source / "visitor3d").exists():
         shutil.copytree(source / "visitor3d", profile / "visitor3d")
+    if (source / 'reimagined').exists():
+        shutil.copytree(source / 'reimagined', profile / 'reimagined')
     control = out / "control.txt"
     control.write_text("show\nsize 960 600\nsleep 5\nkey 1c0d\nsleep 5\n"
                        "key 1454\nsleep 0.15\nkey 1245\nsleep 0.15\n"

@@ -45,6 +45,7 @@
 #include <time.h>
 #include "walk_mesh.h"
 #include "walk_model.h"
+#include "walk_rig.h"
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
@@ -108,7 +109,8 @@ static int geom(Geom *g) {
 #define POOL (12u << 20)            /* source pixels (16-bit: 0xffff transparent), including large parks */
 #define MAXCONT 256
 #define SHR 8                       /* shadow samples per cell */
-typedef struct { float x, y, r; uint16_t w, h, ax, ay; uint32_t off; int16_t idx, type; uint8_t cls, big, shape; } Card;
+typedef struct { float x, y, r; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
+    uint8_t cls, big, shape, rig_ok, seats[40]; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
@@ -244,9 +246,36 @@ static void finish(Build *B) {
         double ax = fx - x0; c->ax = (uint16_t)(ax < 0 ? 0 : ax > w ? w : ax); c->ay = (uint16_t)(fy - y0);
         c->off = s->npix; c->idx = (int16_t)B->idx; c->cls = (uint8_t)(B->idx < 0 ? 0xff : B->cls); c->big = (uint8_t)big;
         c->type = -1; c->shape = WM_SMALL;
+        c->frame=0;c->rig_ok=0;memset(c->seats,255,sizeof c->seats);
+        if(t) {
+            uint32_t at=(uint32_t)(t-M);c->frame=(uint16_t)r16(at+10);
+            if(B->cls==2) {
+                c->type=t[0x59];
+                /* First rig slice: ordinary walking. Items, markers and other
+                 * activity states retain their complete original art. */
+                c->rig_ok=t[12]==8 && !r16(at+0x52) && !t[0xb9] &&
+                    !((M[0x1b14cc]&7) && (t[5]&0x80)) && B->idx!=(uint16_t)r16(0x1d6678);
+            }
+        }
         if (t && B->cls == 4) {
             int type = (uint16_t)r16((uint32_t)(t-M)+0x16)/0xc8;
             if (type<29) c->type=(int16_t)type;
+            if(type<29) {
+                uint32_t at=(uint32_t)(t-M),rec=0x1cced0+(uint32_t)type*200;
+                int cap=(uint16_t)r16(rec+0xa6),kind=M[rec+0xb3],n=0;
+                uint8_t guests[36];uint32_t pool=r32(THINGS),last=r32(THING_LAST);
+                int next=(uint16_t)r16(at+0x47),valid=1;
+                while(next && n<36) {
+                    uint64_t p=(uint64_t)pool+(unsigned)next*200;
+                    if(next>=NTH || p>last || p+200>(64u<<20) || M[p+4]!=2){valid=0;break;}
+                    guests[n++]=M[p+0x59];next=(uint16_t)r16((uint32_t)p+0x47);
+                }
+                if(next)valid=0;
+                if(kind==9 && !r16(at+0x32))valid=0;
+                c->rig_ok=valid && (t[12]==2 || t[12]==4 || t[12]==6) &&
+                    (uint16_t)r16(at+0x2e)<M[rec+0xa8] && !r16(at+0x8e) &&
+                    rm_seat_order(guests,n,cap,kind,r32(at+0x20),c->seats);
+            }
             c->shape=WM_ROUND;
             if(type==0 || type==1 || type==5 || type==6 || type==14 || (type>=22 && type<=25)) c->shape=WM_BOX;
             if(type==2 || type==3 || type==10 || type==11 || type==12 || type==15 || type==17 || type==19 || type==21 || type==26 || type==28) c->shape=WM_OPEN;
@@ -516,6 +545,7 @@ int tp_walk_start(double wx, double wy) {
     W.yaw = ART_YAW; W.mode = getenv("TP_WALK_DIORAMA") ? MODE_DIORAMA : MODE_STREET;
     W.mesh = !getenv("TP_WALK_MESH") || atoi(getenv("TP_WALK_MESH")) != 0;
     wm_models_reset();
+    rm_reset();
     W.hscale = getenv("TP_WALK_SCALE") ? atof(getenv("TP_WALK_SCALE")) : 1; if (W.hscale < 0.25 || W.hscale > 4) W.hscale = 1;
     snaps[0].valid = snaps[1].valid = 0; last_snap = 0;     /* (front stays: the emulation thread may be swapping) */
     pthread_mutex_unlock(&lock);
@@ -672,7 +702,8 @@ int tp_walk_status(char *buf, int n) {
     char what[96];
     if (W.follow && s && s->valid && s->f_cont) snprintf(what, sizeof what, "On %s with a visitor", s->f_name[0] ? s->f_name : "a ride");
     else if (W.follow) snprintf(what, sizeof what, "Following a visitor");
-    else snprintf(what, sizeof what, W.mesh ? "Authored 3D preview" : "Walking (original cards)");
+    else snprintf(what, sizeof what, "%s", W.mesh ?
+        (getenv("TP_ART_MODE") && !strcmp(getenv("TP_ART_MODE"),"reimagined") ? "Reimagined animation study" : "Authored 3D preview") : "Walking (original cards)");
     if (now() < note_until) snprintf(buf, (size_t)n, "%s   ·   %s", what, note);
     else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  R ride  V view  P compare  Esc leave", what, (int)W.cam_x, (int)W.cam_y);
     pthread_mutex_unlock(&lock);
@@ -779,7 +810,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
         WMRender mr={.pixels=out,.depth=depth,.w=ow,.h=oh,.cx=cx,.cy=cy,.cz=cz,
             .fx=fx,.fy=fy,.fz=fz,.rx=rx,.ry=ry,.ux=ux,.uy=uy,.uz=uz,.focal=f,.palette=s->pal};
         float kx=(float)(W.hscale/g->tws),ky=(float)(W.hscale*g->aspect/g->tws);
-        int hide=W.mode==MODE_STREET ? W.follow:0, rendered=0;
+        int hide=W.mode==MODE_STREET ? W.follow:0, rendered=0, rigs_drawn=0;
         double began=now();
         for (int i=0;i<s->ncards;i++) {
             const Card *c=&s->cards[i]; if (hide && c->idx==hide) continue;
@@ -787,11 +818,31 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             float forward=dx*cos(yaw)+dy*sin(yaw), lateral=dx*rx+dy*ry;
             if (dist-radius>FOG1 || forward+radius<.08f || fabsf(lateral)>fmaxf(0,forward)*tan(fov/2)+radius) continue;
             mr.texture=s->pix+c->off; mr.tw=c->w; mr.th=c->h;
-            const WMModel *model=wm_model_find(c->cls,c->type);
+            const char *art=getenv("TP_ART_MODE");int reimagined=art && !strcmp(art,"reimagined");
+            int original=art && !strcmp(art,"original");
+            const RMRig *rig=reimagined && c->rig_ok ? rm_find(c->cls,c->type):NULL;
+            const RMPose *pose=rig?rm_pose(rig,c->frame):NULL;
+            if(pose) {
+                const RMRig *guests[40]={0};const RMPose *seated[40]={0};int ok=1;
+                for(int seat=0;seat<40;seat++)if(c->seats[seat]!=255) {
+                    if(seat>=rig->ns){ok=0;break;}
+                    guests[seat]=rm_find(2,c->seats[seat]);
+                    seated[seat]=guests[seat]?rm_pose(guests[seat],65535):NULL;
+                    if(!seated[seat]){ok=0;break;}
+                }
+                if(ok) {
+                    rm_draw(&mr,rig,pose,c->x,c->y,(float)W.hscale,NULL);
+                    rigs_drawn++;
+                    for(int seat=0;seat<rig->ns;seat++)if(guests[seat])
+                        rm_draw(&mr,guests[seat],seated[seat],c->x,c->y,(float)W.hscale,pose->matrices+(rig->nb+seat)*12);
+                    rendered++;continue;
+                }
+            }
+            const WMModel *model=(reimagined||original)?NULL:wm_model_find(c->cls,c->type);
             if(model && wm_model_draw(&mr,model,c->x,c->y,(float)W.hscale)) {
                 rendered++;continue;
             }
-            if(!getenv("TP_WALK_SHELL_STUDY")) {
+            if(reimagined || original || !getenv("TP_WALK_SHELL_STUDY")) {
                 /* Unmodeled assets retain their original presentation. A
                  * failed generic reconstruction is not a substitute model. */
                 WMShell card={.x=c->x,.y=c->y,.kx=kx,.ky=ky,.ax=c->ax,.ay=c->ay,
@@ -818,8 +869,8 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
         }
         if (getenv("TP_WALK_MESH_LOG")) {
             static double last; if (now()-last>1) { last=now();
-                fprintf(stderr,"pixel mesh: %d objects, %u triangles, %u fragments, %.2f ms, %dx%d\n",
-                    rendered,mr.triangles,mr.fragments,(now()-began)*1000,ow,oh); }
+                fprintf(stderr,"pixel mesh: %d objects (%d Reimagined rigs), %u triangles, %u fragments, %.2f ms, %dx%d\n",
+                    rendered,rigs_drawn,mr.triangles,mr.fragments,(now()-began)*1000,ow,oh); }
         }
         pthread_mutex_unlock(&lock); return 1;
     }

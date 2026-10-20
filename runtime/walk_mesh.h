@@ -54,7 +54,11 @@ static void wm_triangle_inner(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
         float iz=wa*ia+wb*ib+wc*ic;
         if (!(iz>0)) continue;
         float z=1/iz; size_t at=(size_t)y*r->w+x;
-        if (z>=r->depth[at]) continue;
+        /* Coplanar cards can share a guest position. Barycentric roundoff must
+         * not alternate their ownership pixel by pixel; keep the first surface
+         * within a tiny relative depth tolerance. Genuine nearer surfaces win. */
+        float old_depth=r->depth[at];
+        if (z>=old_depth-fmaxf(1e-6f,old_depth*1e-6f)) continue;
         int u=(int)floorf((wa*a.u+wb*b.u+wc*c.u)*z);
         int v=(int)floorf((wa*a.v+wb*b.v+wc*c.v)*z);
         if (u<0) u=0; if (u>=r->tw) u=r->tw-1;

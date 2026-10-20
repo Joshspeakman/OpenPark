@@ -7,6 +7,16 @@ ROOT=$PWD
 CACHE="$ROOT/work/visitor-3d/native"
 DATA="$ROOT/work/visitor-3d/profile"
 NAME="OpenPark Visitor 3D Study"
+ID="com.joshspeakman.openpark.visitor3dstudy"
+MODE="faithful"
+if [[ ${1:-} == --reimagined ]]; then
+  DATA="$ROOT/work/reimagined/profile"
+  NAME="OpenPark Reimagined Study"
+  ID="com.joshspeakman.openpark.reimaginedstudy"
+  MODE="reimagined"
+elif [[ $# != 0 ]]; then
+  echo 'usage: build_visitor_study.sh [--reimagined]' >&2; exit 2
+fi
 APP="$ROOT/build/visitor-study/$NAME.app"
 DEST="$HOME/Applications/$NAME.app"
 for f in main.a intro.a MAIN.TPIMG INTRO.TPIMG; do
@@ -24,15 +34,15 @@ clang -arch arm64 -O2 -fobjc-arc -Wall -Wno-unused-function \
   -framework UniformTypeIdentifiers -framework ImageIO -framework GameController -framework IOSurface -lz \
   -o "$APP/Contents/MacOS/ThemePark"
 cp "$CACHE/MAIN.TPIMG" "$CACHE/INTRO.TPIMG" "$APP/Contents/Resources/"
-python3 - "$APP" "$DATA" <<'PY'
+python3 - "$APP" "$DATA" "$NAME" "$ID" "$MODE" <<'PY'
 import plistlib,sys
 from pathlib import Path
-app,data=map(Path,sys.argv[1:])
-info=dict(CFBundleName='OpenPark Visitor 3D Study',CFBundleDisplayName='OpenPark Visitor 3D Study',
- CFBundleIdentifier='com.joshspeakman.openpark.visitor3dstudy',CFBundleExecutable='ThemePark',
+app,data=map(Path,sys.argv[1:3]);name,identity,mode=sys.argv[3:]
+info=dict(CFBundleName=name,CFBundleDisplayName=name,
+ CFBundleIdentifier=identity,CFBundleExecutable='ThemePark',
  CFBundlePackageType='APPL',CFBundleShortVersionString='0.2',CFBundleVersion='2',
  LSMinimumSystemVersion='13.0',NSHighResolutionCapable=True,
- LSApplicationCategoryType='public.app-category.simulation-games',TPDataRoot=str(data),TPStudyMapSize=128)
+ LSApplicationCategoryType='public.app-category.simulation-games',TPDataRoot=str(data),TPStudyMapSize=128,TPStudyArtMode=mode)
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(info))
 PY
 codesign --force --sign - "$APP"
@@ -40,8 +50,8 @@ codesign --verify --deep --strict "$APP"
 if [[ ${TP_STUDY_NO_INSTALL:-0} != 1 ]]; then
   if [[ -e "$DEST" ]]; then
     # Only this study's identity may be replaced; never Nightly or another app.
-    [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$DEST/Contents/Info.plist") == com.joshspeakman.openpark.visitor3dstudy ]]
-    mv "$DEST" "$HOME/.Trash/OpenPark-Visitor-Study-$(date +%s).app"
+    [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$DEST/Contents/Info.plist") == "$ID" ]]
+    mv "$DEST" "$HOME/.Trash/$NAME-$(date +%s).app"
   fi
   ditto "$APP" "$DEST"
   codesign --verify --deep --strict "$DEST"
