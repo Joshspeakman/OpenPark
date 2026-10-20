@@ -182,6 +182,9 @@ long (*tp_extras_get)(const char *key);              /* (main.m: the app's setti
  * 3DO video instead when it has one for the ride and the setting asks for it (main.m); it returns once the video
  * has finished (the game waits, as for its own), 1 if it played one. */
 int (*tp_ride_video)(int ride);
+/* The game is playing its own video (a ride's, data/rideani.NNN, or the win screen's): from the player's call to its
+ * return (a hook at the return address, the slot after qol.c's). main.m shows it 4:3 at full height, black beside. */
+volatile int tp_game_video; static uint32_t video_ret;
 void (*tp_extras_set)(const char *key, long value);
 double (*tp_extras_getf)(const char *key);
 void (*tp_extras_setf)(const char *key, double value);
@@ -290,6 +293,7 @@ void tp_qol_hook(int nested) {
     uint8_t *m = tp_host_memory();
     uint32_t pc = tp_get(9), sp = tp_get(4);
     int k = tp_hook_which - QOL0;
+    if (k == NHOOK) { if (pc == video_ret) { tp_game_video = 0; tp_hook_pcs[QOL0 + NHOOK] = 0xffffffffu; tp_hooks_changed(); } return; }
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
     if (k == H_START_SAMPLE) {                        /* (the HMI driver starts a sample: cdecl (driver, record, selector), volume at +0x10) */
@@ -309,6 +313,7 @@ void tp_qol_hook(int nested) {
         if (t && mode == 1) { mode = 2; ride = atoi(t); }
         if (log_sounds) fprintf(stderr, "video: player(%d, %d)\n", mode, ride);
         if (mode == 2 && tp_ride_video && tp_ride_video(ride)) skip_call();
+        else if (mode == 1 || mode == 2) { video_ret = r32(m, sp); tp_hook_pcs[QOL0 + NHOOK] = video_ret; tp_hooks_changed(); tp_game_video = 1; }
         return;
     }
     if (k == H_OPTIONS) {                             /* (an EXTRAS item: its word) */

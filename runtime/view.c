@@ -189,6 +189,8 @@ typedef struct { double fx, fy; uint32_t buttons; } Ev;
 static Ev evq[256]; static int evn;
 static int restore, restore_cx, restore_cy;       /* camera for the game's own view after zooming */
 static uint8_t pub_canvas[MAX_CANVAS];
+static volatile double pub_ui_share;                     /* how much of the park's area the interface covered in the last frame */
+double tp_view_ui_share(void) { return pub_ui_share; }    /* (main.m: a clean park picture to keep behind the game's windows) */
 static uint16_t pub_overlay[MAX_SCREEN], prev_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
 /* Panel size: see band_map. */
 static volatile double ui_scale = 1;
@@ -1179,12 +1181,14 @@ void tp_view_hook(void) {
                 for (int y = 150; y < 170; y++) for (int x = 60; x < 310; x++) { int i = y * SW + x; if (src_of[bb[i]] >= 0) { c++; h[src_of[bb[i]]]++; hw[world_only[i]]++; } }
                 if (c && k++ < 20) { fprintf(stderr, "text: %d blended px; src:", c); for (int v = 0; v < 256; v++) if (h[v]) fprintf(stderr, " %02x x%d", v, h[v]);
                     fprintf(stderr, "; under:"); for (int v = 0; v < 256; v++) if (hw[v] > 2) fprintf(stderr, " %02x x%d", v, hw[v]); fprintf(stderr, "\n"); } }
+            int ui_px = 0;
             for (int i = 0; i < SW * WORLD_H; i++) {
-                uint8_t v = bb[i];
+                uint8_t v = bb[i]; ui_px += v != SENTINEL;
                 if (v == SENTINEL) pub_overlay[i] = 0xffff;
                 else if (src_of[v] >= 0 && r32(0x1ba2f8)) pub_overlay[i] = 0xfffe;     /* (blended: settled below) */
                 else pub_overlay[i] = v;
             }
+            pub_ui_share = (double)ui_px / (SW * WORLD_H);
             /* The two colours a blend over the marker gives (0xfffe above) are also ordinary interface colours: a
              * game window is full of them. Each patch of them is settled by what it touches: the bubble's white
              * (the advisor's text: darkened over the white, as in the game), other interface (the game's own
@@ -1345,6 +1349,7 @@ void tp_view_hook(void) {
  * band above it (BAND_H screen rows), drawn k times larger, anchored at the bottom middle of the view;
  * pointer events in it are mapped back. */
 void tp_view_set_ui_scale(double k) { ui_scale = k < 0.5 ? 0.5 : k > 3 ? 3 : k; }
+double tp_view_ui_scale(void) { return ui_scale; }
 /* A layout point in the enlarged band: its point in the screen (sx, sy). 0 if outside it. */
 static int band_map(double lx, double ly, double lw, int sw, int sh, double k, double *sx, double *sy) {
     if (fabs(k - 1) <= 0.001) return 0;                  /* (smaller as well as larger: the rest of its place shows park) */

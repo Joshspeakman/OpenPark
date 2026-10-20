@@ -13,6 +13,25 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, the player's requests: videos 4:3 full screen with black borders; the panel and menus at the set size.
+- The game's full-screen windows in the wide view (the face's screens, research, bank, the ride and shop windows and
+  lists, staff negotiation) were drawn at the full height, the park at the sides, whatever Panel Size was: at 0.5
+  the panel doubled when one opened. Now they are drawn at the panel's size (at most the full height), anchored at
+  the bottom middle as the panel is in the park (main.m columnRect, menuScale), so the panel stays put; pointer
+  events map into that rectangle (sendMouse, pointerAt: both axes now). Around them, the park as it was before the
+  window came: the app keeps a copy of the park picture a few times a second while the interface covers less than
+  half of it (view.c tp_view_ui_share); the last live frame had the window over the park at full size. Checked on a
+  TESTPARK copy at 0.5: the face screen, research (the bulb), the ride list and window, all at the panel's size with
+  the panel in place, clicks landing. Panel Size above 1: menus stay at the full height (larger cannot fit).
+  In-park game windows over the band (pub_straddle) still show the panel at its own size: not seen in this check.
+- The game's own videos (a ride's rideani, the win screen's): qol.c marks them (tp_game_video, from the player's call
+  at 0x15c04f to a hook on its return address, slot QOL0 + NHOOK); main.m draws them 4:3 at the full height, black
+  beside. The 3DO ride videos: a 4:3 picture at the full height inside the black layer (was the stream's own aspect).
+  Checked: the drawing (TP_DEV_GAME_VIDEO=1 draws any game window as the video). Not checked in play: the call and
+  return hook (scripted clicks did not reach the ride window's view button) and a 3DO video.
+- Research confirmed as the Sandbox rule: TESTPARK copy (level 0) shows THIS FEATURE NOT AVAILABLE in the research
+  screen; with the level byte poked to 1 (Sim) the same screen opens without it.
+
 2026-10-19, the player's correction: the bumps at the first weather and while building fast are frame-rate drops,
 not sound. Cause found: a park pass longer than 0.1 s ended the pacing (frame_paced: a release in the last 0.1 s)
 and the instruction governor held the rest of the pass to the Speed setting's rate. On a copy of the player's park
