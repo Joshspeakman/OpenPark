@@ -6,7 +6,8 @@
  * the shop substitution table; 23/24 are the observed identity-zero-only
  * original standing/raised-arm parts outside that table.
  * 65440..65443 identify the native vehicle's deliberately omitted sprite-31
- * marker (one key per flip); these are only valid when invisible.
+ * marker (one key per flip); these require native visible=0. They still
+ * identify an occupied 3D seat, whose authored pose must exist.
  * A rig authors the posture in its seat's local space. The ride's seat matrix
  * supplies position/orientation. Mirrored states have explicit pose keys.
  */

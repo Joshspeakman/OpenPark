@@ -104,6 +104,19 @@ static const RMPose*rm_pose(const RMRig*r,unsigned frame){int lo=0,hi=r->np;
     while(lo<hi){int mid=lo+(hi-lo)/2;if(r->p[mid].frame<frame)lo=mid+1;else hi=mid;}
     return lo<r->np&&r->p[lo].frame==frame?&r->p[lo]:NULL;
 }
+/* Native visibility describes one original sprite projection, not whether
+ * the actual passenger exists in 3D. Every occupied seat needs its exact pose;
+ * authored vehicle surfaces provide occlusion from the current viewpoint. */
+static int rm_resolve_riders(const RMRig*ride,const uint8_t expected[40],const TPRMRider actual[40],
+                             const RMRig*guests[40],const RMPose*poses[40]){
+    memset(guests,0,40*sizeof*guests);memset(poses,0,40*sizeof*poses);
+    if(!ride||!tp_remaster_riders_valid(ride->ns,expected,actual))return 0;
+    for(int i=0;i<ride->ns;i++)if(expected[i]!=255){
+        guests[i]=rm_find(2,expected[i]);poses[i]=guests[i]?rm_pose(guests[i],actual[i].pose):NULL;
+        if(!poses[i])return 0;
+    }
+    return 1;
+}
 static int rm_vehicle_transform(const TPRMVehicle*v,const RMRig*r,const RMPose*p,float*out){
     const RMMotionBody*b=rm_motion_body((unsigned)r->cls,(unsigned)r->type);
     const RMRoute*route=rm_motion_route(v->family,v->shape);

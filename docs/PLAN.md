@@ -5,6 +5,30 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, source-hidden occupants and customer clearance (Codex, isolated
+remaster branch): Reimagined now resolves every occupied attachment's exact
+pose, even when the source sprite is blank. Source visibility remains metadata;
+3D surfaces provide occlusion. This supersedes the earlier candidate decision
+to omit these occupied states. Private character rigs add 37 explicit poses:
+eight Monorail hidden-seat postures, one missing neutral bounce and 28 missing
+shop gestures. Existing geometry and every previous pose remain verbatim.
+
+The five midway shops' customer anchors now sit outside their authored counters,
+with at least .025 world-unit clearance for the checked body/head/leg surfaces
+in all 1,640 mapped customer cases. Jump heights and shop geometry remain
+unchanged. Hands/props and exact action contact still need refinement; clearance
+is not proof of complete visual quality or animation fidelity.
+
+Nine native sanitizer checks, 21 Python tests, both walk modes, 17,808 view
+checks and compile/signature pass. Evidence includes 148 new-pose inspections,
+1,248 occupied-vehicle captures, 55 castle-state views and 1,640 shop-binding
+captures. After the counter placement correction, 56 reverse/orthographic
+views and a front view were inspected/captured separately; earlier shop images
+are retained as pre-correction evidence. All 112 source hashes are unchanged.
+No game launch/install or accepted artwork this turn; full remaster and headed
+acceptance remain unfinished. Details:
+`docs/reports/2026-10-20-remaster-occupied-occlusion.md`.
+
 2026-10-20, actual-seat ride-along camera (Codex, isolated remaster branch):
 ordinary car snapshots retain guest entity IDs as well as appearance variants.
 Exact native seat occurrences correct the first-car/shared-chain follow mapping.

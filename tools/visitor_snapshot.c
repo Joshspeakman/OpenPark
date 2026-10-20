@@ -269,10 +269,7 @@ int main(int argc,char**argv){
         const RMPose*pose=rig?rm_pose(rig,c->frame):NULL;
         if(!c->ncomponents && (!pose || !tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders)))return 4;
         const RMRig*guests[40]={0};const RMPose*poses[40]={0};
-        for(int i=0;i<40;i++)if(c->seats[i]!=255 && c->rig_riders[i].visible){
-            guests[i]=rm_find(2,c->seats[i]);poses[i]=guests[i]?rm_pose(guests[i],c->rig_riders[i].pose):NULL;
-            if(!poses[i])return 4;
-        }
+        if(!c->ncomponents&&!rm_resolve_riders(rig,c->seats,c->rig_riders,guests,poses))return 4;
         uint32_t*p=malloc(640*640*4);float*depth=malloc(640*640*sizeof*depth);
         if(!p||!depth){free(p);free(depth);return 4;}
         for(int i=0;i<640*640;i++){p[i]=0xff332b24;depth[i]=FLT_MAX;}

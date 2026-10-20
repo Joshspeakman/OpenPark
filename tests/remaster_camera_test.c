@@ -58,6 +58,21 @@ int main(void){
     rm_neye=0;CHECK(!vehicle_eye(s,10,1,p,f));rm_neye=1;
     rm_eyes[0].bone=1;CHECK(!vehicle_eye(s,10,1,p,f));rm_eyes[0].bone=0;
     c->rig_riders[1].pose=65027;CHECK(!vehicle_eye(s,10,1,p,f));c->rig_riders[1].pose=65026;
+    /* Invisible in the original projection still means an occupied 3D
+     * seat. Both the rider renderer and first-person camera require its pose. */
+    const RMRig*occupants[40];const RMPose*postures[40];
+    for(int j=0;j<2;j++){c->rig_riders[j].visible=0;c->rig_riders[j].pose=65440;}
+    CHECK(!rm_resolve_riders(&rm_cache[0],c->seats,c->rig_riders,occupants,postures));
+    CHECK(!vehicle_eye(s,10,1,p,f));
+    rm_cache[1].p[0].frame=65440;
+    CHECK(rm_resolve_riders(&rm_cache[0],c->seats,c->rig_riders,occupants,postures));
+    CHECK(occupants[0]==&rm_cache[1]&&occupants[1]==&rm_cache[1]);
+    CHECK(postures[0]&&postures[1]&&postures[0]->frame==65440);
+    CHECK(vehicle_eye(s,10,1,p,f)&&vehicle_eye(s,11,1,p,f));
+    c->rig_riders[0].visible=1;
+    CHECK(!rm_resolve_riders(&rm_cache[0],c->seats,c->rig_riders,occupants,postures));
+    for(int j=0;j<2;j++){c->rig_riders[j].visible=1;c->rig_riders[j].pose=65026;}
+    rm_cache[1].p[0].frame=65026;
     memset(rm_cache[1].matrices,0,12*sizeof(float));CHECK(!vehicle_eye(s,10,1,p,f));
     memcpy(rm_cache[1].matrices,identity,sizeof identity);rm_cache[1].matrices[11]=.1f;
     /* Uphill travel rotates the eye and gaze with the car, even stationary. */

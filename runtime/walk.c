@@ -948,12 +948,9 @@ static int vehicle_eye(const Snap*s,int guest,float scale,float*position,float*f
     }
     if(!c)return 0;
     const RMRig*ride=rm_find_frame(c->cls,c->frame);const RMPose*pose=ride?rm_pose(ride,c->frame):NULL;
-    if(!pose||!tp_remaster_riders_valid(ride->ns,c->seats,c->rig_riders))return 0;
-    const RMRig*person=NULL;const RMPose*seated=NULL;
-    for(int j=0;j<ride->ns;j++)if(c->seats[j]!=255&&(c->rig_riders[j].visible||j==seat)){
-        const RMRig*r=rm_find(2,c->seats[j]);const RMPose*p=r?rm_pose(r,c->rig_riders[j].pose):NULL;
-        if(!p)return 0;if(j==seat){person=r;seated=p;}
-    }
+    const RMRig*guests[40];const RMPose*poses[40];
+    if(!pose||!rm_resolve_riders(ride,c->seats,c->rig_riders,guests,poses))return 0;
+    const RMRig*person=guests[seat];const RMPose*seated=poses[seat];
     if(!person)return 0;
     const RMEye*eye=rm_eye_find(person->cls,person->type);
     float placement[12],attachment[12];if(!rm_vehicle_transform(&c->vehicle,ride,pose,placement))return 0;
@@ -1074,16 +1071,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             const RMPose *pose=rig?rm_pose(rig,c->frame):NULL;
             if(pose) {
                 const RMRig *guests[40]={0};const RMPose *seated[40]={0};
-                int ok=tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders);
-                for(int seat=0;seat<40;seat++)if(c->seats[seat]!=255) {
-                    if(!ok)break;
-                    /* An explicitly empty native pose stays empty. Missing
-                     * metadata or an unknown pose never becomes a stock rider. */
-                    if(!c->rig_riders[seat].visible)continue;
-                    guests[seat]=rm_find(2,c->seats[seat]);
-                    seated[seat]=guests[seat]?rm_pose(guests[seat],c->rig_riders[seat].pose):NULL;
-                    if(!seated[seat]){ok=0;break;}
-                }
+                int ok=rm_resolve_riders(rig,c->seats,c->rig_riders,guests,seated);
                 float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
                 float model_x=c->rig_x,model_y=c->rig_y;
                 if(ok && c->cls==0xe){

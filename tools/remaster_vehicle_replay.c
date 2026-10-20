@@ -81,17 +81,13 @@ int main(int argc,char**argv){
                     sample,c?c->frame:0,c?c->rig_ok:0);goto done;
         }
         const RMRig*guests[40]={0};const RMPose*poses[40]={0};
+        if(!rm_resolve_riders(ride,c->seats,c->rig_riders,guests,poses)){
+            fprintf(stderr,"sample %d: missing exact occupied-rider pose\n",sample);goto done;
+        }
         int attached=0,visible=0,linked=0;unsigned variants=0;
         for(int seat=0;seat<40;seat++)if(c->seats[seat]!=255){
             attached++;variants|=1u<<c->seats[seat];
-            if(!c->rig_riders[seat].visible)continue;
-            guests[seat]=rm_find(2,c->seats[seat]);
-            poses[seat]=guests[seat]?rm_pose(guests[seat],c->rig_riders[seat].pose):NULL;
-            if(!poses[seat]){
-                fprintf(stderr,"sample %d seat %d: missing identity %u pose %u\n",
-                        sample,seat,c->seats[seat],c->rig_riders[seat].pose);goto done;
-            }
-            visible++;
+            visible+=c->rig_riders[seat].visible;
         }
         for(unsigned next=(uint16_t)r16(t+0x47);next;){
             if(++linked>40||(uint64_t)base+next*200>last)goto done;
