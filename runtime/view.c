@@ -123,9 +123,9 @@ static Geo G;                       /* the emulation thread's (tp_view_hook) */
 /* The art is the same size in both modes (measured: a camera step moves the
  * picture (24, 0) or (8, 16) pixels in either); 640x480 shows more of the park. */
 extern uint32_t tp_map_w, tp_map_ext;
-static uint32_t geo_ext;                  /* the park size G was made for */
+static uint32_t geo_ext;                  /* the park size G was made for (set only where G is: the app thread's
+                                           * geo() calls set it too, and a change of park size was never seen) */
 static Geo geo(int s) {
-    geo_ext = tp_map_ext;
     Geo g; if (s != 2) s = 1;
     g.s = s; g.sw = 320 * s; g.sh = s == 1 ? 200 : 480; g.wh = s == 1 ? 178 : 436;
     g.ux = 24; g.uyx = 8; g.uy = 16;
@@ -602,6 +602,24 @@ static void blit_real(int cx, int cy) {
     blit_to_canvas(cx, cy, TX0, TX1, RT, RB);          /* (the furniture is above RT) */
 }
 
+/* A grid rectangle: its pass into the canvas. A native pass covers it all (PT..PB, its taller buffer); the game's
+ * renderer (a native pass that bailed: the selected ride's highlight, an unknown blit) has only its screen, complete
+ * to RB: rows RB..PB of the rectangle were never drawn (frozen or black strips in the zoomed view). They come from
+ * more game passes a cell lower each, shifted back along x to the rectangle's columns (to within 8 px). */
+static void pass_blit(int cx, int cy) {
+    if (pass(cx, cy) != 0) return;
+    if (pass_src == np_out) { blit_to_canvas(cx, cy, TX0, TX1, PT, PB); return; }
+    blit_to_canvas(cx, cy, TX0, TX1, PT, RB);
+    int x_at = cam_ox(cx, cy);
+    for (int d = 1; PT + d * UY < PB; d++) {
+        int cx2 = cx - (int)lround((double)d * UYX / UX), cy2 = cy + d, r = x_at - cam_ox(cx2, cy2);
+        pass_src = NULL;
+        if (pass(cx2, cy2) != 0) break;
+        int y1 = RB; if (d * UY + y1 > PB) y1 = PB - d * UY;
+        blit_to_canvas(cx2, cy2, TX0 + r, TX1 + r, d == 1 ? RB - UY : PT, y1);
+    }
+}
+
 /* The grid of passes covering the canvas. */
 typedef struct { int16_t cx, cy; int x0, y0, x1, y1; } Pass;
 static Pass grid[4096]; static uint8_t drawn[4096];   /* (512 for a 64x64 park; a 128x128 one needs ~2000) */ static int ngrid, rr, rr_done;
@@ -726,7 +744,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
     for (int k = 0; k < ngrid; k++) {                    /* newly visible passes never drawn: now, whatever the budget */
         Pass *p = &grid[k];
         if (drawn[k] || p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
-        if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
+        pass_blit(p->cx, p->cy);
         pass_src = NULL; drawn[k] = 1;
     }
     rr_done = 0;
@@ -734,7 +752,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         Pass *p = &grid[(start + k) % ngrid];
         if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
         (void)rx0; (void)rx1; (void)ry0; (void)ry1;      /* (passes cover the real view too: its frame is trusted only in a band) */
-        if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
+        pass_blit(p->cx, p->cy);
         pass_src = NULL; drawn[(start + k) % ngrid] = 1; rr_done++;   /* (other copies are of the real frame) */
         rr = (start + k + 1) % ngrid;
         (void)budget;   /* every visible pass, every frame: a pass left for a later frame shows that area from another
@@ -932,7 +950,7 @@ void tp_view_hook(void) {
     if (dbg > 0) { dbg--; fprintf(stderr, "view hook %d want %d active %d scale %d\n", tp_hook_which, w, active, sc); }
     if (!sc) { if (active) { active = 0; hooks(0); } return; }
     if (sc != G.s || geo_ext != tp_map_ext) {             /* the game changed its screen mode ([R]) or the park size: start again */
-        G = geo(sc); ngrid = 0; memset(canvas, 0, (size_t)CW * CH);
+        G = geo(sc); geo_ext = tp_map_ext; ngrid = 0; memset(canvas, 0, (size_t)CW * CH);
         have_world = have_pre_extras = pre_ok = 0; in_frame = 0;
         pthread_mutex_lock(&lock); pub_time = 0; pub_cur_ok = 0; pthread_mutex_unlock(&lock);
         if (active) { active = 0; hooks(0); }

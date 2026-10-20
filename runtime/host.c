@@ -559,11 +559,17 @@ static uint32_t key_pop(void) {
     pthread_mutex_unlock(&input_lock);
     return k;
 }
+/* A blocking key wait (INT 16h 0/10h, INT 21h 7/8). Interrupts cannot be delivered from inside it (hw_interrupt
+ * only redirects the game to its handler, which runs after this call returns: several would stack under the key's
+ * return), so the timer, the card and the mouse wait with it. Whether Theme Park ever blocks here is not known: the
+ * first wait is logged. Paused, it sleeps longer. */
+static volatile int paused;
 static uint32_t wait_key(void) {
     if (deterministic && !nkeys) stop("waiting for keyboard input");
+    if (!keys_available()) { static int said; if (!said++) fprintf(stderr, "dos: the game waits for a key (blocking)\n"); }
     while (!keys_available()) {
         if (quit_requested) stop("quit");
-        usleep(2000);
+        usleep(paused ? 20000 : 2000);
     }
     return key_pop();
 }
@@ -592,12 +598,11 @@ static int dos_parts(const char *name, char parts[16][64]) {
     int n = 0;
     for (char *tok = strtok(s, "/"); tok; tok = strtok(NULL, "/")) {
         if (!*tok || !strcmp(tok, ".")) continue;
-        if (!strcmp(tok, "..")) stop("unsafe DOS path: %s", name);
-        if (n >= 16) stop("DOS path too deep");
+        if (!strcmp(tok, "..") || n >= 16) { fprintf(stderr, "dos: path refused: %s\n", name); return -1; }   /* (DOS: path not found) */
         snprintf(parts[n++], 64, "%s", tok);
     }
     if (n && !strcasecmp(parts[0], "GAME")) { memmove(parts[0], parts[1], (n - 1) * 64); n--; }
-    if (!n) stop("unsafe DOS path: %s", name);
+    if (!n) { fprintf(stderr, "dos: path refused: %s\n", name); return -1; }
     return n;
 }
 static void walk(const char *root, char parts[16][64], int n, char *out, size_t size) {
@@ -617,6 +622,7 @@ static void walk(const char *root, char parts[16][64], int n, char *out, size_t 
 /* Resolve: overlay first, then the game; otherwise a new path in the overlay. */
 static int resolve(const char *name, char *out, size_t size) {
     char parts[16][64]; int n = dos_parts(name, parts);
+    if (n < 0) return -1;
     walk(overlay_root, parts, n, out, size);
     if (is_file(out)) return 1;
     walk(game_root, parts, n, out, size);
@@ -629,15 +635,15 @@ static void mkparents(const char *path) {
     for (char *p = buf + strlen(overlay_root) + 1; *p; p++)
         if (*p == '/') { *p = 0; mkdir(buf, 0755); *p = '/'; }
 }
-static void overlay_path(const char *name, char *out, size_t size) {
-    char parts[16][64]; int n = dos_parts(name, parts);
+static int overlay_path(const char *name, char *out, size_t size) {
     char tmp[1024];
     int where = resolve(name, tmp, sizeof tmp);
+    if (where < 0) return -1;
     if (where == 2) {          /* map the game's file to the same relative path in the overlay */
         snprintf(out, size, "%s%s", overlay_root, tmp + strlen(game_root));
     } else snprintf(out, size, "%s", tmp);
-    (void)n;
     mkparents(out);
+    return 0;
 }
 static int copy_file(const char *from, const char *to) {
     int in = open(from, O_RDONLY); if (in < 0) return -1;
@@ -816,13 +822,14 @@ static void interrupt(uint32_t number) {
         if (ah == 0x3d) {
             cstring(address(DS, d), name, sizeof name);
             int where = resolve(name, path, sizeof path);
-            if (getenv("TP_DEBUG")) fprintf(stderr, "open %s mode %u -> %s\n", name, a & 255, where ? path : "(missing)");
+            if (getenv("TP_DEBUG")) fprintf(stderr, "open %s mode %u -> %s\n", name, a & 255, where > 0 ? path : "(missing)");
             file_note(name);
+            if (where < 0) { carry(3); return; }
             if (!where) { carry(2); return; }
             if (a & 3 && where == 2) {
                 char target[1024]; snprintf(target, sizeof target, "%s%s", overlay_root, path + strlen(game_root));
                 mkparents(target);
-                if (copy_file(path, target)) stop("cannot copy %s to overlay", name);
+                if (copy_file(path, target)) { fprintf(stderr, "dos: cannot copy %s to the saves: %s\n", name, strerror(errno)); carry(5); return; }
                 snprintf(path, sizeof path, "%s", target);
             }
             int h = available_handle();
@@ -837,9 +844,10 @@ static void interrupt(uint32_t number) {
             cstring(address(DS, d), name, sizeof name);
             int h = available_handle();
             if (h < 0) { carry(4); return; }
-            overlay_path(name, path, sizeof path); file_note(name);
+            if (overlay_path(name, path, sizeof path) < 0) { carry(3); return; }
+            file_note(name);
             int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
-            if (fd < 0) stop("cannot create %s", path);
+            if (fd < 0) { fprintf(stderr, "dos: cannot create %s: %s\n", path, strerror(errno)); carry(errno == ENOENT ? 3 : 5); return; }
             handles_fd[h] = fd; handles_writable[h] = 1;
             snprintf(handles_path[h], sizeof handles_path[h], "%s", path); handles_big[h] = -1;
             S(EAX, h); carry(0); return;
@@ -847,6 +855,7 @@ static void interrupt(uint32_t number) {
         if (ax == 0x4300) {
             cstring(address(DS, d), name, sizeof name);
             char parts[16][64]; int n = dos_parts(name, parts);
+            if (n < 0) { carry(3); return; }
             walk(overlay_root, parts, n, path, sizeof path);
             if (!exists(path)) walk(game_root, parts, n, path, sizeof path);
             if (!exists(path)) { carry(2); return; }
@@ -873,16 +882,17 @@ static void interrupt(uint32_t number) {
                   SaveTrailer tr; int has_tr = save_trailer_read(handles_fd[b], &tr);   /* (the save's own record wins over the marker files) */
                   int big = has_tr ? tr.w == 128 : exists(mk), want = big ? 0x10000 : 0x4000;
                   if (big && tp_bigmap_alloc() < 128) { fprintf(stderr, "bigmap: %s holds a 128x128 park (turn on the larger map setting)\n", handles_path[b]); carry(5); return; }
-                  { void tp_bigmap_loaded(void); tp_bigmap_loaded(); void tp_free_loaded_rules(const char *, int, int, int);
-                    tp_free_loaded_rules(handles_path[b], has_tr ? tr.rules : -1, has_tr ? tr.months : 0, has_tr ? tr.ramp : 0); }
-                  if ((int)c != want || (int)tp_map_w != (big ? 128 : 64)) { tp_bigmap_set(big ? 128 : 64, big ? 128 : 64); c = (uint32_t)want; }
-                  if (big) {                              /* its things: as many as were saved (1200 before the pool grew) */
-                      int w = 0, n = 1200;
+                  int n = 1200;                           /* its things (a 128x128 park): as many as were saved (1200 before the pool grew), */
+                  if (big) {                              /* checked before anything changes: a refused load leaves the game as it was */
+                      int w = 0;
                       if (has_tr) n = (int)tr.things;
                       else { FILE *f = fopen(mk, "r"); if (f) { if (fscanf(f, "%d %d", &w, &n) < 2) n = 1200; fclose(f); } }
                       if (n > tp_bigmap_things_room()) { fprintf(stderr, "bigmap: %s holds %d things, room for %d\n", handles_path[b], n, tp_bigmap_things_room()); carry(5); return; }
-                      tp_bigmap_things(n); things_grow = 1;
                   }
+                  { void tp_bigmap_loaded(void); tp_bigmap_loaded(); void tp_free_loaded_rules(const char *, int, int, int);
+                    tp_free_loaded_rules(handles_path[b], has_tr ? tr.rules : -1, has_tr ? tr.months : 0, has_tr ? tr.ramp : 0); }
+                  if ((int)c != want || (int)tp_map_w != (big ? 128 : 64)) { tp_bigmap_set(big ? 128 : 64, big ? 128 : 64); c = (uint32_t)want; }
+                  if (big) { tp_bigmap_things(n); things_grow = 1; }
               } }
             ssize_t got = 0, r; double f0 = now_s();
             while ((uint32_t)got < c && (r = read(handles_fd[b], mem + at + got, c - got)) > 0) got += r;
@@ -902,7 +912,7 @@ static void interrupt(uint32_t number) {
             int32_t offset = (int32_t)(((c & 65535) << 16) | (d & 65535));
             int whence = (a & 255) == 0 ? SEEK_SET : (a & 255) == 1 ? SEEK_CUR : SEEK_END;
             off_t pos = lseek(handles_fd[b], offset, whence);
-            if (pos < 0) stop("seek failed");
+            if (pos < 0) { carry(1); return; }           /* (before the start: DOS refuses it, the game's loader copes) */
             S(EAX, pos & 65535); S(EDX, (uint32_t)pos >> 16); carry(0); return;
         }
         if (ax == 0x4400) {
@@ -928,11 +938,11 @@ static void interrupt(uint32_t number) {
                 { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);
                   if (mp && address(DS, d) == mp && (c == 0x4000 || c == 0x10000)) handles_big[b] = c == 0x10000; }
                 double f0 = now_s(); ssize_t w = write(handles_fd[b], mem + address(DS, d), c); tp_file_time += now_s() - f0; tp_file_bytes += c;
-                if (w < 0) stop("write failed: %s", strerror(errno));
+                if (w < 0) { fprintf(stderr, "dos: write to %s failed: %s\n", handles_path[b], strerror(errno)); carry(5); return; }   /* (a full disk: the game says it could not save) */
                 count = (uint32_t)w;
             } else {
                 off_t pos = lseek(handles_fd[b], 0, SEEK_CUR);
-                if (ftruncate(handles_fd[b], pos)) stop("truncate failed");
+                if (ftruncate(handles_fd[b], pos)) { carry(5); return; }
             }
             S(EAX, count); carry(0); return;
         }
@@ -1232,7 +1242,6 @@ int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_
 uint8_t *tp_host_memory(void) { return mem; }
 int tp_host_is_realtime(void) { return !deterministic; }
 
-static volatile int paused;
 void tp_host_pause(int on) { paused = on; }       /* the app is hidden or minimised: the game waits */
 int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
     if (stopped) return -1;
@@ -1377,6 +1386,13 @@ void tp_host_key_raw(uint8_t scan, int down) {
 }
 static void push_mouse(int x, int y, uint32_t buttons) {
     pthread_mutex_lock(&input_lock);
+    /* A move after a move with the same buttons replaces it (the place is what matters): the queue keeps the button
+     * changes when the game is not taking events, where a full queue used to drop the newest, a release among them. */
+    int last = (mq_tail + 255) % 256;
+    if (mq_tail != mq_head && mouse_q[last].buttons == buttons) {
+        int prev = (last + 255) % 256;
+        if (last != mq_head && mouse_q[prev].buttons == buttons) {   /* (the last a move, not a button change) */ mouse_q[last].x = x; mouse_q[last].y = y; pthread_mutex_unlock(&input_lock); return; }
+    }
     int next = (mq_tail + 1) % 256;
     if (next != mq_head) { mouse_q[mq_tail] = (MouseEv){x, y, buttons}; mq_tail = next; }
     pthread_mutex_unlock(&input_lock);
