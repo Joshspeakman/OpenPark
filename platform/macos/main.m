@@ -418,6 +418,13 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         NSPoint g = [self.window convertPointToScreen:loc];
         BOOL nearX = g.x < NSMinX(s) + k || g.x > NSMaxX(s) - 1 - k;
         if (g.y >= NSMaxY(s) - 2 && !nearX) return [self convertPoint:loc fromView:nil];   /* (the menu bar's row) */
+        /* The Mac's pointer, hidden, to the middle of the window: clicks go to the window under it, and where the
+         * mouse was can be outside it (the strip beside the notch above a window that keeps clear of it: every
+         * click went there and the game took none). (Associated again right after the move: no quarter second of
+         * ignored input after it.) */
+        NSRect wf = self.window.frame;
+        CGWarpMouseCursorPosition(CGPointMake(NSMidX(wf), NSMaxY(NSScreen.screens[0].frame) - NSMidY(wf)));
+        CGAssociateMouseAndMouseCursorPosition(true);
         _virt = g; _held = YES; CGAssociateMouseAndMouseCursorPosition(false);
     } else {
         NSEventType t = e.type;

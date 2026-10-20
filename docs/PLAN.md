@@ -13,6 +13,16 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, the player again (d0f1753, full screen, trackpad): no clicks on the panel or in the park, the game left
+open. Read from the running process (lldb, attached and detached): the host's mouse (buttons 0, nothing queued), the
+view (no button held, no drag, no top-bar or restore state) and the app (no buttons, not in the Visitor View's drop
+or a pan) were all clear. The full-screen window is 1728x1085 on a 1728x1117 screen (it keeps clear of the notch),
+and the guard (d86f5c6) froze the Mac's pointer wherever the mouse was when it took it: coming down from the menu
+bar's row, that can be the strip above the window, and macOS sends each click to the window under the Mac's pointer,
+so the game got none while its cursor moved. Now the hidden pointer is moved to the window's middle when the guard
+takes it (and re-associated at once, so the move's quarter second of ignored input does not apply). Not run here
+(a full-screen test would have covered the player's open game); the player to confirm.
+
 2026-10-19, the player: after d86f5c6, clicks stopped working in the park (placing, the panel) after a right-click
 while holding a fries stall; not reproduced (TESTPARK copy: right-click and right-drag while holding a stall, through
 the view's own path; clicks went on working). Most likely cause: the app's right button stayed down (its release
