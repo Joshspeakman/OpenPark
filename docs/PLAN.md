@@ -5,6 +5,19 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, remaining staff costume candidates (Codex,
+`codex/reimagined-full-remaster`): Chicken Man, Teddy Man, Rhino Man and Squid
+Man bring canonical local authoring to all nine staff identities and 179
+travel/mower/break keys. Teddy's measured pogo compression has separate
+shaft/spring/peg transforms; Squid's source-bound body bob bends articulated
+tentacles above grounded pads. Current files have 716 native captures and
+716 sanitized model views, with matching artifact hashes. A private export
+maps 44 known staff action chains / 371 keys for the next authoring work;
+trigger completeness and routines remain unverified. These are unaccepted
+candidates, not completed staff coverage. All 112 source hashes are unchanged;
+no runtime change or installation. See
+`docs/reports/2026-10-20-remaster-costumes.md`.
+
 2026-10-20, native staff binding and worker animation candidates (Codex,
 `codex/reimagined-full-remaster`): all nine staff IDs now use exact native
 body keys/origins with composite-overlay guards. Local mechanic/handyman
