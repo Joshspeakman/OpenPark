@@ -23,6 +23,7 @@ typedef struct {
     const uint32_t *rgba;
     int orthographic;
     float offset_x,offset_y;
+    uint32_t texture_tint; /* ABGR, zero means white; authored material lighting */
 } WMRender;
 
 static WMVertex wm_camera(const WMRender *r, float x, float y, float z, float u, float v) {
@@ -74,6 +75,12 @@ static void wm_triangle_inner(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
             output=r->rgba[(size_t)v*r->tw+u];
             if((output>>24)<128)continue;
             output|=0xff000000u; /* cutout material, not premultiplied translucency */
+            if(r->texture_tint) {
+                unsigned tint=r->texture_tint;
+                output=0xff000000u|((output&255)*(tint&255)/255)|
+                    ((((output>>8)&255)*((tint>>8)&255)/255)<<8)|
+                    ((((output>>16)&255)*((tint>>16)&255)/255)<<16);
+            }
         } else {
             uint16_t colour=r->texture[(size_t)v*r->tw+u];
             if (colour>=256) { if (!r->side_fill) continue; colour=r->side_colour; }

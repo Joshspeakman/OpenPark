@@ -5,6 +5,32 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Reimagined scenery authoring and native placement (Codex,
+`codex/reimagined-full-remaster`): 19 local candidate scenery models now have
+canonical textured geometry, 21 source-keyed poses and 22 native sprite-part
+bakes. New vegetation and scenery materials preserve source identities:
+multi-trunk palms, blue/white planters, three-lantern post, crossed fences,
+three toilet buildings and the four-bowl fountain. The fountain's three
+water states use native frame keys. These remain **candidates, not accepted
+release coverage**. Source-derived authoring, meshes and evidence stay under
+ignored `work/remaster/scenery/`.
+
+Native snapshot metadata now carries the actual drawn frame and origin for
+static/animated scenery. Cropping no longer determines a canonical model's
+placement. A bounded frame-binding map shares canonical models across source
+poses. Material tint, a fixed-camera native inspection tool, texture import
+and optional bone-group baking support the authoring workflow.
+
+Verification: 84 sanitized perspective renders, 21 native scene replays
+(each confirms a Reimagined rig), 22 nonempty part bakes, all modeled ground
+bounds at z=0. New native frame/origin tests, eight Python tests, both walk
+modes and 17,808 view checks pass. Native ARM64 build/signature passes.
+A 36.51-second muted, scratch-profile headed regression captured both views
+in **Original** mode; it does not validate new artwork. All 112 owned DATA
+hashes remain unchanged. No application was installed. Full remaster work
+continues; details and remaining visual issues are in
+`docs/reports/2026-10-20-remaster-scenery.md`.
+
 2026-10-19, full Reimagined scope (Codex, `codex/reimagined-full-remaster`):
 the user requested an autonomous complete world-art remaster, normal and
 Visitor perspectives, all assets/animations/expressions/riders, UI exempt,

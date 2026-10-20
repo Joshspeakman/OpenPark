@@ -6,8 +6,8 @@
  * vertices: xyz bone; triangles: indices RGBhex; poses: frame then 12 floats
  * per bone and seat, row-major affine matrices. Frame 65535 is seated guest.
  * TPRIG2: the same counts, then tw th and tw*th RRGGBBAA hex texels.
- * Vertices gain u v after bone (pixel coordinates). Triangle colours are
- * retained for format compatibility; textured rigs use their atlas instead.
+ * Vertices gain u v after bone (pixel coordinates). Triangle colours tint
+ * the atlas; ffffff is neutral. This stores authored, camera-independent light.
  */
 #ifndef TP_WALK_RIG_H
 #define TP_WALK_RIG_H
@@ -18,7 +18,27 @@ typedef struct {uint16_t frame;float *matrices;} RMPose;
 typedef struct {int cls,type,nv,nt,nb,np,ns;RMVertex*v;RMTriangle*t;RMPose*p;float*matrices;
     int tw,th;uint32_t*texture;} RMRig;
 static RMRig rm_cache[96];static int rm_count;
-static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);free(rm_cache[i].texture);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;}
+/* Source-frame aliases share one canonical model/cache entry. They are resolved
+ * only on the render thread, never while the game thread captures a snapshot.
+ * TPRMAP1 count; rows: source_class source_frame model_class model_type.
+ * Decimal values, sorted by (source_class, source_frame), no duplicate keys. */
+typedef struct { unsigned cls,frame,model_cls,type; } RMBinding;
+static RMBinding *rm_bindings;static unsigned rm_nbindings;static int rm_bindings_loaded;
+static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);free(rm_cache[i].texture);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;
+    free(rm_bindings);rm_bindings=NULL;rm_nbindings=0;rm_bindings_loaded=0;}
+static int rm_read_bindings(FILE*f,RMBinding**out,unsigned*count){
+    char magic[16];unsigned n;RMBinding*b=NULL;
+    *out=NULL;*count=0;
+    if(fscanf(f,"%15s%u",magic,&n)!=2 || strcmp(magic,"TPRMAP1") || !n || n>8192)return 0;
+    b=calloc(n,sizeof*b);if(!b)return 0;
+    for(unsigned i=0;i<n;i++){
+        if(fscanf(f,"%u%u%u%u",&b[i].cls,&b[i].frame,&b[i].model_cls,&b[i].type)!=4 ||
+           b[i].cls>255 || b[i].frame>65535 || b[i].model_cls>255 || b[i].type>32767 ||
+           (i && (b[i].cls<b[i-1].cls || (b[i].cls==b[i-1].cls && b[i].frame<=b[i-1].frame)))){free(b);return 0;}
+    }
+    char extra;if(fscanf(f," %c",&extra)==1){free(b);return 0;}
+    *out=b;*count=n;return 1;
+}
 static int rm_read(FILE*f,RMRig*r){
     char magic[16];int nv,nt,nb,np,ns,tw=0,th=0;uint32_t*texture=NULL;
     if(fscanf(f,"%15s%d%d%d%d%d",magic,&nv,&nt,&nb,&np,&ns)!=6 || (strcmp(magic,"TPRIG1") && strcmp(magic,"TPRIG2")) ||
@@ -58,6 +78,24 @@ static const RMRig*rm_find(int cls,int type){
     FILE*f=fopen(path,"r");if(!f)return NULL;int ok=rm_read(f,r);fclose(f);
     if(!ok)fprintf(stderr,"Reimagined: invalid rig %s; original art retained\n",path);return ok?r:NULL;
 }
+static const RMRig*rm_find_frame(unsigned cls,unsigned frame){
+    if(!rm_bindings_loaded){
+        rm_bindings_loaded=1;const char*root=getenv("TP_DATA");char path[PATH_MAX];
+        if(root){
+            int n=snprintf(path,sizeof path,"%s/reimagined/models.map",root);
+            if(n>0 && (size_t)n<sizeof path){
+                FILE*f=fopen(path,"r");
+                if(f){int ok=rm_read_bindings(f,&rm_bindings,&rm_nbindings);fclose(f);
+                    if(!ok)fprintf(stderr,"Reimagined: invalid model bindings %s; original art retained\n",path);}
+            }
+        }
+    }
+    unsigned lo=0,hi=rm_nbindings;
+    while(lo<hi){unsigned mid=lo+(hi-lo)/2;const RMBinding*b=&rm_bindings[mid];
+        if(b->cls<cls || (b->cls==cls && b->frame<frame))lo=mid+1;else hi=mid;}
+    if(lo==rm_nbindings || rm_bindings[lo].cls!=cls || rm_bindings[lo].frame!=frame)return NULL;
+    return rm_find((int)rm_bindings[lo].model_cls,(int)rm_bindings[lo].type);
+}
 static const RMPose*rm_pose(const RMRig*r,unsigned frame){int lo=0,hi=r->np;
     while(lo<hi){int mid=lo+(hi-lo)/2;if(r->p[mid].frame<frame)lo=mid+1;else hi=mid;}
     return lo<r->np&&r->p[lo].frame==frame?&r->p[lo]:NULL;
@@ -66,7 +104,8 @@ static void rm_point(const float*m,float x,float y,float z,float*out){
     out[0]=m[0]*x+m[1]*y+m[2]*z+m[3];out[1]=m[4]*x+m[5]*y+m[6]*z+m[7];out[2]=m[8]*x+m[9]*y+m[10]*z+m[11];
 }
 static void rm_draw(WMRender*r,const RMRig*rig,const RMPose*pose,float x,float y,float scale,const float*parent){
-    const uint32_t*oldpal=r->palette,*oldrgba=r->rgba;const uint16_t*oldtex=r->texture;int tw=r->tw,th=r->th,fill=r->side_fill;
+    const uint32_t*oldpal=r->palette,*oldrgba=r->rgba;uint32_t oldtint=r->texture_tint;
+    const uint16_t*oldtex=r->texture;int tw=r->tw,th=r->th,fill=r->side_fill;
     uint16_t tex=0;uint32_t colour;r->texture=&tex;r->palette=&colour;r->tw=r->th=1;r->side_fill=0;
     r->rgba=rig->texture;if(r->rgba){r->tw=rig->tw;r->th=rig->th;}
     WMVertex transformed[8192];
@@ -75,8 +114,10 @@ static void rm_draw(WMRender*r,const RMRig*rig,const RMPose*pose,float x,float y
         if(parent){rm_point(parent,p[0],p[1],p[2],q);memcpy(p,q,sizeof p);}
         transformed[i]=wm_camera(r,x+p[0]*scale,y+p[1]*scale,p[2]*scale,v->u,v->v);
     }
-    for(int i=0;i<rig->nt;i++){const RMTriangle*t=&rig->t[i];colour=t->colour;wm_triangle(r,transformed[t->a],transformed[t->b],transformed[t->c]);}
-    r->palette=oldpal;r->texture=oldtex;r->tw=tw;r->th=th;r->side_fill=fill;r->rgba=oldrgba;
+    for(int i=0;i<rig->nt;i++){const RMTriangle*t=&rig->t[i];colour=t->colour;
+        r->texture_tint=rig->texture?t->colour:0;
+        wm_triangle(r,transformed[t->a],transformed[t->b],transformed[t->c]);}
+    r->palette=oldpal;r->texture=oldtex;r->tw=tw;r->th=th;r->side_fill=fill;r->rgba=oldrgba;r->texture_tint=oldtint;
 }
 /* Same descending slot order as native_land.c:ride_draw. 255 is an empty seat. */
 static int rm_seat_order(const uint8_t*guests,int n,int cap,int kind,unsigned phase,uint8_t out[40]){

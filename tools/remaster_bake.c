@@ -12,8 +12,8 @@ static void u32(FILE*f,unsigned v) {
     uint8_t p[4]={v,v>>8,v>>16,v>>24};fwrite(p,1,4,f);
 }
 int main(int argc,char**argv) {
-    if(argc!=10){
-        fprintf(stderr,"usage: remaster_bake MODEL FRAME OUT WIDTH HEIGHT PIXELS_PER_CELL ANCHOR_X ANCHOR_Y ASPECT\n");
+    if(argc!=10 && argc!=11){
+        fprintf(stderr,"usage: remaster_bake MODEL FRAME OUT WIDTH HEIGHT PIXELS_PER_CELL ANCHOR_X ANCHOR_Y ASPECT [BONE]\n");
         return 2;
     }
     int frame=atoi(argv[2]),w=atoi(argv[4]),h=atoi(argv[5]);
@@ -23,6 +23,19 @@ int main(int argc,char**argv) {
     FILE*f=fopen(argv[1],"r");if(!f)return 3;
     RMRig *rig=&rm_cache[0];rm_count=1;int ok=rm_read(f,rig);fclose(f);
     if(!ok){rm_reset();return 3;}
+    if(argc==11){
+        char*end=NULL;long bone=strtol(argv[10],&end,10);
+        if(!argv[10][0] || *end || bone<0 || bone>=rig->nb){rm_reset();return 2;}
+        /* Multi-part native sprites can share a canonical mesh. Export only
+         * this authored group while retaining the full model's origin/pose. */
+        int n=0;
+        for(int i=0;i<rig->nt;i++){
+            RMTriangle t=rig->t[i];
+            if(rig->v[t.a].bone==(unsigned)bone && rig->v[t.b].bone==(unsigned)bone &&
+               rig->v[t.c].bone==(unsigned)bone)rig->t[n++]=t;
+        }
+        rig->nt=n;if(!n){rm_reset();return 4;}
+    }
     const RMPose*p=rm_pose(rig,(unsigned)frame);if(!p){rm_reset();return 4;}
     uint32_t*pixels=calloc((size_t)w*h,4);float*depth=malloc((size_t)w*h*sizeof*depth);
     if(!pixels||!depth){free(pixels);free(depth);rm_reset();return 5;}

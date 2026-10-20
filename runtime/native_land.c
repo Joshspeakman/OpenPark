@@ -189,6 +189,9 @@ static void log_blit(uint32_t entry, int x, int y, int flags) {
     if (dlog) dlog(2, x, y, M[entry + 4] | M[entry + 5] << 8, r32(entry), flags, dctx);
 }
 static void frame_logged(int f, int x, int y) {
+    /* Snapshot-only metadata: preserve the frame actually selected by native
+     * animation and its origin, independently of transparent sprite cropping. */
+    if (marks && dlog) dlog(8, f, x, y, 0, 0, dctx);
     uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
     uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10;
     for (int guard = 0; e > elems && guard < 256; guard++) {

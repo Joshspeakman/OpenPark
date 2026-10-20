@@ -18,7 +18,7 @@ uint8_t *tp_host_memory(void){return memory;}
 void tp_host_palette_rgba(uint32_t p[256]){memcpy(p,palette,sizeof palette);}
 void tp_hooks_changed(void){}
 static void be32(FILE*f,uint32_t n){fputc(n>>24,f);fputc(n>>16,f);fputc(n>>8,f);fputc(n,f);}
-static void chunk(FILE*f,const char*t,const uint8_t*p,size_t n){be32(f,(uint32_t)n);fwrite(t,1,4,f);if(n)fwrite(p,1,n,f);uint32_t c=(uint32_t)crc32(0,(const Bytef*)t,4);c=(uint32_t)crc32(c,p,(uInt)n);be32(f,c);}
+static void chunk(FILE*f,const char*t,const uint8_t*p,size_t n){be32(f,(uint32_t)n);fwrite(t,1,4,f);if(n)fwrite(p,1,n,f);uint32_t c=(uint32_t)crc32(0,(const Bytef*)t,4);if(n)c=(uint32_t)crc32(c,p,(uInt)n);be32(f,c);}
 static int png(const char*path,uint32_t*p,int w,int h){
     size_t stride=1+(size_t)w*3,n=stride*h;uint8_t*raw=malloc(n);if(!raw)return 0;
     for(int y=0;y<h;y++){raw[y*stride]=0;for(int x=0;x<w;x++){uint32_t c=p[y*w+x];size_t i=y*stride+1+x*3;raw[i]=c;raw[i+1]=c>>8;raw[i+2]=c>>16;}}
