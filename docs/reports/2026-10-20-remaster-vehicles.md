@@ -76,3 +76,35 @@ The remaining work includes live vehicle motion, all track families and ground
 track systems, source-part packs for normal gameplay, the rest of the asset and
 animation inventory, and complete headed visual/performance acceptance. No
 completion ledger entry was added for these candidates.
+
+
+## Recorded native motion follow-up
+
+A bounded, muted Original-mode native run in a scratch profile observes the
+owned demo park for 58.06 seconds. It exits normally and records 160 complete
+thing-pool samples at nominal 10 Hz after the demo starts. This is native
+simulation evidence, not fabricated movement between selected poses.
+
+`tools/remaster_vehicle_replay.c` reads those records with strict arguments
+and replays four operating coaster cars through their actual track records.
+Because changing map-cell heads were not recorded, the tool rebuilds isolated
+cell lists from the sampled car and track coordinates. It leaves guest chains,
+terrain, source selection fields and fractional positions intact. It then
+isolates the car for rendering; missing track artwork is not substituted by
+invented geometry. The camera follows the car and its height, so this is pose
+and binding inspection, not whole-park presentation or camera-motion evidence.
+
+All 640 car states resolve exact vehicle and rider poses. The resulting 1,280
+images cover both projections with identical attachment lift. Each car has
+nineteen occupied samples, transitions to empty, and later boards new guests.
+Linked counts, first drawn guest identities and quantized ground origins agree
+with the captured records. The selected frames number nine, nine, six and nine
+for the four cars. Five malformed argument cases reject cleanly under the
+sanitized executable. Artifact and input hashes are in the private
+`work/remaster/vehicles/motion-verification.json`.
+
+Representative rising/steep, occupied and empty frames were inspected. This
+proves neither every intermediate motion at display cadence nor all animation
+states. Live Reimagined timing, complete train context, track contact and art
+quality remain outstanding. No installed application or runtime was changed
+by this follow-up, and no artwork was accepted into the completion ledger.

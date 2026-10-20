@@ -5,6 +5,17 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, recorded coaster motion (Codex, same isolated branch): a bounded
+58.06-second Original-mode native demo run captured 160 thing-pool samples at
+nominal 10 Hz. Replaying four operating cars produces 640 exact state checks
+and 1,280 perspective/orthographic images, including occupied → empty → newly
+boarded states. Each car has nineteen occupied samples; identities, linked
+counts and quantized ground origins agree with the records. This is isolated
+recorded-state replay, not a live Reimagined timing or track-contact pass.
+Five malformed replay argument cases reject cleanly; no game/runtime change
+or installation. Current hashes and captures are in the ignored vehicle work
+folder. Full art and animation acceptance remain unfinished.
+
 2026-10-20, native vehicle riders (Codex, `codex/reimagined-full-remaster`):
 coaster/Monorail cards now retain native ground position, height, exact frame,
 actual guest identity and explicit omitted-seat markers. Rider matrices inherit
