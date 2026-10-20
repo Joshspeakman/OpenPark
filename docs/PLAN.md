@@ -17,6 +17,14 @@ and compile/signature pass. A 38.73-second Original-mode headed regression
 captured both views and exited normally; all 112 source hashes are unchanged.
 No app was installed. See `docs/reports/2026-10-20-remaster-staff.md`.
 
+Staff costume follow-up: distinct Guard, Strong Man and Shark Man walking
+candidates bring local authoring to five staff models / 115 source keys.
+The current files have 460 native captures and 460 sanitized model views;
+the earlier worker replay hashes remain valid. Side inspection corrected
+Shark Man's projecting belly folds and jaw edge. All remain unaccepted;
+four costume identities, their distinct motions and remaining routines
+continue. No runtime change or installation in this follow-up.
+
 2026-10-20, staff inventory correction (Codex,
 `codex/reimagined-full-remaster`): verified native record layout fixes an
 off-by-one catalog error that omitted Shark Man and shifted staff IDs.

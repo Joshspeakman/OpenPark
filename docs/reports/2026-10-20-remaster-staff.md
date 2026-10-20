@@ -64,3 +64,30 @@ The full remaster, remaining asset/animation authoring and final live art
 acceptance remain open. No app was installed; no release-completeness record
 was created. All owned-source references, model files and captures remain
 ignored under `work/`.
+
+## Costume follow-up
+
+Three further walking candidates now use distinct geometry and articulated
+proportions rather than recoloured guest bodies:
+
+- Guard: broad coat and belly, short legs, peaked cap, lapels, tie, shirt,
+  shoulder tabs, buttons, pockets and small hands.
+- Strong Man: oversized angular shoulders, pectorals and arms, separate
+  abdominal/back contours, small moustached head, striped trunks and shoes.
+- Shark Man: long snout, faceted costume eyes, recessed human face, closed
+  mouth backing, side/dorsal fins, tail and yellow webbed feet. Side-view
+  inspection exposed overhanging belly plates; these were replaced with
+  shallow bands on the shell, and the jaw edge was rebuilt as closed geometry.
+
+Each adds sixteen keyed walking poses. Current totals are five staff models,
+115 keys, 460 sanitized model views and 460 native captures. The extra models
+have 585 vertices / 923 triangles (Shark Man), 1,039 / 1,710 (Strong Man),
+and 845 / 1,324 (Guard). The latest verification hashes match all five models;
+mechanic and handyman model hashes still match the recorded-state replay.
+
+These are still candidates, not accepted complete staff replacements. Their
+native costume references include distinct performances that cannot be
+replaced with a shared walk cycle: Teddy Man's pogo motion, Squid Man's
+tentacles, the chicken's crest/tail, Rhino Man's costume and scarf, and the
+remaining routines of the five authored identities all remain work.
+No additional runtime change or installation was needed for this follow-up.
