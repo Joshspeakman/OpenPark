@@ -21,6 +21,14 @@ bindings. All 112 source DATA hashes remain unchanged. No app was installed;
 live remastered-art timing/quality remains unaccepted. See
 `docs/reports/2026-10-20-remaster-riders.md`.
 
+Captured-state follow-up: all 80 saved castle states now replay in Visitor
+and orthographic projections with identical geometry/attachments. This
+exposed and fixed linked-but-not-rendered loading guests and inactive stored
+overlay keys. The ride origin is constant. New loading/overlay fixtures,
+the sanitizer/walk checks and compile-only build pass. This is offline
+sequence evidence, not live pacing or integrated HD normal-view acceptance;
+the complete remaster and release gate remain unfinished.
+
 2026-10-20, Reimagined guest reaction placement (Codex,
 `codex/reimagined-full-remaster`): ordinary and reaction rigs now bind to
 the actual native frame origin; raised guest states retain height without

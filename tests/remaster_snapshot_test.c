@@ -196,6 +196,19 @@ int main(void){
     CHECK(capture(s,1));c=s->cards[0];
     CHECK(c.seats[0]==3 && c.seats[1]==3 && tp_remaster_riders_valid(2,c.seats,c.rig_riders));
     CHECK(c.rig_riders[0].pose!=c.rig_riders[1].pose);
+    /* Castle links can be populated during loading, while native dispatch
+     * intentionally omits all substituted riders. The body remains eligible. */
+    memory[0x1cced0+0xb3]=9;put16(thing+0x32,0);
+    CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.seats[0]==255 && c.seats[1]==255);
+    CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    put16(thing+0x32,1);CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.seats[0]==3 && c.seats[1]==3);
+    CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    put16(thing+0x8e,3);CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok); /* an inactive stored overlay key draws no extra frame */
+    put16(thing+0x2e,1);CHECK(capture(s,1));c=s->cards[0];
+    CHECK(!c.rig_ok); /* active native overlay requires a composite binding */
     free(s);free(memory);
     puts("remaster snapshot: scenery/shop/guest native origins, crop independence, tick-selected frames and composite guards passed");
     return 0;

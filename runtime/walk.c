@@ -291,12 +291,18 @@ static void finish(Build *B) {
                     guests[n++]=M[p+0x59];next=(uint16_t)r16((uint32_t)p+0x47);
                 }
                 if(next)valid=0;
-                if(kind==9 && !r16(at+0x32))valid=0;
+                /* The castle's loading/unloading dispatch draws its body
+                 * without substituted riders until word 0x32 is set. Linked
+                 * guests alone do not mean occupied attachment geometry. */
+                int seated_n=(kind==9 && !r16(at+0x32))?0:n;
                 c->rig_ok=valid && !B->rig_rider_error &&
                     B->frame_count==1 && B->drawn_frame==c->frame &&
                     (t[12]==2 || t[12]==4 || t[12]==6) &&
-                    (uint16_t)r16(at+0x2e)<M[rec+0xa8] && !r16(at+0x8e) &&
-                    rm_seat_order(guests,n,cap,kind,r32(at+0x20),c->seats);
+                    /* The overlay key can stay populated while inactive.
+                     * Native speed dispatch and frame_count decide whether
+                     * an overlay was actually drawn. */
+                    (uint16_t)r16(at+0x2e)<M[rec+0xa8] &&
+                    rm_seat_order(guests,seated_n,cap,kind,r32(at+0x20),c->seats);
             }
             c->shape=WM_ROUND;
             if(type==0 || type==1 || type==5 || type==6 || type==14 || (type>=22 && type<=25)) c->shape=WM_BOX;

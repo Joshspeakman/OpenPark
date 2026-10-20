@@ -77,3 +77,32 @@ coverage. Guest actions, staff/operators, remaining rides and track assemblies,
 full normal-view remaster rendering, effects/resources and complete runtime
 coverage remain unfinished. The completion manifest has no accepted assets;
 the full-release installation gate remains closed.
+
+## Captured-state follow-up
+
+Replaying the previously captured native thing arrays exposed two eligibility
+errors that the synthetic occupied fixture did not cover. Bouncy-castle
+loading can have linked guests while native dispatch intentionally omits
+rider substitutions; the body now remains eligible with empty attachments.
+The stored overlay key can also remain nonzero while inactive. Eligibility
+now follows the native speed threshold and actual drawn-frame count instead
+of rejecting that inactive key.
+
+`tools/remaster_ride_replay.c` validates the actual captured seat bindings,
+renders the isolated ride through Visitor View, and draws the same assembly
+with the orthographic baker's projection. All 80 captured states replay,
+covering eleven frame keys and eight samples with linked guests but no
+attached rider geometry. The native origin remains fixed at
+55.979168,110.937500. The sequence matches the original captured frame list.
+The overhead view prompted a reduction in raised bed seams.
+
+Evidence: `work/remaster/rides/replay/`, `replay-verification.json`,
+`replay.log`, `loading-tests.log`, `loading-walk-tests.log` and
+`loading-build.log`. The report hashes the actual model and capture files.
+Three sanitizer tests, eleven Python tests, both walk modes, 17,808 view
+checks and native compile/signature pass after the fixes.
+
+These are replays of saved things, not fresh headed captures, measured
+display pacing, full loading choreography or an integrated high-resolution
+normal-view renderer. The surrounding terrain is still original artwork.
+No new application was installed.
