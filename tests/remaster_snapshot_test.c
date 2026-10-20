@@ -15,7 +15,7 @@ static void put16(unsigned p,unsigned v){memory[p]=v;memory[p+1]=v>>8;}
 static void put32(unsigned p,unsigned v){put16(p,v);put16(p+2,v>>16);}
 static void file16(FILE*f,unsigned v){fputc(v&255,f);fputc((v>>8)&255,f);}
 static void file32(FILE*f,unsigned v){file16(f,v);file16(f,v>>16);}
-static int capture(Snap*s,int idx){
+static int capture_missing(Snap*s,int idx,int expected_missing){
     s->ncards=0;s->npix=0;
     memset(sa,0,sizeof sa);memset(sb,255,sizeof sb);
     Build b={.s=s,.g=&s->g,.cx=12,.cy=14,.rider_slot=-1};
@@ -23,12 +23,13 @@ static int capture(Snap*s,int idx){
     b.b=b.a;b.b.buf=sb;
     put16(0x300000+(14*64+12)*4,idx);
     int missing=tp_native_cell_things(memory,12,14,OXS<<s->g.lo,OYS<<s->g.lo,card_log,&b);
-    finish(&b);return !missing && s->ncards==1;
+    finish(&b);return missing==expected_missing && s->ncards==1;
 }
+static int capture(Snap*s,int idx){return capture_missing(s,idx,0);}
 int main(void){
     memory=calloc(64u<<20,1);Snap*s=calloc(1,sizeof*s);CHECK(memory&&s);M=memory;
     put16(TILE_W,48);put16(TILE_H,32);put16(SCREEN_MODE,1);
-    put32(MAP_PTR,0x300000);put32(THINGS,0x400000);
+    put32(MAP_PTR,0x300000);put32(0x1d3b04,0x300000+64*64*4);put32(THINGS,0x400000);
     put32(0x1d3b80,0x500000);put32(0x1d3b7c,0x510000);
     put32(0x1d3bb8,0x520000);put32(0x1d3b38,0x540000);
     put16(0x1b44c1+2,7);put16(0x540000+14,3);
@@ -77,6 +78,53 @@ int main(void){
     put16(thing+0x16,3*107);memory[thing+12]=4;put16(SCREEN_MODE,8);
     CHECK(geom(&s->g));CHECK(capture(s,1));
     CHECK(s->cards[0].rig_ok && s->cards[0].rig_x==12.5f && s->cards[0].rig_y==14.125f);
+    /* Reaction frames can have very different crops. Native origins and
+     * source-frame keys must stay attached to the guest, in both modes. */
+    memory[thing+4]=2;memory[thing+0x59]=7;
+    static const uint8_t guest_states[]={2,4,6,8,0xa,0x14,0x18,0x1a,0x1e,
+        0x20,0x22,0x28,0x2a,0x2c,0x2e,0x34,0x38,0x3a,0x3c,0x3e,0x40,0x42,0x4a,0x4c};
+    for(int mode=0;mode<2;mode++){
+        put16(SCREEN_MODE,mode?8:1);CHECK(geom(&s->g));
+        for(unsigned st=0;st<sizeof guest_states;st++){
+            memory[thing+12]=guest_states[st];
+            for(unsigned frame=3;frame<=4;frame++){
+                put16(thing+10,frame);CHECK(capture(s,1));c=s->cards[0];
+                CHECK(c.rig_ok && c.cls==2 && c.type==7 && c.frame==frame);
+                CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.125f:14.25f));
+                CHECK(c.x==12.5f && c.y==14.25f); /* legacy card placement */
+            }
+        }
+    }
+    memory[thing+12]=8;
+    memory[thing+0x59]=8;CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    memory[thing+0x59]=0;
+    put16(thing+0x52,1);CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(thing+0x52,0);memory[thing+0xb9]=1;
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);memory[thing+0xb9]=0;
+    put16(0x1d6678,1);CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(0x1d6678,0);memory[0x1b14cc]=1;memory[thing+5]=0x80;
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    memory[0x1b14cc]=memory[thing+5]=0;
+    for(int mode=0;mode<2;mode++){
+        put16(SCREEN_MODE,mode?8:1);CHECK(geom(&s->g));
+        memory[thing+12]=0xc;CHECK(capture(s,1));
+        CHECK(s->cards[0].rig_ok && s->cards[0].rig_z==0);
+        /* A no-art bench record triggers the native vertical placement.
+         * The renderer reports this class unsupported; this fixture checks
+         * the guest's offset only and preserves that diagnostic. */
+        put16(thing+2,2);memory[thing+200+4]=0x1a;
+        memory[thing+7]=12;memory[thing+9]=14;
+        CHECK(capture_missing(s,1,0x1a));c=s->cards[0];
+        CHECK(c.rig_ok && fabsf(c.rig_z-(mode?1.f/6:.2f))<1e-6f);
+        CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.125f:14.25f));
+        put16(thing+2,0);memory[thing+200+4]=0;
+        memory[thing+12]=0x32;put16(thing+0x5f,12);
+        CHECK(capture(s,1));c=s->cards[0];
+        CHECK(c.rig_ok && fabsf(c.rig_z-(mode?.125f:.3f))<1e-6f);
+        CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.125f:14.25f));
+    }
+    /* Restore the shop for the expanded-pixel fixture below. */
+    memory[thing+4]=10;memory[thing+12]=4;put16(thing+0x5f,0);
     /* An expanded world part must be captured completely without moving the
      * model's native origin. This fixture contains no source game artwork. */
     mkdir("build",0755);mkdir("build/remaster_snapshot_fixture",0755);
@@ -97,6 +145,6 @@ int main(void){
     for(int i=0;i<64;i++)CHECK(s->pix[i]==88);
     setenv("TP_ART_MODE","original",1);
     free(s);free(memory);
-    puts("remaster snapshot: scenery/shop native origins, crop independence, tick-selected frames and composite guards passed");
+    puts("remaster snapshot: scenery/shop/guest native origins, crop independence, tick-selected frames and composite guards passed");
     return 0;
 }

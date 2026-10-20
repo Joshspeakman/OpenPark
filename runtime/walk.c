@@ -116,7 +116,7 @@ static int geom(Geom *g) {
 #define POOL (12u << 20)            /* source pixels (16-bit: 0xffff transparent), including large parks */
 #define MAXCONT 256
 #define SHR 8                       /* shadow samples per cell */
-typedef struct { float x, y, r, rig_x, rig_y; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
+typedef struct { float x, y, r, rig_x, rig_y, rig_z; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
     uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40]; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
@@ -252,7 +252,7 @@ static void finish(Build *B) {
         fy = y1 + 1;
         if (!big) c->r = 0;
         c->x = (float)wx; c->y = (float)wy; c->w = (uint16_t)w; c->h = (uint16_t)h;
-        c->rig_x=c->x;c->rig_y=c->y;
+        c->rig_x=c->x;c->rig_y=c->y;c->rig_z=0;
         double ax = fx - x0; c->ax = (uint16_t)(ax < 0 ? 0 : ax > w ? w : ax); c->ay = (uint16_t)(fy - y0);
         c->off = s->npix; c->idx = (int16_t)B->idx; c->cls = (uint8_t)(B->idx < 0 ? 0xff : B->cls); c->big = (uint8_t)big;
         c->type = -1; c->shape = WM_SMALL;
@@ -262,9 +262,14 @@ static void finish(Build *B) {
             uint32_t at=(uint32_t)(t-M);c->frame=(uint16_t)r16(at+10);
             if(B->cls==2) {
                 c->type=t[0x59];
-                /* First rig slice: ordinary walking. Items, markers and other
-                 * activity states retain their complete original art. */
-                c->rig_ok=t[12]==8 && !r16(at+0x52) && !t[0xb9] &&
+                /* The native common path supplies one complete body frame.
+                 * Bind its actual key/origin for walking and reactions alike.
+                 * Substituted riders and attached overlays require separate
+                 * composite placement, not a body-only rig. Vertical offsets
+                 * on the direct/common paths are separated below. */
+                c->rig_ok=c->type<8 &&
+                    B->frame_count==1 && B->drawn_frame==c->frame &&
+                    !r16(at+0x52) && !t[0xb9] &&
                     !((M[0x1b14cc]&7) && (t[5]&0x80)) && B->idx!=(uint16_t)r16(0x1d6678);
             }
         }
@@ -312,11 +317,19 @@ static void finish(Build *B) {
             if(animation==431) c->shape=WM_GROUND; /* lake */
             if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
         }
-        if((B->idx<0 || B->cls==0x18 || (B->cls==0xa && c->rig_ok)) && B->frame_count==1) {
+        if((B->idx<0 || B->cls==0x18 || ((B->cls==0xa || B->cls==2) && c->rig_ok)) && B->frame_count==1) {
             /* The model is authored around the native frame origin. The old
              * card's cropped bottom is only a billboard placement heuristic. */
             double sy=((int16_t)B->frame_y>>g->lo)-OYS;
             double sx=((int16_t)B->frame_x>>g->lo)-OXS;
+            if(t && B->cls==2 && (t[12]==0x0c || t[12]==0x32)){
+                /* Native bench/elevated states raise the frame on screen.
+                 * Preserve that as height, not a slide across the ground. */
+                int hires=r16(SCREEN_MODE)==8;
+                int base_y=((OYS<<g->lo)+(hires?(t[8]>>3)>>1:t[8]>>3))>>g->lo;
+                c->rig_z=(float)((base_y-(((int16_t)B->frame_y)>>g->lo))*g->aspect/g->tws);
+                sy=base_y-OYS;
+            }
             double vy=sy/g->ths,vx=(sx-vy*g->shear)/g->tws;
             c->rig_x=(float)(B->cx+vx);c->rig_y=(float)(B->cy+vy);
             c->frame=(uint16_t)B->drawn_frame;c->rig_ok=1;
@@ -328,7 +341,7 @@ static void finish(Build *B) {
             wx=B->cx+t[6]/256.0+layer->ox;wy=B->cy+t[8]/256.0+layer->oy;
             c->x=(float)wx;c->y=(float)wy;c->r=fmaxf(layer->hx,layer->hy);c->big=1;
         }
-        if(B->idx>=0 && B->cls!=0x18 && !(B->cls==0xa && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
+        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==2) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {
@@ -893,7 +906,8 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                     if(!seated[seat]){ok=0;break;}
                 }
                 if(ok) {
-                    rm_draw(&mr,rig,pose,c->rig_x,c->rig_y,(float)W.hscale,NULL);
+                    float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
+                    rm_draw(&mr,rig,pose,c->rig_x,c->rig_y,(float)W.hscale,c->rig_z?placement:NULL);
                     rigs_drawn++;
                     for(int seat=0;seat<rig->ns;seat++)if(guests[seat])
                         rm_draw(&mr,guests[seat],seated[seat],c->rig_x,c->rig_y,(float)W.hscale,pose->matrices+(rig->nb+seat)*12);

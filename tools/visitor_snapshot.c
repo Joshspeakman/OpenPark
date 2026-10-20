@@ -6,6 +6,7 @@
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth x y yaw [original]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth frame FRAME SHAPE yaw
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth guest FRAME VARIANT yaw [state SUBTYPE]
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -35,7 +36,8 @@ int main(int argc,char**argv){
     for(int i=0;i<256;i++)palette[i]=0xff000000u|(pal[i*3]*255/63)|((pal[i*3+1]*255/63)<<8)|((pal[i*3+2]*255/63)<<16);
     tp_map_w=tp_map_ext=(uint32_t)atoi(argv[4]);
     int shop=!strcmp(argv[5],"shop");
-    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop;double x,y,yaw;
+    int guest=!strcmp(argv[5],"guest");
+    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest;double x,y,yaw;
     if(gallery){
         if(!sweep&&argc<9)return 2;M=memory;
         uint32_t map=r32(MAP_PTR),things=r32(THINGS);
@@ -50,6 +52,16 @@ int main(int argc,char**argv){
             /* Isolate the base state in this private memory copy. Occupied and
              * status states need separate composite fixtures. */
             memory[0x1d3c62+record+0x67]=255;
+        }
+        if(guest){
+            int variant=atoi(argv[7]);if(variant<0||variant>=8)return 2;
+            t[4]=2;t[12]=8;t[6]=t[8]=128;t[0x59]=(uint8_t)variant;
+            if(argc>10 && !strcmp(argv[9],"state")){
+                char*end=NULL;long state=strtol(argv[10],&end,0);
+                if(!argv[10][0] || *end || state<0 || state>255)return 2;
+                t[12]=(uint8_t)state;
+            }
+            memset(memory+0x1d6678,0,2); /* no selection-arrow fixture */
         }
         memory[0x1d3afc]=1;x=y=32;yaw=sweep?ART_YAW:atof(argv[8])*M_PI/180;
     }else{x=atof(argv[5]);y=atof(argv[6]);yaw=atof(argv[7])*M_PI/180;}
@@ -91,7 +103,7 @@ int main(int argc,char**argv){
     }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
-        Card*c=&s->cards[0];if(!shop)c->shape=(uint8_t)atoi(argv[7]);
+        Card*c=&s->cards[0];if(!shop && !guest)c->shape=(uint8_t)atoi(argv[7]);
         if(argc>11 && !strcmp(argv[9],"model")) {
             c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
             const WMModel*m=wm_model_find(c->cls,c->type);
@@ -103,6 +115,14 @@ int main(int argc,char**argv){
         }
         float width=c->w/s->g.tws,height=c->h*s->g.aspect/s->g.tws;
         double dist=fmax(width,height)*1.45+1;
+        /* A guest's exaggerated reaction bounds must not move the camera.
+         * Use one fixed composition for all identities, keys and subtypes. */
+        if(guest){
+            dist=3.2;height=1.25;
+            fprintf(stderr,"guest %d state %u source frame %u: native origin %.6f %.6f lift %.6f eligible %u\n",
+                    c->type,memory[r32(THINGS)+200+12],c->frame,
+                    c->rig_x,c->rig_y,c->rig_z,c->rig_ok);
+        }
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
         W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55;W.cam_pitch=.07;
         if(getenv("TP_SNAPSHOT_EYE"))W.cam_z=atof(getenv("TP_SNAPSHOT_EYE"));

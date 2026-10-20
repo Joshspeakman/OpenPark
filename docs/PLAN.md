@@ -5,6 +5,22 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Reimagined guest reaction placement (Codex,
+`codex/reimagined-full-remaster`): ordinary and reaction rigs now bind to
+the actual native frame origin; raised guest states retain height without
+sliding across the ground. Offline guest capture uses a fixed camera.
+Local character authoring adds articulated faces, jaws, skin changes and
+props, with 226 reaction-key candidates across the first two identities.
+These are not accepted animation coverage; remaining performances and
+visual corrections continue.
+
+Three sanitizer tests, eleven Python tests, both walk modes and 17,808 view
+checks pass. Compile-only native build/signature passes. A 36.61-second
+muted scratch-profile headed **Original-mode** regression captured both
+views and exited cleanly; all 112 source DATA hashes remain unchanged.
+No application was installed and no headed remastered-art pass is claimed.
+See `docs/reports/2026-10-20-remaster-reactions.md`.
+
 2026-10-20, expanded Reimagined drawing bounds (Codex,
 `codex/reimagined-full-remaster`): `TPRART02` separates replacement display
 bounds from immutable source bindings. Normal world drawing, terrain and
