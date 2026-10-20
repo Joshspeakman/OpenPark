@@ -446,18 +446,24 @@ int tp_host_timer_behind(void) {
  * the instruction count's time otherwise: holding by either clock alone let the card outrun the mixer in the menus
  * and while loading). It never runs ahead of real time, and after a stall longer than the ring's lead it goes on from now (sb16_skip_to): the stall is not replayed. The output ring's
  * lead (sb16_play) covers the hold. Deterministic runs: the wall clock, as before. */
-static double card_allow, card_hold_max;   /* (card_hold_max: the longest the card waited for a tick, TP_DEBUG's card: line) */
+static double card_allow, card_hold_max;
+static volatile long card_stalls; static volatile double card_stall_max;   /* stalls past the output's lead (tp_host_card_stalls) */   /* (card_hold_max: the longest the card waited for a tick, TP_DEBUG's card: line) */
 static void card_tick(double period) {
     double t = now_s(), sb16_lead_seconds(void);
     if (card_allow && t - card_allow > card_hold_max) card_hold_max = t - card_allow;
     /* After a stall longer than the output ring's lead (or at the start): on from now, the stall not replayed. (A
      * shorter threshold than the lead let a stall run the ring dry and then replayed it, leaving the effects that
      * much later until the next dry-out.) */
-    if (card_allow < t - sb16_lead_seconds()) { void sb16_skip_to(double t); card_allow = t; sb16_skip_to(t); }
+    if (card_allow < t - sb16_lead_seconds()) {
+        if (card_allow) { card_stalls++; if (t - card_allow > card_stall_max) card_stall_max = t - card_allow; }
+        void sb16_skip_to(double t); card_allow = t; sb16_skip_to(t);
+    }
     card_allow += period;                              /* (the card may play a period past this tick before its handler has mixed:
                                                         * safe because the driver mixes further ahead than one period) */
     if (card_allow > t + period) card_allow = t + period;
 }
+/* Stalls of the game thread longer than the output's lead since the last call (heard as a drop), and the longest. */
+long tp_host_card_stalls(double *longest) { long n = card_stalls; *longest = card_stall_max; card_stalls = 0; card_stall_max = 0; return n; }
 double tp_host_card_hold_max(void) { double h = card_hold_max; card_hold_max = 0; return h; }
 double tp_host_card_clock(void) {
     double t = now_s();
@@ -497,7 +503,7 @@ static void realtime_events(void) {
 
 static void poll_keyboard(void) {
     poll_count++;
-    if (!deterministic) return;
+    if (!deterministic) { void tp_view_screen_pass(void); tp_view_screen_pass(); return; }   /* (a pass of the game's loop: view.c) */
     while (key_at < script.nkeys && script.keys[key_at].at <= poll_count) keys[nkeys++] = script.keys[key_at++].key;
     while (click_at < script.nclicks && script.clicks[click_at].at <= poll_count) {
         queue_mouse(script.clicks[click_at].x, script.clicks[click_at].y, 1);

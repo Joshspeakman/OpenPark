@@ -102,14 +102,37 @@ void tp_audio_video_stop(void) {
 }
 int tp_audio_cd_busy(void) { return cd && cd.isPlaying; }
 
+/* Drops, in the log (theme-park.log) whatever the settings, once a second at most: output callbacks that came late
+ * (the device ran on without the game's sound), the output ring run dry, and game-thread stalls longer than the
+ * output's lead (host.c: the card skipped them). Called by the app's tick. */
+static volatile long late_callbacks; static volatile double late_worst_ms; static double t0;   /* (the output's start) */
+void tp_audio_report(void) {
+    static double last; double t = NSProcessInfo.processInfo.systemUptime; if (t - last < 1) return; last = t;
+    long sb16_underruns(void), tp_host_card_stalls(double *longest);
+    static long dry0; long dry = sb16_underruns(); double st; long stalls = tp_host_card_stalls(&st);
+    long late = late_callbacks; double lw = late_worst_ms; late_callbacks = 0; late_worst_ms = 0;
+    if (!late && dry == dry0 && !stalls) return;
+    fprintf(stderr, "audio drop at %.0f s: late output callbacks %ld (longest %.0f ms), ran dry %ld, game stalls past the lead %ld (longest %.0f ms)\n",
+            t - t0, late, lw, dry - dry0, stalls, st * 1e3);
+    dry0 = dry;
+}
 int tp_audio_start(void) {
     if (engine) return 0;
+    t0 = NSProcessInfo.processInfo.systemUptime;
     engine = [AVAudioEngine new];
     AVAudioFormat *fmt = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100 channels:2];
     AVAudioSourceNode *pcm = [[AVAudioSourceNode alloc] initWithFormat:fmt renderBlock:
         ^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount frames, AudioBufferList *out) {
             static float buf[2 * 4096];
             if (frames > 4096) frames = 4096;
+            {   /* (an output callback that came late: the device played on without us; tp_audio_report) */
+                static double next = -1;
+                if (ts && (ts->mFlags & kAudioTimeStampSampleTimeValid)) {
+                    double gap = next >= 0 ? ts->mSampleTime - next : 0;
+                    if (gap > 8) { late_callbacks++; if (gap / 44.1 > late_worst_ms) late_worst_ms = gap / 44.1; }
+                    next = ts->mSampleTime + frames;
+                }
+            }
             sb16_play(buf, (int)frames);   /* (made in the game's time by sb16_pump) */
             static FILE *rec; static int rec_on = -1;              /* TP_AUDIO_REC=<file> (development): the card's output, 44.1 kHz stereo float */
             if (rec_on < 0) { const char *p = getenv("TP_AUDIO_REC"); rec = p ? fopen(p, "wb") : NULL; rec_on = rec != NULL; }

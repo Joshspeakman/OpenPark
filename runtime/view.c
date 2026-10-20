@@ -222,7 +222,8 @@ static int fps_game_hook;                               /* (the game's frames co
 /* Steady pacing (the default; Launcher: Pacing): park frames are released at a fixed rate, 60 a second at the
  * game's Original speed and in proportion for the faster ones, on the display's refresh when the app reports
  * it: every frame lasts the same, and the game, which advances once per frame, runs at an
- * even speed whatever is drawn. Elsewhere (menus without the park) the instruction governor paces as before. */
+ * even speed whatever is drawn. Elsewhere (menus without the park) the instruction governor paces as before, except
+ * for the game's own screens that take longer than a park frame per pass (tp_view_screen_pass). */
 static int pacing;
 static double pub_frame_t; static long pub_serial, shown_serial;   /* the published frame's start (paced), and which the app has shown */
 static volatile double vs_t, vs_period;                 /* the display's last refresh and its period */
@@ -256,7 +257,8 @@ int tp_view_pacing(void) { return pacing; }
 void tp_view_set_pacing(int on) { pacing = on; if (on) { tp_hook_pcs[0] = FRAME_RENDER; tp_hooks_changed(); } }
 void tp_view_pacing_init(void) { const char *e = getenv("TP_PACING"); tp_view_set_pacing(!(e && !strcmp(e, "dosbox"))); }   /* (qol.c, at the game's start) */
 int tp_host_timer_behind(void);
-static void pace_frame(void) {
+static double park_paced_at;                              /* (when a park frame was last paced) */
+static void pace_frame(double share) {
     /* Timer ticks overdue: not now. The game's timer interrupts (240 a second) are delivered between its
      * instructions; a loop of short frames (one that waits on its timer counters while an effect starts) got
      * two or three a frame between the frame waits, and the park froze for up to a second, its timer at half
@@ -264,7 +266,7 @@ static void pace_frame(void) {
     if (tp_host_timer_behind()) return;
     static double target;
     double fps = 60.0 * tp_host_cycles() / 10000.0; if (fps < 10) fps = 10;
-    double period = 1.0 / fps, t = now();
+    double period = share / fps, t = now();
     static double ideal;                                  /* the exact schedule; target: it on the refresh grid */
     if (!ideal || t - ideal > 4 * period) ideal = t;     /* (starting, or after a stall: no burst to catch up) */
     ideal += period; target = ideal;
@@ -289,6 +291,27 @@ static void pace_frame(void) {
     if (getenv("TP_PACE_DEBUG")) { static double last, lo = 1, hi, l2; double d = tp_frame_paced_at - last; last = tp_frame_paced_at;
         if (d < 0.5) { if (d < lo) lo = d; if (d > hi) hi = d; }
         if (tp_frame_paced_at - l2 > 1) { fprintf(stderr, "pace intervals: %.2f .. %.2f ms (refresh %.2f ms)\n", lo * 1e3, hi * 1e3, vs_period * 1e3); lo = 1; hi = 0; l2 = tp_frame_paced_at; } }
+}
+/* The game's own screens over a running park (the park rating's: thoughts, graphs; the others of that row) do the
+ * park's work and draw a whole screen each pass: 500,000 instructions, where a park frame takes some 300,000. Under
+ * the instruction governor they ran at 20 passes a second at Original speed (the park itself at 60), their menus and
+ * pointer slow. The host calls this at each keyboard poll, once a pass: a pass of more than a park frame's share of
+ * the governor (its instructions at the Speed setting would take longer than a frame) is paced as a park frame
+ * instead, and then every pass for a second after, each at most its governed time (a short pass never runs slower
+ * than the governor would let it). Light screens (the title, the menus without a park) are governed as before. */
+extern double tp_dbg_pace;
+void tp_view_screen_pass(void) {
+    extern uint64_t tp_insns; static uint64_t li; static double heavy_at;
+    uint64_t d = tp_insns - li; li = tp_insns;
+    if (!pacing || d < 20000) return;                     /* (not a pass: a poll inside a wait, or an interrupt) */
+    double t = now();
+    if (t - park_paced_at < 0.1) return;                  /* (the park's frames are paced already) */
+    double c = tp_host_cycles(), fps = 60.0 * c / 10000.0; if (fps < 10) fps = 10;
+    double budget = c * 1e3 / fps;                        /* a frame's instructions at the governor's rate (pace_frame's) */
+    if (d > budget) heavy_at = t;
+    if (!heavy_at || t - heavy_at > 1) return;
+    double p0 = now(); pace_frame(d > budget ? 1 : (double)d / budget); tp_dbg_pace += now() - p0;
+    if (getenv("TP_PACE_DEBUG")) { static double l; static int n; n++; if (t - l > 1) { fprintf(stderr, "pace: %d screen passes\n", n); n = 0; l = t; } }
 }
 static int st_game, st_pub, st_comp; static long st_game_total; static double st_pass, st_t0;      /* counts this second */
 static double sh_game, sh_pub, sh_comp, sh_pass;                        /* last second's */
@@ -904,7 +927,7 @@ void tp_view_hook(void) {
         { void tp_free_park_shown(void); tp_free_park_shown(); }       /* (and its Free Mode rules; freemode.c) */
         tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
         { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
-          if (fresh) { st_game++; st_game_total++; if (pacing) { double p0 = now(); pace_frame(); tp_dbg_pace += now() - p0; } } }
+          if (fresh) { st_game++; st_game_total++; if (pacing) { double p0 = now(); pace_frame(1); park_paced_at = now(); tp_dbg_pace += now() - p0; } } }
         if (getenv("TP_VIEW_DEBUG")) { static double l; static long c0; if (now() - l > 1) { fprintf(stderr, "view: %ld game frames/s\n", st_game_total - c0); c0 = st_game_total; l = now(); } }
         hires_step(sc);
         { static int tc = -1; if (tc < 0) tc = getenv("TP_VIEW_TRUST") ? atoi(getenv("TP_VIEW_TRUST")) : 0;

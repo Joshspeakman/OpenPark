@@ -13,6 +13,36 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, the player's report after #10 (sound "working okay"):
+- The park rating's screens (the face: thoughts, graphs and the rest of that row) ran slowly while a park was open.
+  Only park frames are paced (view.c); the game's own screens fell back to the instruction governor, and a pass of
+  those screens does the park's work and draws a whole screen: 500,000 instructions on TESTPARK, about a million on
+  the player's 128x128 park, so 20 and about 10 passes a second at Original speed (polls/s; it followed Cycles:
+  37 at 20000, 73 at 40000). Now the host calls tp_view_screen_pass at each keyboard poll (one per pass of the
+  game's loop): a pass longer than a park frame's share of the governor is paced as a park frame, and so is every
+  pass for a second after, each at most its governed time. Light screens (title, menus without a park) are
+  governed as before. Measured on a copy of the player's park: 60 passes a second on the rating screens.
+- Full screen, the bottom-right hot corner (Quick Note) fired: the game scrolls at the screen's edges, and hot
+  corners act on the Mac's pointer. In full screen the Mac's pointer is now detached from the mouse and set where
+  the mouse takes it, never within 6 points of a corner; the game is given the mouse's own place, corners included
+  (main.m pointOf:). The menu bar's row, other apps, the Visitor View and DS_TEST runs keep the real pointer
+  (TP_CORNER_GUARD=1: in tests too). Checked with posted mouse moves: pushed into the bottom right, the pointer stops
+  at 1727,1111 on a 1728x1117 screen while the game reads 638,398 of 640x400; released at the top row, after leaving
+  full screen and at quit. Not checked: Quick Note itself (a real mouse).
+- Sound drops at the first weather of a session and while building fast as the view moved between corners: not
+  reproduced. Sessions on a copy of the player's park with their settings (Cycles 10000, panel 0.5, 1728x1085, MIDI
+  music), a storm started from clear and edge scrolling zoomed out, recorded both before and after the limiter: no
+  gaps, no ran-dry, hold max under 40 ms against the 60 ms lead. Two changes: (1) the game's code (27 MB) is read
+  into memory at launch in the background (main.m prefault_code): a first storm or new building code otherwise ran
+  from the disk once, and on a cold disk cache the game thread waits on those reads; these test runs always had the
+  code cached. (2) theme-park.log now always gets a line "audio drop at N s: ..." for output callbacks that came late
+  (the device's sample time skipped), the ring run dry, and game stalls past the lead, so the next report has times.
+- Research "THIS FEATURE NOT AVAILABLE TRY PLAYING THE FULL GAME" (menu text 183): most likely the game's own rule
+  for the Sandbox level (its levels, texts 73..75: Sandbox, Sim, Business); not yet confirmed in play (the screen's
+  path was not found by automation; its code reads the text by an index not found as a constant). The player's parks
+  are Sandbox with Free Mode Rules: Sandbox; Endless keeps the level byte at 0, so it would have the same rule. Asked
+  the player where they opened research and whether Endless should play at Sim.
+
 2026-10-19, sound (#10, #11, Fable's review): the card's clock is now tied to the timer ticks delivered (host.c
 card_tick / tp_host_card_clock): each tick lets it play on one period, never ahead of real time, a stall over 100 ms
 not replayed (sb16_skip_to). Fable's branch held it at the next undelivered tick by emu_now; that is the same while

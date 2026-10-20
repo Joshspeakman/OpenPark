@@ -12,6 +12,9 @@
 #import <GameController/GameController.h>
 #import <AVFoundation/AVFoundation.h>
 #include <pthread.h>
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <sys/mman.h>
 #include "host.h"
 int tp_audio_start(void);
 void tp_audio_stop(void);
@@ -98,6 +101,7 @@ int tp_audio_video_play(const char *path); void tp_audio_video_stop(void);
 - (void)walkStop;
 - (void)walkHold:(double)fwd :(double)strafe :(double)turn :(double)seconds;
 - (void)walkPad:(double)fwd :(double)strafe :(double)lookX :(double)lookY;
+- (void)setCornerGuard:(BOOL)on;
 @end
 
 static GameView *game_view;                         /* (the 3DO ride videos: ride_video_3do) */
@@ -130,6 +134,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
     TpVideo *_v3; CALayer *_v3Layer; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
+    BOOL _cornerGuard, _held; NSPoint _virt;   /* full screen: the pointer kept out of the corners (pointOf:) */
 }
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
@@ -329,8 +334,51 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     _cursorHidden = hidden;
     if (hidden) [NSCursor hide]; else [NSCursor unhide];
 }
+/* Full screen: macOS's hot corners act on the Mac's pointer wherever it is (Quick Note in the bottom right, reached
+ * by the game's edge scrolling). There the Mac's pointer is detached from the mouse (CGAssociateMouseAndMouseCursor-
+ * Position) and set where the mouse takes it, but never within 6 points of a corner; the game is given the mouse's
+ * own place, corners included. The menu bar's row is left to the Mac (its menus need the real pointer), as are other
+ * apps, the Visitor View and the tests. */
+- (void)setCornerGuard:(BOOL)on {
+    static BOOL watching;
+    if (!watching) {
+        watching = YES;
+        for (NSString *n in @[NSApplicationDidResignActiveNotification, NSWindowDidResignKeyNotification])
+            [NSNotificationCenter.defaultCenter addObserverForName:n object:nil queue:nil usingBlock:^(NSNotification *note) { [game_view releasePointer]; }];
+    }
+    _cornerGuard = on; if (!on) [self releasePointer];
+}
+- (void)releasePointer { if (!_held) return; _held = NO; CGAssociateMouseAndMouseCursorPosition(true); }
+- (NSPoint)pointOf:(NSEvent *)e {
+    NSPoint loc = e.locationInWindow;
+    NSScreen *sc = self.window.screen;
+    static int test = -1; if (test < 0) test = getenv("DS_TEST") && !getenv("TP_CORNER_GUARD");   /* (TP_CORNER_GUARD=1: in tests too) */
+    if (!_cornerGuard || !sc || test || !self.window.isKeyWindow || !NSApp.isActive || tp_walk_active() || _walkDrop) {
+        [self releasePointer]; return [self convertPoint:loc fromView:nil];
+    }
+    NSRect s = sc.frame; const CGFloat k = 6;
+    if (!_held) {
+        NSPoint g = [self.window convertPointToScreen:loc];
+        BOOL nearX = g.x < NSMinX(s) + k || g.x > NSMaxX(s) - 1 - k;
+        if (g.y >= NSMaxY(s) - 2 && !nearX) return [self convertPoint:loc fromView:nil];   /* (the menu bar's row) */
+        _virt = g; _held = YES; CGAssociateMouseAndMouseCursorPosition(false);
+    } else {
+        NSEventType t = e.type;
+        if (t == NSEventTypeMouseMoved || t == NSEventTypeLeftMouseDragged || t == NSEventTypeRightMouseDragged || t == NSEventTypeOtherMouseDragged) {
+            _virt.x += e.deltaX; _virt.y -= e.deltaY;
+        }
+    }
+    _virt.x = fmin(fmax(_virt.x, NSMinX(s)), NSMaxX(s) - 1);
+    _virt.y = fmin(fmax(_virt.y, NSMinY(s)), NSMaxY(s) - 1);
+    NSPoint c = _virt;
+    BOOL ex = c.x < NSMinX(s) + k || c.x > NSMaxX(s) - 1 - k, ey = c.y < NSMinY(s) + k || c.y > NSMaxY(s) - 1 - k;
+    if (ex && ey) c.y = c.y < NSMidY(s) ? NSMinY(s) + k : NSMaxY(s) - 1 - k;   /* (beside the corner, on its side edge) */
+    CGWarpMouseCursorPosition(CGPointMake(c.x, NSMaxY(NSScreen.screens[0].frame) - c.y));
+    if (_virt.y >= NSMaxY(s) - 1 && !ex) [self releasePointer];               /* (up into the menu bar's row) */
+    return [self convertPoint:[self.window convertPointFromScreen:_virt] fromView:nil];
+}
 - (void)sendMouse:(NSEvent *)e {
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    NSPoint p = [self pointOf:e];
     _mouse = p; _mouseIn = YES;
     if (_walkDrop || tp_walk_active()) { [self setCursorHidden:NO]; return; }   /* (the Visitor View takes the pointer) */
     NSRect r = [self pointerRect];
@@ -480,7 +528,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 }
 - (void)magnifyWithEvent:(NSEvent *)e {
     if (tp_walk_active()) return;
-    [self zoomTo:_zoom * (1 + e.magnification) at:[self convertPoint:e.locationInWindow fromView:nil]];
+    [self zoomTo:_zoom * (1 + e.magnification) at:[self pointOf:e]];
 }
 - (void)scrollWheel:(NSEvent *)e {
     double dy = e.scrollingDeltaY, dx = e.scrollingDeltaX;
@@ -490,7 +538,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     }
     if (!e.hasPreciseScrollingDeltas) { dx *= 12; dy *= 12; }
     if (e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))
-        [self zoomTo:_zoom * pow(1.006, dy) at:[self convertPoint:e.locationInWindow fromView:nil]];
+        [self zoomTo:_zoom * pow(1.006, dy) at:[self pointOf:e]];
     else [self panBy:-dx :-dy];
 }
 - (void)zoomIn:(id)sender { [self zoomTo:_zoom * 1.25 at:NSMakePoint(NAN, NAN)]; }
@@ -530,9 +578,9 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     _buttons |= 4; [self sendMouse:e];
 }
 - (void)otherMouseUp:(NSEvent *)e { if (_panning) { _panning = NO; return; } _buttons &= ~4u; [self sendMouse:e]; }
-- (void)startPan:(NSEvent *)e { _panning = YES; _panFrom = [self convertPoint:e.locationInWindow fromView:nil]; }
+- (void)startPan:(NSEvent *)e { _panning = YES; _panFrom = [self pointOf:e]; }
 - (void)dragPan:(NSEvent *)e {                        /* the park follows the pointer */
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    NSPoint p = [self pointOf:e];
     [self panBy:-(p.x - _panFrom.x) :(p.y - _panFrom.y)];
     _panFrom = p;
 }
@@ -1245,6 +1293,7 @@ static uint32_t key_of_char(unichar c) {
 - (void)tick {
     [self runControl];
     [self musicTick];
+    { void tp_audio_report(void); tp_audio_report(); }
     [_view video3DOTick];
     [self runTestScript];
     [self pollController];
@@ -1308,6 +1357,7 @@ static uint32_t key_of_char(unichar c) {
         _view.frame = _container.bounds;
         _full = NO;
     }
+    [_view setCornerGuard:_full];
     [_window makeKeyAndOrderFront:nil]; [_window makeFirstResponder:_view];
     fprintf(stderr, "full screen %d (%.0fx%.0f)\n", _full, _view.frame.size.width, _view.frame.size.height);
 }
@@ -1364,8 +1414,23 @@ static uint32_t key_of_char(unichar c) {
 }
 @end
 
+/* The game's code (27 MB of it) read into memory at the start, in the background: otherwise each part runs from the
+ * disk the first time it is needed (the first storm, building in a new corner), and on a cold disk cache the game
+ * thread waited on the reads, long enough for the sound to drop. Every page touched once, at low priority. */
+static void prefault_code(void) {
+    unsigned long size = 0;
+    uint8_t *p = getsegmentdata((const struct mach_header_64 *)_dyld_get_image_header(0), "__TEXT", &size);
+    if (!p || !size) return;
+    madvise(p, size, MADV_WILLNEED);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        volatile uint8_t sum = 0; long page = getpagesize();
+        for (unsigned long i = 0; i < size; i += (unsigned long)page) sum += p[i];
+        (void)sum;
+    });
+}
 int main(int argc, const char **argv) {
     @autoreleasepool {
+        prefault_code();
         NSApplication *a = NSApplication.sharedApplication;
         a.activationPolicy = NSApplicationActivationPolicyRegular;
         NSMenu *bar = [NSMenu new];
