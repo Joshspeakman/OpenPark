@@ -243,7 +243,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         _bigW = ow; _bigH = oh;
         if (getenv("TP_PACE_DEBUG")) { static double l, worst, sum; static int n; double d = CACurrentMediaTime() - tc0; sum += d; n++; if (d > worst) worst = d;
             if (tc0 - l > 1) { fprintf(stderr, "compose %dx%d: avg %.2f ms, worst %.2f ms\n", _bigW, _bigH, sum / n * 1e3, worst * 1e3); l = tc0; worst = sum = 0; n = 0; } }
-        if (live != _live || _menuWide) { _live = live; _menuWide = NO; [self setNeedsLayout:YES]; [self layout]; [self setCursorHidden:NO]; }
+        if (live != _live || _menuWide) { _live = live; _menuWide = NO; [self setNeedsLayout:YES]; [self layout]; [self setCursorHidden:_held]; }
         [self updateGameCursor];
         [self updateScanlines:fh];
         [CATransaction begin]; [CATransaction setDisableActions:YES];
@@ -304,7 +304,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         tp_view_debug_hud(_big, ow, oh);
         px = _big; w = ow; h = oh;
     }
-    if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; if (live) [self setCursorHidden:NO]; }
+    if (live != _live) { _live = live; [self setNeedsLayout:YES]; [self layout]; if (live) [self setCursorHidden:_held]; }
     [self updateGameCursor];
     [self updateScanlines:fh];
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -353,9 +353,12 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 }
 /* Full screen: macOS's hot corners act on the Mac's pointer wherever it is (Quick Note in the bottom right, reached
  * by the game's edge scrolling). There the Mac's pointer is detached from the mouse (CGAssociateMouseAndMouseCursor-
- * Position) and set where the mouse takes it, but never within 6 points of a corner; the game is given the mouse's
- * own place, corners included. The menu bar's row is left to the Mac (its menus need the real pointer), as are other
- * apps, the Visitor View and the tests. */
+ * Position) and left where it was, hidden; the game is given the mouse's own place from its movements, corners
+ * included, and its cursor is drawn by the view (tp_view_hw_cursor off). When it is let go (the menu bar's row, other
+ * apps, leaving full screen) the Mac's pointer is put there, 6 points from any corner. The menu bar's row is left to
+ * the Mac (its menus need the real pointer), as are the Visitor View and the tests. (The first version moved the
+ * Mac's pointer with every event, and macOS ignores the mouse and trackpad for a quarter of a second after each such
+ * move: the pointer barely moved in full screen.) */
 - (void)setCornerGuard:(BOOL)on {
     static BOOL watching;
     if (!watching) {
@@ -365,7 +368,18 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     }
     _cornerGuard = on; if (!on) [self releasePointer];
 }
-- (void)releasePointer { if (!_held) return; _held = NO; CGAssociateMouseAndMouseCursorPosition(true); }
+- (void)releasePointer {
+    if (!_held) return;
+    _held = NO;
+    NSScreen *sc = self.window.screen;
+    if (sc) {                                             /* (the Mac's pointer where the mouse is, off the corners) */
+        NSRect s = sc.frame; const CGFloat k = 6; NSPoint c = _virt;
+        BOOL ex = c.x < NSMinX(s) + k || c.x > NSMaxX(s) - 1 - k, ey = c.y < NSMinY(s) + k || c.y > NSMaxY(s) - 1 - k;
+        if (ex && ey) c.y = c.y < NSMidY(s) ? NSMinY(s) + k : NSMaxY(s) - 1 - k;
+        CGWarpMouseCursorPosition(CGPointMake(c.x, NSMaxY(NSScreen.screens[0].frame) - c.y));
+    }
+    CGAssociateMouseAndMouseCursorPosition(true);         /* (also ends the warp's suppression of the mouse) */
+}
 - (NSPoint)pointOf:(NSEvent *)e {
     NSPoint loc = e.locationInWindow;
     NSScreen *sc = self.window.screen;
@@ -387,12 +401,10 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     }
     _virt.x = fmin(fmax(_virt.x, NSMinX(s)), NSMaxX(s) - 1);
     _virt.y = fmin(fmax(_virt.y, NSMinY(s)), NSMaxY(s) - 1);
-    NSPoint c = _virt;
-    BOOL ex = c.x < NSMinX(s) + k || c.x > NSMaxX(s) - 1 - k, ey = c.y < NSMinY(s) + k || c.y > NSMaxY(s) - 1 - k;
-    if (ex && ey) c.y = c.y < NSMidY(s) ? NSMinY(s) + k : NSMaxY(s) - 1 - k;   /* (beside the corner, on its side edge) */
-    CGWarpMouseCursorPosition(CGPointMake(c.x, NSMaxY(NSScreen.screens[0].frame) - c.y));
+    BOOL ex = _virt.x < NSMinX(s) + k || _virt.x > NSMaxX(s) - 1 - k;
+    NSPoint v = _virt;
     if (_virt.y >= NSMaxY(s) - 1 && !ex) [self releasePointer];               /* (up into the menu bar's row) */
-    return [self convertPoint:[self.window convertPointFromScreen:_virt] fromView:nil];
+    return [self convertPoint:[self.window convertPointFromScreen:v] fromView:nil];
 }
 - (void)sendMouse:(NSEvent *)e {
     NSPoint p = [self pointOf:e];
@@ -403,7 +415,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     BOOL inside = fx >= 0 && fx < 1 && fy >= 0 && fy < 1;
     /* The game's own screen draws its cursor: the Mac's hides over it. The park view shows the game's
      * cursor as a Mac cursor instead (smooth at the display's rate; the menu bar keeps its own). */
-    [self setCursorHidden:inside && !_live && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]];
+    [self setCursorHidden:(inside && !_live && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]) || _held];
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     if (_live) tp_view_mouse(fx, fy, _buttons);      /* mapped into the park */
@@ -412,7 +424,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 
 /* The game's cursor (view.c reads it from the game) as the Mac cursor over the park view, at the view's scale. */
 - (void)updateGameCursor {
-    BOOL want = _live && !_walkDrop && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"];
+    BOOL want = _live && !_walkDrop && !_held && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"];   /* (held: drawn by the view) */
     tp_view_hw_cursor = want;
     if (!want) { if (_gameCursor) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; } return; }
     static uint32_t px[64 * 64]; int w = 0, h = 0, ox = 0, oy = 0;

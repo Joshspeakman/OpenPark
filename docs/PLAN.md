@@ -13,6 +13,15 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, the player: mouse and trackpad broken in the main menu (full screen, 454ad1b; the guard came in d22771b).
+The hot-corner guard moved the Mac's pointer (CGWarpMouseCursorPosition) with every event while it held it, and
+macOS ignores local mouse and trackpad input for about 0.25 s after such a move: the pointer barely moved in full
+screen. The posted moves of the earlier check are not suppressed, so it passed. Now, while held, the Mac's pointer
+is left where it was and hidden, the game's cursor is drawn by the view (tp_view_hw_cursor off; menus draw their
+own), and the Mac's pointer is moved once when let go (off the corners), then re-associated (which also ends the
+suppression). Checked with TP_CORNER_GUARD=1 in full screen and posted moves: 109 moves reach the game in the menu,
+the park shows the game's cursor at the mouse's place. Not checkable here: a real mouse; the player to confirm.
+
 2026-10-19, the player's requests: videos 4:3 full screen with black borders; the panel and menus at the set size.
 - The game's full-screen windows in the wide view (the face's screens, research, bank, the ride and shop windows and
   lists, staff negotiation) were drawn at the full height, the park at the sides, whatever Panel Size was: at 0.5
