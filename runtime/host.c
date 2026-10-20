@@ -280,7 +280,27 @@ static double gov_rate;
 static double emu_t; static uint64_t emu_last; static int emu_on = -1;
 volatile double tp_frame_paced_at;                       /* steady pacing: when a park frame was last released (view.c) */
 double tp_dbg_run, tp_dbg_gov;                           /* (development: qol.c's tick gaps) */
-static int frame_paced(void) { return tp_frame_paced_at && now_s() - tp_frame_paced_at < 0.1; }
+/* The game's file activity, for view.c's long-frame log: the files opened or made since it last looked, and
+ * the time and bytes of reads and writes. */
+char tp_file_note[160]; double tp_file_time; long tp_file_bytes;
+static void file_note(const char *name) {
+    size_t n = strlen(tp_file_note); const char *b = strrchr(name, '\\'); b = b ? b + 1 : name;
+    if (n + strlen(b) + 2 < sizeof tp_file_note) snprintf(tp_file_note + n, sizeof tp_file_note - n, "%s%s", n ? " " : "", b);
+}
+/* Paced: a park frame was released in the last 0.1 s, or the game is still in the pass after it (a long pass:
+ * the park's monthly work, an award's pictures loading, 60 million instructions). Before, the governor took over
+ * 0.1 s into such a pass and held the rest of it to the Speed setting's rate: a 0.15 s frame became 1.2 s, and the
+ * timer and sound card went to the instruction clock meanwhile. Passes are counted at the keyboard polls (one a
+ * pass of the game's loop); two since the release: the game is elsewhere (a menu without the park), governed.
+ * (Park frames only: after a screen pass at the title, the menus ran ungoverned and the sound card starved.) */
+volatile int tp_frame_paced_park;                         /* (the last release was a park frame's, not a screen pass's: view.c) */
+static double pace_seen; static int passes_since_pace; static uint64_t poll_insns;
+static void pace_sync(void) { if (tp_frame_paced_at != pace_seen) { pace_seen = tp_frame_paced_at; passes_since_pace = 0; } }
+static int frame_paced(void) {
+    if (!tp_frame_paced_at) return 0;
+    double ago = now_s() - tp_frame_paced_at; pace_sync();
+    return ago < 0.1 || (tp_frame_paced_park && ago < 2 && passes_since_pace < 2);
+}
 static double emu_now(void) {
     if (emu_on < 0) emu_on = !getenv("TP_WALL_CLOCK");
     if (frame_paced()) { emu_t = now_s(); emu_last = tp_insns; return emu_t; }   /* (frames are paced: time is real time) */
@@ -503,6 +523,7 @@ static void realtime_events(void) {
 
 static void poll_keyboard(void) {
     poll_count++;
+    pace_sync(); if (tp_insns - poll_insns >= 20000) passes_since_pace++; poll_insns = tp_insns;
     if (!deterministic) { void tp_view_screen_pass(void); tp_view_screen_pass(); return; }   /* (a pass of the game's loop: view.c) */
     while (key_at < script.nkeys && script.keys[key_at].at <= poll_count) keys[nkeys++] = script.keys[key_at++].key;
     while (click_at < script.nclicks && script.clicks[click_at].at <= poll_count) {
@@ -796,6 +817,7 @@ static void interrupt(uint32_t number) {
             cstring(address(DS, d), name, sizeof name);
             int where = resolve(name, path, sizeof path);
             if (getenv("TP_DEBUG")) fprintf(stderr, "open %s mode %u -> %s\n", name, a & 255, where ? path : "(missing)");
+            file_note(name);
             if (!where) { carry(2); return; }
             if (a & 3 && where == 2) {
                 char target[1024]; snprintf(target, sizeof target, "%s%s", overlay_root, path + strlen(game_root));
@@ -815,7 +837,7 @@ static void interrupt(uint32_t number) {
             cstring(address(DS, d), name, sizeof name);
             int h = available_handle();
             if (h < 0) { carry(4); return; }
-            overlay_path(name, path, sizeof path);
+            overlay_path(name, path, sizeof path); file_note(name);
             int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) stop("cannot create %s", path);
             handles_fd[h] = fd; handles_writable[h] = 1;
@@ -862,8 +884,9 @@ static void interrupt(uint32_t number) {
                       tp_bigmap_things(n); things_grow = 1;
                   }
               } }
-            ssize_t got = 0, r;
+            ssize_t got = 0, r; double f0 = now_s();
             while ((uint32_t)got < c && (r = read(handles_fd[b], mem + at + got, c - got)) > 0) got += r;
+            tp_file_time += now_s() - f0; tp_file_bytes += got;
             { void tp_sound_bank_read(const char *, long, uint8_t *, long);   /* (a sound bank: its samples' ends cleaned, sb16.c) */
               if (got > 0) tp_sound_bank_read(handles_path[b], (long)lseek(handles_fd[b], 0, SEEK_CUR) - got, mem + at, got); }
             if (things_grow) { uint32_t tp; memcpy(&tp, mem + 0x1d3b10, 4);   /* a 128x128 park's things read: the rest of the pool, empty, in play */
@@ -904,7 +927,7 @@ static void interrupt(uint32_t number) {
             if (c) {
                 { uint32_t mp; memcpy(&mp, mem + 0x1d3b08, 4);
                   if (mp && address(DS, d) == mp && (c == 0x4000 || c == 0x10000)) handles_big[b] = c == 0x10000; }
-                ssize_t w = write(handles_fd[b], mem + address(DS, d), c);
+                double f0 = now_s(); ssize_t w = write(handles_fd[b], mem + address(DS, d), c); tp_file_time += now_s() - f0; tp_file_bytes += c;
                 if (w < 0) stop("write failed: %s", strerror(errno));
                 count = (uint32_t)w;
             } else {

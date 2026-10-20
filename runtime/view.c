@@ -167,6 +167,7 @@ static uint32_t r32(uint32_t a) { uint32_t v; memcpy(&v, M + a, 4); return v; }
 static int menu_open(void) { for (int k = 0; k < 4; k++) if (M[MENU_OPEN + k] != 0xff) return 1; return 0; }
 static void w16(uint32_t a, int16_t v) { memcpy(M + a, &v, 2); }
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
+static double tp_view_t0;                                 /* (the first park frame: the log's times) */
 /* The game's screen mode as a scale: 1 (320x200), 2 (640x480) or 0 (neither, not drawable here). */
 static int mode_scale(void) {
     uint32_t pitch = r32(DISP_PITCH), h = r32(DISP_H);
@@ -300,6 +301,7 @@ static void pace_frame(double share) {
  * instead, and then every pass for a second after, each at most its governed time (a short pass never runs slower
  * than the governor would let it). Light screens (the title, the menus without a park) are governed as before. */
 extern double tp_dbg_pace;
+static long screen_paces;                                 /* (long_frame: a screen came between two park frames) */
 void tp_view_screen_pass(void) {
     extern uint64_t tp_insns; static uint64_t li; static double heavy_at;
     uint64_t d = tp_insns - li; li = tp_insns;
@@ -310,6 +312,7 @@ void tp_view_screen_pass(void) {
     double budget = c * 1e3 / fps;                        /* a frame's instructions at the governor's rate (pace_frame's) */
     if (d > budget) heavy_at = t;
     if (!heavy_at || t - heavy_at > 1) return;
+    screen_paces++; { extern volatile int tp_frame_paced_park; tp_frame_paced_park = 0; }
     double p0 = now(); pace_frame(d > budget ? 1 : (double)d / budget); tp_dbg_pace += now() - p0;
     if (getenv("TP_PACE_DEBUG")) { static double l; static int n; n++; if (t - l > 1) { fprintf(stderr, "pace: %d screen passes\n", n); n = 0; l = t; } }
 }
@@ -899,6 +902,21 @@ static volatile int hires_wanted, poster_wanted;   /* (below) */
 void tp_walk_frame(void); int tp_walk_active(void);   /* the Visitor View (walk.c) */
 /* Called by the host when the game reaches a hooked address. */
 double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace;                  /* development (qol.c's tick gaps): where the game thread's time went */
+/* A park frame that took more than three frames' time, in the log (always): where its time went. */
+static void long_frame(uint64_t insns) {
+    extern double tp_dbg_run, tp_dbg_gov, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
+    static double run0, pass0, gov0, lock0, file0; static uint64_t ins0; static int logged; static long screen0;
+    double t = now(), took = t - park_paced_at; if (!tp_view_t0) tp_view_t0 = t;
+    if (park_paced_at && screen_paces == screen0 && took > 0.05 && took < 30 && logged < 500) {
+        logged++;
+        fprintf(stderr, "long frame at %.1f s: %.0f ms (game code %.0f ms for %.1fM instructions, of which the view's passes %.0f; "
+                "governor %.0f, view lock %.0f; files %.0f ms, %ld KB%s%s), weather %#x\n", t - tp_view_t0, took * 1e3,
+                (tp_dbg_run - run0) * 1e3, (insns - ins0) / 1e6, (tp_dbg_passes - pass0) * 1e3, (tp_dbg_gov - gov0) * 1e3,
+                (tp_dbg_lockwait - lock0) * 1e3, (tp_file_time - file0) * 1e3, tp_file_bytes / 1024, tp_file_note[0] ? ": " : "", tp_file_note, M[0x1b14cc]);
+    }
+    run0 = tp_dbg_run; pass0 = tp_dbg_passes; gov0 = tp_dbg_gov; lock0 = tp_dbg_lockwait; file0 = tp_file_time; ins0 = insns;
+    tp_file_note[0] = 0; tp_file_bytes = 0; screen0 = screen_paces;
+}
 void tp_view_hook(void) {
     M = tp_host_memory();
     { double t0 = now(); pthread_mutex_lock(&lock); tp_dbg_lockwait += now() - t0; }
@@ -927,7 +945,7 @@ void tp_view_hook(void) {
         { void tp_free_park_shown(void); tp_free_park_shown(); }       /* (and its Free Mode rules; freemode.c) */
         tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
         { extern uint64_t tp_insns; static uint64_t li; int fresh = tp_insns - li >= 20000; li = tp_insns;   /* (not an interrupt returning here) */
-          if (fresh) { st_game++; st_game_total++; if (pacing) { double p0 = now(); pace_frame(1); park_paced_at = now(); tp_dbg_pace += now() - p0; } } }
+          if (fresh) { st_game++; st_game_total++; if (pacing) { long_frame(tp_insns); extern volatile int tp_frame_paced_park; tp_frame_paced_park = 1; double p0 = now(); pace_frame(1); park_paced_at = now(); tp_dbg_pace += now() - p0; } } }
         if (getenv("TP_VIEW_DEBUG")) { static double l; static long c0; if (now() - l > 1) { fprintf(stderr, "view: %ld game frames/s\n", st_game_total - c0); c0 = st_game_total; l = now(); } }
         hires_step(sc);
         { static int tc = -1; if (tc < 0) tc = getenv("TP_VIEW_TRUST") ? atoi(getenv("TP_VIEW_TRUST")) : 0;

@@ -13,6 +13,19 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, the player's correction: the bumps at the first weather and while building fast are frame-rate drops,
+not sound. Cause found: a park pass longer than 0.1 s ended the pacing (frame_paced: a release in the last 0.1 s)
+and the instruction governor held the rest of the pass to the Speed setting's rate. On a copy of the player's park
+(their settings, edge scrolling at zoom 0.5, a storm), 148 s in, the game loads its award pictures (mawpal, mawar1,
+mcup, mspr; 66 million instructions): 142 ms of game code became a 1,170 ms frame (governor 1,015 ms). Now the pass
+after a park frame stays paced until the game has made two passes since that frame's release (keyboard polls, one a
+pass) or 2 s have gone (host.c frame_paced, tp_frame_paced_park). The same moment: 107 to 116 ms, governor 0; no
+other frame over 52 ms in 4 minutes. A first version (any release, 5 s) left the menus ungoverned after a screen
+pass at the title, and the sound card stalled there (up to 750 ms, five times): now only park frames' releases
+count, and those stalls are gone. theme-park.log now always gets a "long frame at N s" line for a park frame over 50
+ms, with its game code, instructions, governor, view lock and file reads (view.c long_frame, host.c tp_file_note).
+check_macos.sh --park and check_portable pass. The remaining 0.1 s at the awards is the game's own work.
+
 2026-10-19, the player's report after #10 (sound "working okay"):
 - The park rating's screens (the face: thoughts, graphs and the rest of that row) ran slowly while a park was open.
   Only park frames are paced (view.c); the game's own screens fell back to the instruction governor, and a pass of
