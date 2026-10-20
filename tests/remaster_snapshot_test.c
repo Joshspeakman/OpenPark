@@ -144,6 +144,58 @@ int main(void){
     CHECK(s->cards[0].rig_ok && s->cards[0].rig_x==12.5f && s->cards[0].rig_y==14.25f);
     for(int i=0;i<64;i++)CHECK(s->pix[i]==88);
     setenv("TP_ART_MODE","original",1);
+    /* Actual ride capture must retain each substituted pose without relying
+     * on a loaded Faithful asset. Two guests occupy different pose elements. */
+    memset(memory+thing,0,600);put32(THING_LAST,thing+400);
+    memory[thing+4]=4;memory[thing+12]=2;memory[thing+6]=memory[thing+8]=128;
+    put16(thing+10,3);put16(thing+0x47,2);
+    put16(0x1cced0+0xa6,2);memory[0x1cced0+0xa8]=1;memory[0x1cced0+0xb3]=5;
+    memory[thing+200+4]=memory[thing+400+4]=2;
+    memory[thing+200+0x59]=7;memory[thing+400+0x59]=3;put16(thing+200+0x47,3);
+    put16(0x510000+10+8,2);
+    put16(0x510000+20,6);put16(0x510000+20+6,0x80);put16(0x510000+20+8,3);
+    put16(0x510000+30,12);put16(0x510000+30+2,10);put16(0x510000+30+4,-20);
+    put16(0x510000+30+6,0x81);
+    put16(0x1b9a78+1*2,6);put16(0x1b9a78+2*2,12);
+    put16(0x1b9a78 + 3*0x5e + 1*2,12);put16(0x1b9a78 + 7*0x5e + 2*2,6);
+    CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.type==0 && c.seats[0]==3 && c.seats[1]==7);
+    CHECK(c.nriders==0); /* no Faithful layer loaded; 3-D metadata is independent */
+    CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    CHECK(c.rig_riders[0].pose==65025 && c.rig_riders[1].pose==65090);
+    CHECK(c.rig_riders[0].visible && c.rig_riders[1].visible);
+    /* Different body/rider crops and either screen mode preserve the ride's
+     * native origin. Occupancy must not move the entire authored ride. */
+    for(int mode=0;mode<2;mode++){
+        put16(SCREEN_MODE,mode?8:1);CHECK(geom(&s->g));
+        for(int crop=0;crop<2;crop++){
+            put16(0x510000+10+2,crop?-80:-8);
+            put16(0x510000+10+4,crop?-100:-24);
+            CHECK(capture(s,1));c=s->cards[0];
+            CHECK(c.rig_ok && c.frame==3 && c.rig_x==12.5f);
+            CHECK(c.rig_y==(mode?14.25f:14.5f));
+            CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+        }
+        put16(thing+0x47,0);CHECK(capture(s,1));c=s->cards[0];
+        CHECK(c.rig_ok && c.rig_x==12.5f && c.rig_y==(mode?14.25f:14.5f));
+        CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+        put16(thing+0x47,2);
+    }
+    put16(SCREEN_MODE,1);CHECK(geom(&s->g));
+    /* An intentionally absent substituted sprite is still a known pose. */
+    put16(0x1b9a78 + 7*0x5e + 2*2,0);CHECK(capture(s,1));c=s->cards[0];
+    CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    CHECK(c.rig_riders[1].present && !c.rig_riders[1].visible && c.rig_riders[1].pose==65090);
+    put16(thing+0x92,65535);
+    put16(0x1b9a58+3*4+2,6);put16(0x1b9a58+7*4+2,12);
+    CHECK(capture(s,1));c=s->cards[0];
+    CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    CHECK(c.rig_riders[0].pose==65281 && c.rig_riders[1].pose==65285);
+    /* Same identity, distinct exact poses: never collapse to a stock sitter. */
+    put16(thing+0x92,0);memory[thing+200+0x59]=3;put16(0x1b9a78 + 3*0x5e + 2*2,6);
+    CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.seats[0]==3 && c.seats[1]==3 && tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    CHECK(c.rig_riders[0].pose!=c.rig_riders[1].pose);
     free(s);free(memory);
     puts("remaster snapshot: scenery/shop/guest native origins, crop independence, tick-selected frames and composite guards passed");
     return 0;

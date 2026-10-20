@@ -5,6 +5,22 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Reimagined actual rider poses (Codex,
+`codex/reimagined-full-remaster`): native ride capture now binds each
+occupant's identity, exact source pose/flip and explicit visibility without
+requiring a Faithful layer. The generic seated-pose fallback is removed.
+Eligible rides retain their native origin across crop and occupancy changes.
+Local authoring adds 23 guest bounce-pose candidates and an eleven-key castle
+candidate using the same guest geometry. None is accepted release coverage.
+
+Three sanitizer tests, eleven Python tests, both walk modes, 17,808 view
+checks and native compile/signature pass. An Original-mode headed regression
+captured both views in 36.76 seconds and exited cleanly. Offline native
+occupied-castle replay produced 407 captures with verified pose/identity
+bindings. All 112 source DATA hashes remain unchanged. No app was installed;
+live remastered-art timing/quality remains unaccepted. See
+`docs/reports/2026-10-20-remaster-riders.md`.
+
 2026-10-20, Reimagined guest reaction placement (Codex,
 `codex/reimagined-full-remaster`): ordinary and reaction rigs now bind to
 the actual native frame origin; raised guest states retain height without

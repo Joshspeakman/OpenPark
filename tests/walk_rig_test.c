@@ -16,9 +16,29 @@ int main(void){
  CHECK(!read_rig("TPRIG1 3 1 1 1 0 0 0 0 1",&r));
  const char*fixture="TPRIG1 3 1 1 2 1\n-1 0 0 0\n1 0 0 0\n0 0 2 0\n0 1 2 12abef\n"
  "10\n1 0 0 0 0 1 0 0 0 0 1 0\n1 0 0 2 0 1 0 3 0 0 1 4\n"
- "65535\n1 0 0 0 0 1 0 0 0 0 1 0\n1 0 0 0 0 1 0 0 0 0 1 0\n";
+ "65024\n1 0 0 0 0 1 0 0 0 0 1 0\n1 0 0 0 0 1 0 0 0 0 1 0\n";
  CHECK(read_rig(fixture,&r));CHECK(r.np==2&&r.ns==1);
- CHECK(rm_pose(&r,10)==rm_pose(&r,10));CHECK(!rm_pose(&r,11));CHECK(rm_pose(&r,65535));
+ CHECK(rm_pose(&r,10)==rm_pose(&r,10));CHECK(!rm_pose(&r,11));
+ CHECK(rm_pose(&r,tp_remaster_rider_key(0,0,0x80)));CHECK(!rm_pose(&r,65535));
+ for(int alternate=0;alternate<2;alternate++)for(int flags=0;flags<4;flags++)
+  for(int pose=0;pose<(alternate?2:47);pose++){
+   unsigned key=tp_remaster_rider_key(pose,alternate,(unsigned)flags|0x80);
+   CHECK(key && tp_remaster_rider_key_valid(key));
+  }
+ CHECK(!tp_remaster_rider_key(-1,0,0));CHECK(!tp_remaster_rider_key(47,0,0));
+ CHECK(!tp_remaster_rider_key(2,1,0));CHECK(!tp_remaster_rider_key(0,2,0));
+ CHECK(!tp_remaster_rider_key(0,0,4));CHECK(!tp_remaster_rider_key_valid(65535));
+ CHECK(!tp_remaster_rider_key_valid(65024+47));CHECK(!tp_remaster_rider_key_valid(65282));
+ uint8_t expected[40];memset(expected,255,sizeof expected);
+ TPRMRider actual[40]={0};CHECK(tp_remaster_riders_valid(0,expected,actual));
+ expected[0]=3;actual[0]=(TPRMRider){65024,3,1,1};
+ CHECK(tp_remaster_riders_valid(1,expected,actual));CHECK(!tp_remaster_riders_valid(0,expected,actual));
+ actual[0].variant=7;CHECK(!tp_remaster_riders_valid(1,expected,actual));actual[0].variant=3;
+ actual[0].present=0;CHECK(!tp_remaster_riders_valid(1,expected,actual));actual[0].present=1;
+ actual[0].visible=0;CHECK(tp_remaster_riders_valid(1,expected,actual));
+ actual[0].pose=65535;CHECK(!tp_remaster_riders_valid(1,expected,actual));actual[0].pose=65024;
+ actual[1]=(TPRMRider){65025,3,1,1};CHECK(!tp_remaster_riders_valid(2,expected,actual));
+ expected[1]=3;CHECK(tp_remaster_riders_valid(2,expected,actual));
  float p[3];rm_point(r.p[0].matrices+12,1,2,3,p);CHECK(p[0]==3&&p[1]==5&&p[2]==7);
  uint8_t g[36]={6,7},out[40];CHECK(rm_seat_order(g,2,4,5,0,out));
  CHECK(out[0]==7&&out[1]==6&&out[2]==255&&out[3]==255);
@@ -36,5 +56,5 @@ int main(void){
  rm_draw(&wr,&r,&r.p[0],0,0,1,NULL);
  CHECK(pixels[32*64+32]==0xffefab12u);CHECK(wr.palette==pal&&wr.texture==tex);
  free(r.v);free(r.t);free(r.p);free(r.matrices);
- puts("rig: bounded loading, exact frame keys, shared seated pose, seat identity/rotation/capacity and raster passed");return 0;
+ puts("rig: bounded loading, exact frame/rider keys, seat identity/rotation/capacity, explicit empty poses and raster passed");return 0;
 }

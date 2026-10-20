@@ -4,13 +4,15 @@
  * stay in TP_DATA/reimagined, outside source control.
  * TPRIG1 nv nt bones poses seats
  * vertices: xyz bone; triangles: indices RGBhex; poses: frame then 12 floats
- * per bone and seat, row-major affine matrices. Frame 65535 is seated guest.
+ * per bone and seat, row-major affine matrices. Guest rider pose keys are
+ * defined in remaster_rider.h; there is no generic seated-pose fallback.
  * TPRIG2: the same counts, then tw th and tw*th RRGGBBAA hex texels.
  * Vertices gain u v after bone (pixel coordinates). Triangle colours tint
  * the atlas; ffffff is neutral. This stores authored, camera-independent light.
  */
 #ifndef TP_WALK_RIG_H
 #define TP_WALK_RIG_H
+#include "remaster_rider.h"
 #include <limits.h>
 typedef struct {float x,y,z;unsigned bone;float u,v;} RMVertex;
 typedef struct {unsigned a,b,c;uint32_t colour;} RMTriangle;

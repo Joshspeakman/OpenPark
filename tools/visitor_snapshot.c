@@ -7,6 +7,7 @@
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth frame FRAME SHAPE yaw
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth guest FRAME VARIANT yaw [state SUBTYPE]
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES]
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -37,7 +38,8 @@ int main(int argc,char**argv){
     tp_map_w=tp_map_ext=(uint32_t)atoi(argv[4]);
     int shop=!strcmp(argv[5],"shop");
     int guest=!strcmp(argv[5],"guest");
-    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest;double x,y,yaw;
+    int ride=!strcmp(argv[5],"ride");
+    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||ride;double x,y,yaw;
     if(gallery){
         if(!sweep&&argc<9)return 2;M=memory;
         uint32_t map=r32(MAP_PTR),things=r32(THINGS);
@@ -62,6 +64,25 @@ int main(int argc,char**argv){
                 t[12]=(uint8_t)state;
             }
             memset(memory+0x1d6678,0,2); /* no selection-arrow fixture */
+        }
+        if(ride){
+            int type=atoi(argv[7]);if(type<0||type>=29)return 2;
+            uint16_t record=(uint16_t)(type*200);
+            t[4]=4;t[12]=2;t[6]=t[8]=128;memcpy(t+0x16,&record,2);
+            t[0x32]=1; /* occupied bouncy-castle dispatch, native kind 9 */
+            if(argc>10 && !strcmp(argv[9],"guests")){
+                size_t n=strlen(argv[10]);
+                int cap=r16(0x1cced0+record+0xa6);
+                if(n>36 || n>(unsigned)cap)return 2;
+                for(size_t i=0;i<n;i++){
+                    if(argv[10][i]<'0'||argv[10][i]>'7')return 2;
+                    uint16_t next=(uint16_t)(i+2);
+                    uint8_t*prev=i?memory+things+(i+1)*200:t;
+                    memcpy(prev+0x47,&next,2);
+                    uint8_t*p=memory+things+(i+2)*200;
+                    p[4]=2;p[0x59]=(uint8_t)(argv[10][i]-'0');
+                }
+            }
         }
         memory[0x1d3afc]=1;x=y=32;yaw=sweep?ART_YAW:atof(argv[8])*M_PI/180;
     }else{x=atof(argv[5]);y=atof(argv[6]);yaw=atof(argv[7])*M_PI/180;}
@@ -103,7 +124,7 @@ int main(int argc,char**argv){
     }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
-        Card*c=&s->cards[0];if(!shop && !guest)c->shape=(uint8_t)atoi(argv[7]);
+        Card*c=&s->cards[0];if(!shop && !guest && !ride)c->shape=(uint8_t)atoi(argv[7]);
         if(argc>11 && !strcmp(argv[9],"model")) {
             c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
             const WMModel*m=wm_model_find(c->cls,c->type);
@@ -124,6 +145,16 @@ int main(int argc,char**argv){
                     c->rig_x,c->rig_y,c->rig_z,c->rig_ok);
         }
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
+        if(ride){
+            dist=6;height=2;
+            x=c->rig_x+.4-cos(yaw)*dist;y=c->rig_y-1-sin(yaw)*dist;
+            fprintf(stderr,"ride %d frame %u: native origin %.6f %.6f eligible %u\n",
+                    c->type,c->frame,c->rig_x,c->rig_y,c->rig_ok);
+            for(int i=0;i<40;i++)if(c->seats[i]!=255)
+                fprintf(stderr,"seat %d identity %u pose %u present %u visible %u\n",
+                        i,c->seats[i],c->rig_riders[i].pose,
+                        c->rig_riders[i].present,c->rig_riders[i].visible);
+        }
         W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55;W.cam_pitch=.07;
         if(getenv("TP_SNAPSHOT_EYE"))W.cam_z=atof(getenv("TP_SNAPSHOT_EYE"));
         if(getenv("TP_SNAPSHOT_PITCH"))W.cam_pitch=atof(getenv("TP_SNAPSHOT_PITCH"));

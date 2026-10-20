@@ -117,7 +117,8 @@ static int geom(Geom *g) {
 #define MAXCONT 256
 #define SHR 8                       /* shadow samples per cell */
 typedef struct { float x, y, r, rig_x, rig_y, rig_z; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
-    uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40]; } Card;
+    uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40];
+    TPRMRider rig_riders[40]; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
@@ -197,6 +198,7 @@ typedef struct {
     int idx, cls, colour, any; int x0, y0, x1, y1;      /* the thing being drawn and what it touched */
     NDTarget a, b;
     int rider_slot, rider_variant, nriders, rider_error; LPRider riders[40];
+    int rig_rider_error; TPRMRider rig_riders[40];
     int drawn_frame, frame_x, frame_y, frame_count;
 } Build;
 static void touch(Build *B, int x0, int y0, int x1, int y1) {
@@ -258,6 +260,7 @@ static void finish(Build *B) {
         c->type = -1; c->shape = WM_SMALL;
         c->frame=0;c->rig_ok=0;c->layer_ok=0;c->nriders=(uint8_t)B->nriders;
         memcpy(c->riders,B->riders,(size_t)B->nriders*sizeof(LPRider));memset(c->seats,255,sizeof c->seats);
+        memcpy(c->rig_riders,B->rig_riders,sizeof c->rig_riders);
         if(t) {
             uint32_t at=(uint32_t)(t-M);c->frame=(uint16_t)r16(at+10);
             if(B->cls==2) {
@@ -289,7 +292,9 @@ static void finish(Build *B) {
                 }
                 if(next)valid=0;
                 if(kind==9 && !r16(at+0x32))valid=0;
-                c->rig_ok=valid && (t[12]==2 || t[12]==4 || t[12]==6) &&
+                c->rig_ok=valid && !B->rig_rider_error &&
+                    B->frame_count==1 && B->drawn_frame==c->frame &&
+                    (t[12]==2 || t[12]==4 || t[12]==6) &&
                     (uint16_t)r16(at+0x2e)<M[rec+0xa8] && !r16(at+0x8e) &&
                     rm_seat_order(guests,n,cap,kind,r32(at+0x20),c->seats);
             }
@@ -317,7 +322,7 @@ static void finish(Build *B) {
             if(animation==431) c->shape=WM_GROUND; /* lake */
             if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
         }
-        if((B->idx<0 || B->cls==0x18 || ((B->cls==0xa || B->cls==2) && c->rig_ok)) && B->frame_count==1) {
+        if((B->idx<0 || B->cls==0x18 || ((B->cls==0xa || B->cls==2 || B->cls==4) && c->rig_ok)) && B->frame_count==1) {
             /* The model is authored around the native frame origin. The old
              * card's cropped bottom is only a billboard placement heuristic. */
             double sy=((int16_t)B->frame_y>>g->lo)-OYS;
@@ -341,7 +346,7 @@ static void finish(Build *B) {
             wx=B->cx+t[6]/256.0+layer->ox;wy=B->cy+t[8]/256.0+layer->oy;
             c->x=(float)wx;c->y=(float)wy;c->r=fmaxf(layer->hx,layer->hy);c->big=1;
         }
-        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==2) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
+        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==2 || B->cls==4) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {
@@ -358,10 +363,18 @@ static void finish(Build *B) {
 static int parts_log;                                    /* development: TP_WALK_PARTS logs one snapshot's sprites */
 static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
     Build *B = ctx; int lo = B->g->lo;
-    if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; B->rider_slot=-1;B->nriders=0;B->rider_error=0;B->frame_count=0;return; }
+    if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; B->rider_slot=-1;B->nriders=0;B->rider_error=0;B->frame_count=0;
+        B->rig_rider_error=0;memset(B->rig_riders,0,sizeof B->rig_riders);return; }
     if (kind == 8) { B->drawn_frame=a;B->frame_x=b;B->frame_y=c;B->frame_count++;return; }
     if (kind == 5) { B->colour = c; return; }
-    if (kind == 7) { B->rider_slot=a;B->rider_variant=b;return; }
+    if (kind == 7) {
+        B->rider_slot=a;B->rider_variant=b;
+        if(a>=0){
+            if(a>=40 || b<0 || b>=8 || B->rig_riders[a].present || d>1)B->rig_rider_error=1;
+            else B->rig_riders[a]=(TPRMRider){(uint16_t)c,(uint8_t)b,1,(uint8_t)d};
+        }
+        return;
+    }
     if (kind == 2) {
         int w = (c & 0xff) >> lo, h = (c >> 8) >> lo, x = (int16_t)a >> lo, y = (int16_t)b >> lo;
         int bounds[4];
@@ -898,11 +911,15 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                 (c->cls==0x18?rm_find_frame(c->cls,c->frame):rm_find(c->cls,c->type)):NULL;
             const RMPose *pose=rig?rm_pose(rig,c->frame):NULL;
             if(pose) {
-                const RMRig *guests[40]={0};const RMPose *seated[40]={0};int ok=1;
+                const RMRig *guests[40]={0};const RMPose *seated[40]={0};
+                int ok=tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders);
                 for(int seat=0;seat<40;seat++)if(c->seats[seat]!=255) {
-                    if(seat>=rig->ns){ok=0;break;}
+                    if(!ok)break;
+                    /* An explicitly empty native pose stays empty. Missing
+                     * metadata or an unknown pose never becomes a stock rider. */
+                    if(!c->rig_riders[seat].visible)continue;
                     guests[seat]=rm_find(2,c->seats[seat]);
-                    seated[seat]=guests[seat]?rm_pose(guests[seat],65535):NULL;
+                    seated[seat]=guests[seat]?rm_pose(guests[seat],c->rig_riders[seat].pose):NULL;
                     if(!seated[seat]){ok=0;break;}
                 }
                 if(ok) {

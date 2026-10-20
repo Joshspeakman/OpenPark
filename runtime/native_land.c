@@ -18,6 +18,7 @@
  *       of row), clipped to the display window ([0x1de5c8] x [0x1de5f0]).
  * Coordinates are in the game's 640-wide space. */
 #include <stdint.h>
+#include "remaster_rider.h"
 #include <string.h>
 #include <stdio.h>
 #include "remaster_art.h"
@@ -634,11 +635,14 @@ static int rem_7be8;                                    /* 0x1d7be8: the last by
  * Kind 8 draws the frame's first element and one animated figure: a rider (or a bystander pose
  * with an offset, from table 0x1b4e5a) picked at random, which the game remembers in word 0x4d;
  * other kinds draw the frame without seats. Scaled mode (0x167182) is not native. */
-/* Kind 7 brackets a substituted rider blit for layered Visitor View assets.
+/* Kind 7 brackets a substituted rider blit and identifies its native pose.
  * Ordinary renderer logs/pixels are unchanged; marks is the Visitor View path. */
-static void rider_blit(uint32_t entry,int x,int y,int flags,int seat,uint32_t person) {
-    if(marks && dlog)dlog(7,seat,M[person+0x59],0,0,0,dctx);
-    log_blit(entry,x,y,flags);
+static void rider_blit(uint32_t entry,int x,int y,int flags,int seat,uint32_t person,int pose,int alternate) {
+    uint32_t sprites=r32(SPRITES);
+    int visible=entry>sprites && M[entry+4] && M[entry+5];
+    if(marks && dlog)dlog(7,seat,M[person+0x59],
+        tp_remaster_rider_key(pose,alternate,(unsigned)flags),(uint32_t)visible,flags,dctx);
+    if(entry>sprites)log_blit(entry,x,y,flags);
     if(marks && dlog)dlog(7,-1,0,0,0,0,dctx);
 }
 static int ride_draw(uint32_t t, int x, int y) {
@@ -646,6 +650,7 @@ static int ride_draw(uint32_t t, int x, int y) {
     uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES), things = r32(THINGS), deco = r32(DECO_TABLE);
     uint32_t fr = frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
     if (r16(FRAME_MODE)) return (M[FRAME_MODE] & 8) ? 0x304 : 0;
+    if (marks && dlog) dlog(8, (uint16_t)r16(t + 0xa), x, y, 0, 0, dctx);
     uint32_t rec = 0x1cced0 + (uint32_t)(uint16_t)r16(t + 0x16);
     uint32_t slot[0x28]; int n = 0, start = 0, mode = 2;
     if (r16(t + 0x47)) {
@@ -705,21 +710,28 @@ static int ride_draw(uint32_t t, int x, int y) {
                 slot[(uint16_t)start] = 0;
                 if (p == 0xffffffffu) continue;
                 uint32_t os = sprites + (uint16_t)r16(e), ns = 0;
-                if ((int16_t)r16(t + 0x92) < 0)
+                int rider_pose=-1,alternate=(int16_t)r16(t+0x92)<0;
+                if (alternate) {
+                    rider_pose=r16(t+0x92)&1;
                     ns = sprites + (uint16_t)r16(0x1b9a58 + (uint32_t)M[p + 0x59] * 4 + (uint32_t)(r16(t + 0x92) & 1) * 2);
-                else if (M[p + 0x59]) {
+                } else if (M[p + 0x59]) {
                     for (int i = 0; i < 0x2f; i++) if (r16(0x1b9a78 + (uint32_t)i * 2) == r16(e)) {
+                        rider_pose=i;
                         ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[p + 0x59] * 0x5e + (uint32_t)i * 2);
                         break;
                     }
                     if (!ns) continue;
                 } else {
-                    if (os > sprites) rider_blit(os, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl,seat,p);
+                    for(int i=0;i<0x2f;i++)if(r16(0x1b9a78+(uint32_t)i*2)==r16(e)){rider_pose=i;break;}
+                    rider_blit(os, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl,seat,p,rider_pose,0);
                     continue;
                 }
-                if (ns <= sprites) continue;
+                if (ns <= sprites) {
+                    rider_blit(ns,x,y,fl,seat,p,rider_pose,alternate);
+                    continue;
+                }
                 int bx = (int16_t)x - (M[ns + 4] >> 1) + (M[os + 4] >> 1), by = y - M[ns + 5] + M[os + 5];
-                rider_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl,seat,p);
+                rider_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl,seat,p,rider_pose,alternate);
             } else {
                 uint32_t s = sprites + (uint16_t)r16(e);
                 if (s > sprites) log_blit(s, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl);
