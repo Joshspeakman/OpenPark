@@ -13,6 +13,8 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-20, Beta 1.2 (the user's say): nightly fast-forwarded to main and tagged beta-1.2, a source-only pre-release.
+
 2026-10-20, the pointer jumping back to the middle in full screen (the top left, quick edge scrolling): the guard let
 go of the pointer in the menu bar's row (the top edge, 6 points or more from a side). Events queued before the let-go
 had the held pointer's place, the window's middle, and the next hold started there. Now, in full screen with the
