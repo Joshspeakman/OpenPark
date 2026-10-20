@@ -48,7 +48,7 @@ extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out
 void tp_view_compose_stride(size_t px);
 void tp_view_debug_hud(uint32_t *out, int ow, int oh);
 void tp_view_count_game_frames(int on);
-void tp_view_set_ui_scale(double k);
+void tp_view_set_ui_scale(double k); double tp_view_ui_scale(void); double tp_view_ui_share(void); extern volatile int tp_game_video;
 int tp_view_frame_due(void);
 void tp_view_vsync_now(double period, double ago);
 int tp_view_cursor_rgba(uint32_t *out, int *w, int *h, int *ox, int *oy);
@@ -133,7 +133,8 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     uint32_t *_walkPx; int _walkW, _walkH;
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
-    TpVideo *_v3; CALayer *_v3Layer; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
+    uint32_t *_clean; int _cleanW, _cleanH; double _cleanAt;   /* the park picture without a game window over it (present: menuWide) */
+    TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
     BOOL _cornerGuard, _held; NSPoint _virt;   /* full screen: the pointer kept out of the corners (pointOf:) */
 }
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -171,10 +172,14 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 /* What the park view occupies, and its width in the game screen's pixels. */
 - (NSRect)viewRect { return [self wide] ? self.bounds : [self screenRect]; }
 /* The game's own screen inside the wide view: the column its interface takes there (the panel's). */
+/* A full-screen game window in the wide view (present: menuWide) at the panel's size, as the panel is in the park
+ * (view.c band_map: anchored at the bottom middle), so opening one from the panel keeps the panel where it was; at
+ * most the view's height. The game's own videos: the whole height. */
+- (double)menuScale { double k = tp_view_ui_scale(); return tp_game_video || k > 1 ? 1 : k; }
 - (NSRect)columnRect {
-    NSRect v = [self viewRect]; double lw = _lastLW > 0 ? _lastLW : [self layoutW];
-    CGFloat w = v.size.width * _sw / lw;
-    return NSMakeRect(v.origin.x + (v.size.width - w) / 2, v.origin.y, w, v.size.height);
+    NSRect v = [self viewRect]; double lw = _lastLW > 0 ? _lastLW : [self layoutW], k = [self menuScale];
+    CGFloat w = v.size.width * _sw / lw * k, h = v.size.height * k;
+    return NSMakeRect(v.origin.x + (v.size.width - w) / 2, v.origin.y, w, h);
 }
 - (NSRect)pointerRect { return _live ? [self viewRect] : _menuWide ? [self columnRect] : [self screenRect]; }
 - (double)layoutW {
@@ -228,6 +233,12 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         tp_view_out_bgra = 1; tp_view_compose_stride(IOSurfaceGetBytesPerRow(sf) / 4);
         tp_view_compose((uint32_t *)IOSurfaceGetBaseAddress(sf), ow, oh, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
         tp_view_out_bgra = 0; tp_view_compose_stride(0);
+        if (tc0 - _cleanAt > 0.25 && tp_view_ui_share() < 0.5) {   /* (a few times a second, while no game window covers the park) */
+            if (_cleanW != ow || _cleanH != oh) { free(_clean); _clean = malloc((size_t)ow * oh * 4); _cleanW = ow; _cleanH = oh; }
+            size_t bp = IOSurfaceGetBytesPerRow(sf); const uint8_t *b = IOSurfaceGetBaseAddress(sf);
+            for (int y = 0; y < oh; y++) memcpy(_clean + (size_t)y * ow, b + (size_t)y * bp, (size_t)ow * 4);
+            _cleanAt = tc0;
+        }
         IOSurfaceUnlock(sf, 0, NULL);
         _bigW = ow; _bigH = oh;
         if (getenv("TP_PACE_DEBUG")) { static double l, worst, sum; static int n; double d = CACurrentMediaTime() - tc0; sum += d; n++; if (d > worst) worst = d;
@@ -259,13 +270,19 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         IOSurfaceLock(cur, kIOSurfaceLockReadOnly, NULL); IOSurfaceLock(nx, 0, NULL);
         size_t sp = IOSurfaceGetBytesPerRow(cur), dp = IOSurfaceGetBytesPerRow(nx);
         uint8_t *src = IOSurfaceGetBaseAddress(cur), *dst = IOSurfaceGetBaseAddress(nx);
-        double lw = _lastLW > 0 ? _lastLW : [self layoutW];
-        int cw = (int)lround(_bigW * _sw / lw), cx0 = (_bigW - cw) / 2; if (cw > _bigW) cw = _bigW; if (cx0 < 0) cx0 = 0;
+        if (getenv("TP_DEV_GAME_VIDEO")) tp_game_video = 1;   /* (development: any game window drawn as the game's video) */
+        double lw = _lastLW > 0 ? _lastLW : [self layoutW], mk = [self menuScale]; BOOL video = tp_game_video;
+        int cw = (int)lround(_bigW * _sw / lw * mk), cx0 = (_bigW - cw) / 2; if (cw > _bigW) cw = _bigW; if (cx0 < 0) cx0 = 0;
+        BOOL clean = _clean && _cleanW == _bigW && _cleanH == _bigH && CACurrentMediaTime() - _cleanAt < 5;
+        int ch = (int)lround(_bigH * mk), cy0 = _bigH - ch; if (ch < 1) ch = 1; if (cy0 < 0) cy0 = 0;   /* (the panel's size, at the bottom: columnRect) */
         for (int y = 0; y < _bigH; y++) {
             uint32_t *d = (uint32_t *)(dst + (size_t)y * dp);
-            if (!_menuWide) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* (entering: the park picture at the sides) */
+            if (video) for (int x = 0; x < _bigW; x++) d[x] = 0xff000000u;   /* (a video: black beside it) */
+            else if (!_menuWide && clean) memcpy(d, _clean + (size_t)y * _bigW, (size_t)_bigW * 4);   /* (entering: the park picture around it, */
+            else if (!_menuWide || y < cy0) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* as it was before the window came) */
             else { memcpy(d, src + (size_t)y * sp, (size_t)cx0 * 4); memcpy(d + cx0 + cw, src + (size_t)y * sp + (size_t)(cx0 + cw) * 4, (size_t)(_bigW - cx0 - cw) * 4); }
-            const uint32_t *row = _pixels + (size_t)(y * fh / _bigH) * fw;
+            if (y < cy0) continue;
+            const uint32_t *row = _pixels + (size_t)((y - cy0) * fh / ch) * fw;
             for (int x = 0; x < cw; x++) { uint32_t c = row[(size_t)x * fw / cw];   /* (RGBA in memory -> BGRA) */
                 d[cx0 + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
         }
@@ -445,7 +462,8 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 }
 /* A pointer from elsewhere (a game controller), in 0..1 of what is shown. */
 - (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b {
-    if (_menuWide) { NSRect v = [self viewRect], c = [self columnRect]; fx = (fx * v.size.width - (c.origin.x - v.origin.x)) / c.size.width; fx = fmin(fmax(fx, 0), 0.9999); }   /* (into the column) */
+    if (_menuWide) { NSRect v = [self viewRect], c = [self columnRect]; fx = (fx * v.size.width - (c.origin.x - v.origin.x)) / c.size.width; fx = fmin(fmax(fx, 0), 0.9999);   /* (into the column) */
+                     fy = 1 - ((1 - fy) * v.size.height - (c.origin.y - v.origin.y)) / c.size.height; fy = fmin(fmax(fy, 0), 0.9999); }
     if (_live) tp_view_mouse(fx, fy, b); else tp_host_mouse(fx, fy, b);
 }
 
@@ -756,9 +774,11 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     if (!_v3) { tp_host_pause(0); if (done) dispatch_semaphore_signal(done); return; }
     _v3done = done; _v3shown = 0; _v3t0 = CACurrentMediaTime();
     _v3Layer = [CALayer layer];
-    _v3Layer.backgroundColor = NSColor.blackColor.CGColor; _v3Layer.contentsGravity = kCAGravityResizeAspect;
-    _v3Layer.magnificationFilter = kCAFilterLinear;
-    _v3Layer.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null]};
+    _v3Layer.backgroundColor = NSColor.blackColor.CGColor;     /* (black around the picture, which is 4:3 at the full height: video3DOTick) */
+    _v3Layer.actions = @{@"bounds": [NSNull null], @"position": [NSNull null]};
+    _v3Pic = [CALayer layer]; _v3Pic.contentsGravity = kCAGravityResize; _v3Pic.magnificationFilter = kCAFilterLinear;
+    _v3Pic.actions = @{@"contents": [NSNull null], @"bounds": [NSNull null], @"position": [NSNull null]};
+    [_v3Layer addSublayer:_v3Pic];
     _v3Layer.frame = self.bounds; _v3Layer.zPosition = 50;
     [self.layer addSublayer:_v3Layer];
     if (wav && [NSFileManager.defaultManager fileExistsAtPath:wav]) tp_audio_video_play(wav.fileSystemRepresentation);
@@ -766,7 +786,11 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 }
 - (void)video3DOTick {
     if (!_v3) return;
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
     _v3Layer.frame = self.bounds;
+    { CGSize b = self.bounds.size; CGFloat h = fmin(b.height, b.width * 3 / 4), w = h * 4 / 3;
+      _v3Pic.frame = CGRectMake((b.width - w) / 2, (b.height - h) / 2, w, h); }
+    [CATransaction commit];
     int due = (int)((CACurrentMediaTime() - _v3t0) * tp_video_fps(_v3));
     const uint8_t *px = NULL;
     while (_v3shown <= due) { px = tp_video_next(_v3); _v3shown++; if (!px) { [self end3DO]; return; } }
@@ -776,14 +800,14 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGImageRef img = CGImageCreate(w, h, 8, 24, w * 3, cs, kCGImageAlphaNone, prov, NULL, NO, kCGRenderingIntentDefault);
-    _v3Layer.contents = (__bridge id)img;
+    _v3Pic.contents = (__bridge id)img;
     CGImageRelease(img); CGColorSpaceRelease(cs); CGDataProviderRelease(prov); CFRelease(data);
 }
 - (void)end3DO {
     if (!_v3) return;
     tp_audio_video_stop();
     tp_video_close(_v3); _v3 = NULL;
-    [_v3Layer removeFromSuperlayer]; _v3Layer = nil;
+    [_v3Layer removeFromSuperlayer]; _v3Layer = nil; _v3Pic = nil;
     if (_v3done) { dispatch_semaphore_signal(_v3done); _v3done = nil; }
     if (!self.window.miniaturized && self.window.visible) tp_host_pause(0);   /* (still hidden: holdGame resumes it) */
 }
