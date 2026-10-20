@@ -279,8 +279,10 @@ static void pace_frame(double share) {
     double wait = target - now();
     if (getenv("TP_PACE_DEBUG")) { static double l3, late; if (-wait > late) late = -wait; if (t - l3 > 1) { fprintf(stderr, "pace late max %.2f ms\n", late * 1e3); late = 0; l3 = t; } }
     if (getenv("TP_PACE_DEBUG")) { static double l; static int n, sl; n++; if (wait > 0) sl++; if (t - l > 1) { fprintf(stderr, "pace: %d frames, %d waited, fps %.0f, last wait %.2f ms\n", n, sl, fps, wait * 1e3); n = sl = 0; l = t; } }
-    { static int rt; if (!rt) {                           /* the game thread as a real-time thread: timers not coalesced, woken on time */
-        rt = 1; fprintf(stderr, "pace: real-time thread policy %s\n", tp_plat_realtime_thread(period) ? "set" : "refused"); } }
+    { static double rt_fps; if (fps != rt_fps) {         /* the game thread as a real-time thread: timers not coalesced, woken on time */
+        int ok = tp_plat_realtime_thread(1 / fps);        /* (again when the speed changes: its frame period is the policy's) */
+        if (!rt_fps || !ok) fprintf(stderr, "pace: real-time thread policy %s (%.0f frames a second)\n", ok ? "set" : "refused", fps);
+        rt_fps = fps; } }
     {   /* a millisecond at a time, the sound card going on meanwhile (sb16.c: the HMI driver mixes just ahead of its
          * DMA position) */
         void sb16_pump(double t); double tp_host_card_clock(void);

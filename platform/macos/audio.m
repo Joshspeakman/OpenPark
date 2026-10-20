@@ -57,25 +57,36 @@ void tp_audio_set_volumes(float sfx, float music) {
     if (vid) vid.volume = music;
 }
 
-/* Play a WAV track (loop: until stopped or replaced); the MIDI synth is muted while it plays. */
+/* Play a WAV track (loop: until stopped or replaced); the MIDI synth is muted while it plays. The track is read and
+ * decoded on a queue of its own (a whole track: the display's tick, where the music follows the game, waited for
+ * it, a hitch at every tune change), then played on the main thread unless another tune or a stop came first. */
+static int cd_gen; static dispatch_queue_t cd_queue;
 int tp_audio_cd_play(const char *path, int loop) {
     if (!engine || !cd) return -1;
-    NSError *err = nil;
-    AVAudioFile *f = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:@(path)] error:&err];
-    if (!f) { fprintf(stderr, "audio: %s: %s\n", path, err.localizedDescription.UTF8String); return -1; }
-    AVAudioPCMBuffer *b = [[AVAudioPCMBuffer alloc] initWithPCMFormat:f.processingFormat frameCapacity:(AVAudioFrameCount)f.length];
-    if (![f readIntoBuffer:b error:&err]) return -1;
-    [cd stop];
-    if (![[cd outputFormatForBus:0] isEqual:b.format]) {
-        [engine disconnectNodeOutput:cd];
-        [engine connect:cd to:engine.mainMixerNode format:b.format];
-    }
-    [cd scheduleBuffer:b atTime:nil options:loop ? AVAudioPlayerNodeBufferLoops : 0 completionHandler:nil];
-    [cd play];
-    cd_playing = 1; apply_music();                   /* (the game's MIDI keeps running underneath, unheard) */
+    int gen = ++cd_gen; NSString *p = @(path);
+    if (!cd_queue) cd_queue = dispatch_queue_create("theme-park.cd", DISPATCH_QUEUE_SERIAL);
+    dispatch_async(cd_queue, ^{
+        NSError *err = nil;
+        AVAudioFile *f = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:p] error:&err];
+        if (!f) { fprintf(stderr, "audio: %s: %s\n", p.UTF8String, err.localizedDescription.UTF8String); return; }
+        AVAudioPCMBuffer *b = [[AVAudioPCMBuffer alloc] initWithPCMFormat:f.processingFormat frameCapacity:(AVAudioFrameCount)f.length];
+        if (![f readIntoBuffer:b error:&err]) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (gen != cd_gen || !engine || !cd) return;  /* (superseded, or the sound stopped) */
+            [cd stop];
+            if (![[cd outputFormatForBus:0] isEqual:b.format]) {
+                [engine disconnectNodeOutput:cd];
+                [engine connect:cd to:engine.mainMixerNode format:b.format];
+            }
+            [cd scheduleBuffer:b atTime:nil options:loop ? AVAudioPlayerNodeBufferLoops : 0 completionHandler:nil];
+            [cd play];
+            cd_playing = 1; apply_music();               /* (the game's MIDI keeps running underneath, unheard) */
+        });
+    });
     return 0;
 }
 void tp_audio_cd_stop(void) {
+    cd_gen++;
     if (cd) [cd stop];
     cd_playing = 0; apply_music();
 }
@@ -124,7 +135,6 @@ int tp_audio_start(void) {
     AVAudioSourceNode *pcm = [[AVAudioSourceNode alloc] initWithFormat:fmt renderBlock:
         ^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount frames, AudioBufferList *out) {
             static float buf[2 * 4096];
-            if (frames > 4096) frames = 4096;
             {   /* (an output callback that came late: the device played on without us; tp_audio_report) */
                 static double next = -1;
                 if (ts && (ts->mFlags & kAudioTimeStampSampleTimeValid)) {
@@ -133,14 +143,18 @@ int tp_audio_start(void) {
                     next = ts->mSampleTime + frames;
                 }
             }
-            sb16_play(buf, (int)frames);   /* (made in the game's time by sb16_pump) */
             static FILE *rec; static int rec_on = -1;              /* TP_AUDIO_REC=<file> (development): the card's output, 44.1 kHz stereo float */
             if (rec_on < 0) { const char *p = getenv("TP_AUDIO_REC"); rec = p ? fopen(p, "wb") : NULL; rec_on = rec != NULL; }
-            if (rec_on) { fwrite(buf, sizeof(float), 2 * frames, rec); fflush(rec); }
             float *l = out->mBuffers[0].mData, *r = out->mNumberBuffers > 1 ? out->mBuffers[1].mData : NULL;
-            for (AVAudioFrameCount i = 0; i < frames; i++) {
-                l[i] = buf[2 * i] * sfx_volume;
-                if (r) r[i] = buf[2 * i + 1] * sfx_volume;
+            for (AVAudioFrameCount done = 0; done < frames; ) {   /* (in pieces of the buffer's size: a device can ask for more) */
+                AVAudioFrameCount n = frames - done > 4096 ? 4096 : frames - done;
+                sb16_play(buf, (int)n);   /* (made in the game's time by sb16_pump) */
+                if (rec_on) { fwrite(buf, sizeof(float), 2 * n, rec); fflush(rec); }
+                for (AVAudioFrameCount i = 0; i < n; i++) {
+                    l[done + i] = buf[2 * i] * sfx_volume;
+                    if (r) r[done + i] = buf[2 * i + 1] * sfx_volume;
+                }
+                done += n;
             }
             return noErr;
         }];
