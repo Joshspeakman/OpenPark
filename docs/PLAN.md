@@ -5,6 +5,23 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, mapped staff routine candidates (Codex,
+`codex/reimagined-full-remaster`): all 371 keys in the current 44-chain staff
+action inventory now have local candidate poses, bringing the nine models to
+515 keys including travel. This adds distinct entertainer performances,
+grounded head-glance loops, guard saluting and mechanic case/cloth setup.
+Fixed-scale, fixed-origin source comparisons corrected misleading apparent
+squashes. Rhino's source-offset jump is explicitly distinguished from a
+grounding error; mechanic cloth release preserves the stationary upper body.
+Current artifact hashes cover 2,060 sanitized native perspective captures,
+2,060 model views and 515 offline normal-projection bakes. The changed
+mechanic replay was rerun; both workers' 160 recorded states and 320 capture
+hashes check against current models. All 112 source DATA hashes are unchanged.
+These are unaccepted candidates: known inventory coverage does not prove all
+dynamic triggers, proportions, live pacing or integrated HD normal gameplay.
+No runtime change or app installation. See
+`docs/reports/2026-10-20-remaster-staff-actions.md`.
+
 2026-10-20, remaining staff costume candidates (Codex,
 `codex/reimagined-full-remaster`): Chicken Man, Teddy Man, Rhino Man and Squid
 Man bring canonical local authoring to all nine staff identities and 179

@@ -12,7 +12,7 @@ six-pixel compression is retained without fitting each pose to its crop.
 The telescoping shaft remains overlapped; transformed wrist/grip and
 foot/peg contact checks pass for every key. Visual inspection led to rebuilt
 arm volumes and a mouth recess that exposes the human face. The distinct
-performance sequence, which adds stronger head squash and hand waves,
+performance sequence, which adds further compression and hand waves,
 remains unfinished.
 
 Chicken Man has a checkered orange shell, articulated wings, hooked crest,
