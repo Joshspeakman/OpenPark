@@ -5,6 +5,25 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, model capacity (Codex, isolated remaster branch): replaced the
+96-entry rig cache with a sparse index over the existing model key domain.
+Missing files no longer consume a resident-model allowance; loaded rigs/poses
+keep stable addresses through later component/passenger loads. The standalone
+baker and inspection tool now own their model directly.
+
+A source-free sanitized regression retains 513 models after 4,096 misses. The
+private audit retains all 114 candidate models together, with matching geometry,
+poses and 456 render comparisons against independent loads (452 nonempty).
+Ten remaster native checks, 21 Python tests, both walk modes, 17,808 view checks,
+compile/signature and 24 unchanged carousel inspection captures pass. All 112
+owned source hashes and 114 candidate model hashes are unchanged. No app launch,
+installation or artwork acceptance. Cache payload is about 47.25 MiB for the
+current candidates; this is not a full-pack memory/performance acceptance.
+Normal gameplay still uses per-part replacements and needs complete-model
+integration; remaining art and final headed acceptance are unfinished. See
+`docs/reports/2026-10-20-remaster-model-cache.md` for evidence and integration
+constraints found during the normal-view investigation.
+
 2026-10-20, Merry-Go-Round candidate (Codex, isolated remaster branch): the
 owned source is a four-cup spinner, not a horse carousel. A new local model
 contains the orange-backed metal cups, blue/white stepped turntable, inset seats,

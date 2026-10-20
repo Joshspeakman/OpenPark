@@ -21,11 +21,11 @@ int main(int argc,char**argv) {
     if(frame<0||frame>65535||w<1||h<1||w>2048||h>2048||!isfinite(scale)||scale<1||scale>1024||
        !isfinite(ax)||!isfinite(ay)||fabsf(ax)>4096||fabsf(ay)>4096||!isfinite(aspect)||aspect<.1||aspect>10)return 2;
     FILE*f=fopen(argv[1],"r");if(!f)return 3;
-    RMRig *rig=&rm_cache[0];rm_count=1;int ok=rm_read(f,rig);fclose(f);
-    if(!ok){rm_reset();return 3;}
+    RMRig model={0},*rig=&model;int ok=rm_read(f,rig);fclose(f);
+    if(!ok){rm_free(rig);return 3;}
     if(argc==11){
         char*end=NULL;long bone=strtol(argv[10],&end,10);
-        if(!argv[10][0] || *end || bone<0 || bone>=rig->nb){rm_reset();return 2;}
+        if(!argv[10][0] || *end || bone<0 || bone>=rig->nb){rm_free(rig);return 2;}
         /* Multi-part native sprites can share a canonical mesh. Export only
          * this authored group while retaining the full model's origin/pose. */
         int n=0;
@@ -34,11 +34,11 @@ int main(int argc,char**argv) {
             if(rig->v[t.a].bone==(unsigned)bone && rig->v[t.b].bone==(unsigned)bone &&
                rig->v[t.c].bone==(unsigned)bone)rig->t[n++]=t;
         }
-        rig->nt=n;if(!n){rm_reset();return 4;}
+        rig->nt=n;if(!n){rm_free(rig);return 4;}
     }
-    const RMPose*p=rm_pose(rig,(unsigned)frame);if(!p){rm_reset();return 4;}
+    const RMPose*p=rm_pose(rig,(unsigned)frame);if(!p){rm_free(rig);return 4;}
     uint32_t*pixels=calloc((size_t)w*h,4);float*depth=malloc((size_t)w*h*sizeof*depth);
-    if(!pixels||!depth){free(pixels);free(depth);rm_reset();return 5;}
+    if(!pixels||!depth){free(pixels);free(depth);rm_free(rig);return 5;}
     for(int i=0;i<w*h;i++)depth[i]=FLT_MAX;
     /* Native park shear: x=24X+8Y, y=16Y-20Z at low resolution.
      * Positive Y points toward the observer; shared geometry resolves overlaps. */
@@ -46,10 +46,10 @@ int main(int argc,char**argv) {
         .ux=0,.uy=-2.f/3,.uz=1/aspect,.fx=0,.fy=-1,.fz=-1,
         .focal=scale,.orthographic=1,.offset_x=ax-w*.5f,.offset_y=ay-h*.5f};
     rm_draw(&r,rig,p,0,0,1,NULL);
-    f=fopen(argv[3],"wb");if(!f){free(pixels);free(depth);rm_reset();return 6;}
+    f=fopen(argv[3],"wb");if(!f){free(pixels);free(depth);rm_free(rig);return 6;}
     fwrite("TPBAKE01",1,8,f);u32(f,w);u32(f,h);
     for(int i=0;i<w*h;i++)u32(f,pixels[i]);
     int failed=ferror(f);if(fclose(f))failed=1;
     printf("%u triangles, %u fragments; source pose %d, %dx%d\n",r.triangles,r.fragments,frame,w,h);
-    free(pixels);free(depth);rm_reset();return failed?6:0;
+    free(pixels);free(depth);rm_free(rig);return failed?6:0;
 }

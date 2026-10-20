@@ -20,7 +20,23 @@ typedef struct {unsigned a,b,c;uint32_t colour;} RMTriangle;
 typedef struct {uint16_t frame;float *matrices;} RMPose;
 typedef struct {int cls,type,nv,nt,nb,np,ns;RMVertex*v;RMTriangle*t;RMPose*p;float*matrices;
     int tw,th;uint32_t*texture;} RMRig;
-static RMRig rm_cache[96];static int rm_count;
+/* Sparse direct index over the model format's complete class/type domain.
+ * Pages and rigs never move until reset: resolving another component or guest
+ * must not invalidate pointers already held for an assembly. A missing model
+ * occupies only its index slot, never a resident-model capacity allowance.
+ * Render-thread owned, just like the frame aliases below. */
+static RMRig **rm_pages[256][128];
+static RMRig rm_missing;
+static RMRig **rm_cache_slot(int cls,int type){
+    if(cls<0 || cls>255 || type<0 || type>32767)return NULL;
+    RMRig ***page=&rm_pages[cls][(unsigned)type>>8];
+    if(!*page)*page=calloc(256,sizeof **page);
+    return *page?&(*page)[type&255]:NULL;
+}
+static void rm_free(RMRig*r){
+    free(r->v);free(r->t);free(r->p);free(r->matrices);free(r->texture);
+    memset(r,0,sizeof *r);
+}
 /* Source-frame aliases share one canonical model/cache entry. They are resolved
  * only on the render thread, never while the game thread captures a snapshot.
  * TPRMAP1 count; rows: source_class source_frame model_class model_type.
@@ -28,7 +44,12 @@ static RMRig rm_cache[96];static int rm_count;
 typedef struct { unsigned cls,frame,model_cls,type; } RMBinding;
 static RMBinding *rm_bindings;static unsigned rm_nbindings;static int rm_bindings_loaded;
 static void rm_eyes_reset(void);
-static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);free(rm_cache[i].texture);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;
+static void rm_reset(void){
+    for(int cls=0;cls<256;cls++)for(int page=0;page<128;page++){
+        RMRig **p=rm_pages[cls][page];if(!p)continue;
+        for(int i=0;i<256;i++)if(p[i] && p[i]!=&rm_missing){rm_free(p[i]);free(p[i]);}
+        free(p);rm_pages[cls][page]=NULL;
+    }
     free(rm_bindings);rm_bindings=NULL;rm_nbindings=0;rm_bindings_loaded=0;rm_motion_free(&rm_motion);rm_motion_loaded=0;rm_eyes_reset();}
 static int rm_read_bindings(FILE*f,RMBinding**out,unsigned*count){
     char magic[16];unsigned n;RMBinding*b=NULL;
@@ -75,12 +96,18 @@ static int rm_read(FILE*f,RMRig*r){
 bad:free(v);free(t);free(p);free(mat);free(texture);return 0;
 }
 static const RMRig*rm_find(int cls,int type){
-    if(type<0)return NULL;for(int i=0;i<rm_count;i++)if(rm_cache[i].cls==cls&&rm_cache[i].type==type)return rm_cache[i].nv?&rm_cache[i]:NULL;
-    if(rm_count>=96)return NULL;RMRig*r=&rm_cache[rm_count++];r->cls=cls;r->type=type;
+    RMRig **slot=rm_cache_slot(cls,type);if(!slot)return NULL;
+    if(*slot)return *slot==&rm_missing?NULL:*slot;
     const char*root=getenv("TP_DATA");if(!root)return NULL;char path[PATH_MAX];
     int n=snprintf(path,sizeof path,"%s/reimagined/%02x-%d.rig",root,cls,type);if(n<0||(size_t)n>=sizeof path)return NULL;
-    FILE*f=fopen(path,"r");if(!f)return NULL;int ok=rm_read(f,r);fclose(f);
-    if(!ok)fprintf(stderr,"Reimagined: invalid rig %s; original art retained\n",path);return ok?r:NULL;
+    FILE*f=fopen(path,"r");if(!f){*slot=&rm_missing;return NULL;}
+    RMRig*r=calloc(1,sizeof *r);if(!r){fclose(f);return NULL;}
+    r->cls=cls;r->type=type;int ok=rm_read(f,r);fclose(f);
+    if(!ok){
+        fprintf(stderr,"Reimagined: invalid rig %s; original art retained\n",path);
+        rm_free(r);free(r);*slot=&rm_missing;return NULL;
+    }
+    *slot=r;return r;
 }
 static const RMRig*rm_find_frame(unsigned cls,unsigned frame){
     if(!rm_bindings_loaded){

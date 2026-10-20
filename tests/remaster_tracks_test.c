@@ -101,11 +101,12 @@ int main(void){
      * cache. A missing LAST component must leave colour and depth untouched. */
     rm_bindings=calloc(2,sizeof *rm_bindings);CHECK(rm_bindings);
     rm_bindings[0]=(RMBinding){18,3,18,1};rm_bindings[1]=(RMBinding){18,4,18,1};
-    rm_nbindings=2;rm_bindings_loaded=1;rm_count=1;
+    rm_nbindings=2;rm_bindings_loaded=1;RMRig **slot=rm_cache_slot(18,1);CHECK(slot);
+    RMRig *model=*slot=calloc(1,sizeof *model);CHECK(model);
     FILE *f=tmpfile();CHECK(f);
     fputs("TPRIG1 3 1 1 1 0\n-1 0 0 0\n1 0 0 0\n0 0 2 0\n0 1 2 ff0000\n"
           "3\n1 0 0 0 0 1 0 0 0 0 1 0\n",f);rewind(f);
-    CHECK(rm_read(f,&rm_cache[0]));fclose(f);rm_cache[0].cls=18;rm_cache[0].type=1;
+    CHECK(rm_read(f,model));fclose(f);model->cls=18;model->type=1;
     uint32_t pixels[64*64];float depth[64*64];
     for(int i=0;i<64*64;i++){pixels[i]=0xff123456;depth[i]=1e9;}
     WMRender mr={.pixels=pixels,.depth=depth,.w=64,.h=64,.cy=-4,.cz=1,
@@ -117,8 +118,8 @@ int main(void){
     for(int i=0;i<64*64;i++)CHECK(pixels[i]==0xff123456 && depth[i]==1e9f);
     s->components[1].frame=5;CHECK(!draw_track_assembly(s,&c,&mr,1)); /* alias missing */
     for(int i=0;i<64*64;i++)CHECK(pixels[i]==0xff123456 && depth[i]==1e9f);
-    s->components[1].frame=3;rm_cache[0].ns=1;
-    CHECK(!draw_track_assembly(s,&c,&mr,1));rm_cache[0].ns=0;
+    s->components[1].frame=3;model->ns=1;
+    CHECK(!draw_track_assembly(s,&c,&mr,1));model->ns=0;
     CHECK(draw_track_assembly(s,&c,&mr,1));int changed=0;
     for(int i=0;i<64*64;i++)if(pixels[i]!=0xff123456)changed++;
     CHECK(changed>0);c.component_first=2;CHECK(!draw_track_assembly(s,&c,&mr,1));

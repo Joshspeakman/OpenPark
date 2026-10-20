@@ -24,17 +24,18 @@ int main(void){
     for(int seat=0;seat<2;seat++){c->seats[seat]=3;c->rider_ids[seat]=10+seat;c->rig_riders[seat]=(TPRMRider){65026,3,1,1};}
     c->vehicle=(TPRMVehicle){.family=1,.shape=5,.direction=0,.track_x=12,.track_y=14,.car_x=12,.car_y=14,.frac_x=128,.frac_y=128};
     rm_bindings=calloc(1,sizeof*rm_bindings);CHECK(rm_bindings);rm_nbindings=1;rm_bindings_loaded=1;
-    rm_bindings[0]=(RMBinding){14,3,14,0};rm_count=2;
+    rm_bindings[0]=(RMBinding){14,3,14,0};RMRig *models[2];
     const float identity[12]={1,0,0,0,0,1,0,0,0,0,1,0};
     for(int i=0;i<2;i++){
-        RMRig*r=&rm_cache[i];r->cls=i?2:14;r->type=i?3:0;r->nv=3;r->nb=1;r->np=1;r->ns=i?0:2;
+        RMRig **slot=rm_cache_slot(i?2:14,i?3:0);CHECK(slot);
+        RMRig*r=models[i]=*slot=calloc(1,sizeof *r);CHECK(r);r->cls=i?2:14;r->type=i?3:0;r->nv=3;r->nb=1;r->np=1;r->ns=i?0:2;
         r->p=calloc(1,sizeof*r->p);r->matrices=calloc((1+r->ns)*12,sizeof(float));CHECK(r->p&&r->matrices);
         r->p[0]=(RMPose){i?65026:3,r->matrices};
         for(int j=0;j<=r->ns;j++)memcpy(r->matrices+j*12,identity,sizeof identity);
     }
-    rm_cache[0].matrices[12+3]=.2f;rm_cache[0].matrices[12+11]=.5f;
-    rm_cache[0].matrices[24+3]=-.2f;rm_cache[0].matrices[24+11]=.5f;
-    rm_cache[1].matrices[11]=.1f;
+    models[0]->matrices[12+3]=.2f;models[0]->matrices[12+11]=.5f;
+    models[0]->matrices[24+3]=-.2f;models[0]->matrices[24+11]=.5f;
+    models[1]->matrices[11]=.1f;
     rm_motion_loaded=1;rm_motion.nb=1;rm_motion.nr=1;
     rm_motion.bodies=calloc(1,sizeof*rm_motion.bodies);rm_motion.routes=calloc(1,sizeof*rm_motion.routes);
     CHECK(rm_motion.bodies&&rm_motion.routes);
@@ -62,19 +63,19 @@ int main(void){
      * seat. Both the rider renderer and first-person camera require its pose. */
     const RMRig*occupants[40];const RMPose*postures[40];
     for(int j=0;j<2;j++){c->rig_riders[j].visible=0;c->rig_riders[j].pose=65440;}
-    CHECK(!rm_resolve_riders(&rm_cache[0],c->seats,c->rig_riders,occupants,postures));
+    CHECK(!rm_resolve_riders(models[0],c->seats,c->rig_riders,occupants,postures));
     CHECK(!vehicle_eye(s,10,1,p,f));
-    rm_cache[1].p[0].frame=65440;
-    CHECK(rm_resolve_riders(&rm_cache[0],c->seats,c->rig_riders,occupants,postures));
-    CHECK(occupants[0]==&rm_cache[1]&&occupants[1]==&rm_cache[1]);
+    models[1]->p[0].frame=65440;
+    CHECK(rm_resolve_riders(models[0],c->seats,c->rig_riders,occupants,postures));
+    CHECK(occupants[0]==models[1]&&occupants[1]==models[1]);
     CHECK(postures[0]&&postures[1]&&postures[0]->frame==65440);
     CHECK(vehicle_eye(s,10,1,p,f)&&vehicle_eye(s,11,1,p,f));
     c->rig_riders[0].visible=1;
-    CHECK(!rm_resolve_riders(&rm_cache[0],c->seats,c->rig_riders,occupants,postures));
+    CHECK(!rm_resolve_riders(models[0],c->seats,c->rig_riders,occupants,postures));
     for(int j=0;j<2;j++){c->rig_riders[j].visible=1;c->rig_riders[j].pose=65026;}
-    rm_cache[1].p[0].frame=65026;
-    memset(rm_cache[1].matrices,0,12*sizeof(float));CHECK(!vehicle_eye(s,10,1,p,f));
-    memcpy(rm_cache[1].matrices,identity,sizeof identity);rm_cache[1].matrices[11]=.1f;
+    models[1]->p[0].frame=65026;
+    memset(models[1]->matrices,0,12*sizeof(float));CHECK(!vehicle_eye(s,10,1,p,f));
+    memcpy(models[1]->matrices,identity,sizeof identity);models[1]->matrices[11]=.1f;
     /* Uphill travel rotates the eye and gaze with the car, even stationary. */
     for(int j=0;j<2;j++){r->p[j][0]=j-.5f;r->p[j][1]=0;r->p[j][2]=.1f+.5f*(j-.5f);
         r->p[j][3]=1;r->p[j][4]=0;r->p[j][5]=.5f;CHECK(rm_unit3(r->p[j]+3));}

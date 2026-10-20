@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build
 CC=${CC:-cc}
-for name in remaster_art remaster_mesh remaster_rgba; do
+for name in remaster_art remaster_mesh remaster_rgba remaster_cache; do
   extra=""; [[ "$name" == remaster_rgba ]] && extra="runtime/native_land.c"
   "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation \
     -fsanitize=address,undefined "tests/${name}_test.c" $extra -lm -o "build/${name}_test"

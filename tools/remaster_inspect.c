@@ -28,9 +28,9 @@ static int png(const char*path,const uint32_t*p,int w,int h){
 int main(int argc,char**argv){
     if(argc!=3){fprintf(stderr,"usage: remaster_inspect MODEL OUT_PREFIX\n");return 2;}
     FILE*f=fopen(argv[1],"r");if(!f)return 3;
-    RMRig*r=&rm_cache[0];rm_count=1;int ok=rm_read(f,r);fclose(f);if(!ok){rm_reset();return 3;}
+    RMRig model={0},*r=&model;int ok=rm_read(f,r);fclose(f);if(!ok){rm_free(r);return 3;}
     const int w=640,h=640;uint32_t*p=malloc(w*h*4);float*d=malloc(w*h*sizeof*d);
-    if(!p||!d){free(p);free(d);rm_reset();return 4;}
+    if(!p||!d){free(p);free(d);rm_free(r);return 4;}
     /* Fix the camera across the whole animation; per-frame auto-framing would
      * hide translation errors and turn changing bounds into apparent zoom. */
     float all_lo[3]={FLT_MAX,FLT_MAX,FLT_MAX},all_hi[3]={-FLT_MAX,-FLT_MAX,-FLT_MAX};
@@ -73,10 +73,10 @@ int main(int argc,char**argv){
             unsigned floor_fragments=wr.fragments;
             rm_draw(&wr,r,&r->p[pose],0,0,1,NULL);
             char path[4096];snprintf(path,sizeof path,"%s-%u-%d.png",argv[2],r->p[pose].frame,view);
-            if(wr.fragments==floor_fragments||!png(path,p,w,h)){free(p);free(d);rm_reset();return 5;}
+            if(wr.fragments==floor_fragments||!png(path,p,w,h)){free(p);free(d);rm_free(r);return 5;}
         }
         printf("pose %u bounds %.4f %.4f %.4f / %.4f %.4f %.4f; %d triangles\n",
             r->p[pose].frame,lo[0],lo[1],lo[2],hi[0],hi[1],hi[2],r->nt);
     }
-    free(p);free(d);rm_reset();return 0;
+    free(p);free(d);rm_free(r);return 0;
 }
