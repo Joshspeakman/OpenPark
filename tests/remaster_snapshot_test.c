@@ -123,6 +123,37 @@ int main(void){
         CHECK(c.rig_ok && fabsf(c.rig_z-(mode?.125f:.3f))<1e-6f);
         CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.125f:14.25f));
     }
+    /* All nine native staff identities bind the actual body frame/origin;
+     * selection, job and shared special overlays require separate coverage. */
+    memory[thing+4]=8;put16(thing+0x5f,0);put16(thing+0x9c,65535);
+    for(int mode=0;mode<2;mode++){
+        put16(SCREEN_MODE,mode?8:1);CHECK(geom(&s->g));
+        for(int variant=0;variant<9;variant++){
+            memory[thing+0x59]=(uint8_t)variant;
+            for(int state=2;state<=0x3e;state+=2){
+                if(state==0x20||state==0x28||state==0x2a||state==0x3c)continue;
+                memory[thing+12]=(uint8_t)state;
+                for(int frame=3;frame<=4;frame++){
+                    put16(thing+10,frame);CHECK(capture(s,1));c=s->cards[0];
+                    CHECK(c.rig_ok && c.cls==8 && c.type==variant && c.frame==frame);
+                    CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.125f:14.25f) && c.rig_z==0);
+                }
+            }
+        }
+    }
+    memory[thing+0x59]=9;CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    memory[thing+0x59]=2;put16(0x1d35ec+2*54,0x16);
+    put16(thing+0x9c,0);put16(0x540000+0x500,3);
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(thing+0x9c,65535);put16(0x540000+0x284,3);put16(0x1d6678,1);
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);put16(0x1d6678,0);
+    memory[thing+12]=0x3c;put16(0x540000+0x4a0,3);
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    memory[thing+12]=0x3f;put16(thing+0x14,0);
+    CHECK(capture(s,1));CHECK(s->cards[0].rig_ok);
+    put16(thing+0x14,0x709);put16(0x540000+0x52a,3);
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(thing+0x14,0);
     /* Restore the shop for the expanded-pixel fixture below. */
     memory[thing+4]=10;memory[thing+12]=4;put16(thing+0x5f,0);
     /* An expanded world part must be captured completely without moving the

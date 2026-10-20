@@ -274,6 +274,12 @@ static void finish(Build *B) {
                     B->frame_count==1 && B->drawn_frame==c->frame &&
                     !r16(at+0x52) && !t[0xb9] &&
                     !((M[0x1b14cc]&7) && (t[5]&0x80)) && B->idx!=(uint16_t)r16(0x1d6678);
+            } else if(B->cls==8) {
+                c->type=t[0x59];
+                /* Staff IDs include Shark Man at zero and Guard at eight.
+                 * Job/selection/special overlays add native frames; a body
+                 * pose alone must not consume those composite states. */
+                c->rig_ok=c->type<9 && B->frame_count==1 && B->drawn_frame==c->frame;
             }
         }
         if (t && B->cls == 4) {
@@ -328,7 +334,7 @@ static void finish(Build *B) {
             if(animation==431) c->shape=WM_GROUND; /* lake */
             if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
         }
-        if((B->idx<0 || B->cls==0x18 || ((B->cls==0xa || B->cls==2 || B->cls==4) && c->rig_ok)) && B->frame_count==1) {
+        if((B->idx<0 || B->cls==0x18 || ((B->cls==0xa || B->cls==2 || B->cls==4 || B->cls==8) && c->rig_ok)) && B->frame_count==1) {
             /* The model is authored around the native frame origin. The old
              * card's cropped bottom is only a billboard placement heuristic. */
             double sy=((int16_t)B->frame_y>>g->lo)-OYS;
@@ -352,7 +358,7 @@ static void finish(Build *B) {
             wx=B->cx+t[6]/256.0+layer->ox;wy=B->cy+t[8]/256.0+layer->oy;
             c->x=(float)wx;c->y=(float)wy;c->r=fmaxf(layer->hx,layer->hy);c->big=1;
         }
-        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==2 || B->cls==4) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
+        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==2 || B->cls==4 || B->cls==8) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {

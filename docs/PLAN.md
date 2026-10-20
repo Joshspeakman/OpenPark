@@ -5,6 +5,18 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, native staff binding and worker animation candidates (Codex,
+`codex/reimagined-full-remaster`): all nine staff IDs now use exact native
+body keys/origins with composite-overlay guards. Local mechanic/handyman
+models add 67 walking, mowing and break keys, checked in 268 native captures
+and 268 model views. A corrected isolated-actor replay retains recorded
+positions and animation states for 160 samples in both projections.
+These remain unaccepted artwork; other staff, actions and full remaster work
+are unfinished. Three sanitizer tests, fourteen Python tests, walk checks
+and compile/signature pass. A 38.73-second Original-mode headed regression
+captured both views and exited normally; all 112 source hashes are unchanged.
+No app was installed. See `docs/reports/2026-10-20-remaster-staff.md`.
+
 2026-10-20, staff inventory correction (Codex,
 `codex/reimagined-full-remaster`): verified native record layout fixes an
 off-by-one catalog error that omitted Shark Man and shifted staff IDs.

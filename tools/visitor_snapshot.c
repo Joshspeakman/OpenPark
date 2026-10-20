@@ -7,6 +7,7 @@
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth frame FRAME SHAPE yaw
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth guest FRAME VARIANT yaw [state SUBTYPE]
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth staff FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES]
  */
 #include <stdint.h>
@@ -38,8 +39,9 @@ int main(int argc,char**argv){
     tp_map_w=tp_map_ext=(uint32_t)atoi(argv[4]);
     int shop=!strcmp(argv[5],"shop");
     int guest=!strcmp(argv[5],"guest");
+    int staff=!strcmp(argv[5],"staff");
     int ride=!strcmp(argv[5],"ride");
-    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||ride;double x,y,yaw;
+    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||staff||ride;double x,y,yaw;
     if(gallery){
         if(!sweep&&argc<9)return 2;M=memory;
         uint32_t map=r32(MAP_PTR),things=r32(THINGS);
@@ -55,9 +57,11 @@ int main(int argc,char**argv){
              * status states need separate composite fixtures. */
             memory[0x1d3c62+record+0x67]=255;
         }
-        if(guest){
-            int variant=atoi(argv[7]);if(variant<0||variant>=8)return 2;
-            t[4]=2;t[12]=8;t[6]=t[8]=128;t[0x59]=(uint8_t)variant;
+        if(guest||staff){
+            int variant=atoi(argv[7]);if(variant<0||variant>=(staff?9:8))return 2;
+            t[4]=staff?8:2;t[12]=staff?memory[0x1d35ec+variant*54]:8;
+            t[6]=t[8]=128;t[0x59]=(uint8_t)variant;
+            if(staff)t[0x9c]=t[0x9d]=255; /* isolate body from job marker */
             if(argc>10 && !strcmp(argv[9],"state")){
                 char*end=NULL;long state=strtol(argv[10],&end,0);
                 if(!argv[10][0] || *end || state<0 || state>255)return 2;
@@ -124,7 +128,7 @@ int main(int argc,char**argv){
     }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
-        Card*c=&s->cards[0];if(!shop && !guest && !ride)c->shape=(uint8_t)atoi(argv[7]);
+        Card*c=&s->cards[0];if(!shop && !guest && !staff && !ride)c->shape=(uint8_t)atoi(argv[7]);
         if(argc>11 && !strcmp(argv[9],"model")) {
             c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
             const WMModel*m=wm_model_find(c->cls,c->type);
@@ -138,10 +142,10 @@ int main(int argc,char**argv){
         double dist=fmax(width,height)*1.45+1;
         /* A guest's exaggerated reaction bounds must not move the camera.
          * Use one fixed composition for all identities, keys and subtypes. */
-        if(guest){
-            dist=3.2;height=1.25;
-            fprintf(stderr,"guest %d state %u source frame %u: native origin %.6f %.6f lift %.6f eligible %u\n",
-                    c->type,memory[r32(THINGS)+200+12],c->frame,
+        if(guest||staff){
+            dist=staff?4:3.2;height=staff?1.8:1.25;
+            fprintf(stderr,"%s %d state %u source frame %u: native origin %.6f %.6f lift %.6f eligible %u\n",
+                    staff?"staff":"guest",c->type,memory[r32(THINGS)+200+12],c->frame,
                     c->rig_x,c->rig_y,c->rig_z,c->rig_ok);
         }
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
