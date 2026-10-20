@@ -5,6 +5,22 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, expanded Reimagined drawing bounds (Codex,
+`codex/reimagined-full-remaster`): `TPRART02` separates replacement display
+bounds from immutable source bindings. Normal world drawing, terrain and
+Visitor snapshot capture retain geometry outside legacy crops without
+moving mirror/flip pivots. Original/UI drawing remains on the legacy path.
+Production compilation still requires complete release evidence.
+
+Three native sanitizer tests and eleven Python tests pass, including
+expanded clipping and snapshot capture. Both walk modes, 17,808 view checks,
+existing mesh/model/rig/layer tests, and native build/signature pass.
+A 36.54-second muted scratch-profile headed **Original-mode** regression
+captured both views, was visually inspected, and exited cleanly. All 112
+DATA hashes are unchanged. This does not validate new artwork; no app was
+installed. Full remaster work continues. See
+`docs/reports/2026-10-20-remaster-expanded-bounds.md`.
+
 2026-10-20, Reimagined character candidates and corrected source references
 (Codex, `codex/reimagined-full-remaster`): eight articulated guest identities
 and 128 keyed walking candidates now have 512 sanitized inspection renders.

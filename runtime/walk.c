@@ -61,6 +61,8 @@ int tp_native_cell_ground(const uint8_t *mem, int cx, int cy, int gx, int gy, ui
 int tp_native_cell_things(const uint8_t *mem, int cx, int cy, int gx, int gy, DrawLog lg, void *ctx);
 typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
 void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
+void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
+                                int w,int h,int x,int y,int flags,int colour,int bounds[4]);
 void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, const uint8_t *str, int colour);
 extern const uint8_t *tp_native_text;
 extern int tp_native_stable_rng;
@@ -349,10 +351,10 @@ static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx
     if (kind == 7) { B->rider_slot=a;B->rider_variant=b;return; }
     if (kind == 2) {
         int w = (c & 0xff) >> lo, h = (c >> 8) >> lo, x = (int16_t)a >> lo, y = (int16_t)b >> lo;
-        const uint8_t *src=tp_remaster_source(M,d,c&255,c>>8,lo);
-        tp_native_draw_sprite(&B->a,src,c&255,c>>8,a,b,e,B->colour);
-        tp_native_draw_sprite(&B->b,src,c&255,c>>8,a,b,e,B->colour);
-        touch(B, x - 2, y - 2, x + w + 3, y + h + 3);
+        int bounds[4];
+        tp_native_draw_world_sprite(&B->a,M,d,c&255,c>>8,a,b,e,B->colour,bounds);
+        tp_native_draw_world_sprite(&B->b,M,d,c&255,c>>8,a,b,e,B->colour,NULL);
+        touch(B,bounds[0]-2,bounds[1]-2,bounds[2]+2,bounds[3]+2);
         if(B->cls==4 && B->rider_slot>=0 && lp_find(4,(uint16_t)r16(r32(THINGS)+(uint32_t)B->idx*200+22)/200)) {
             static uint8_t ra[128*128],rb[128*128];
             if(w<1 || h<1) { /* Native empty rider pose: preserve its absence. */ }

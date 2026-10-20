@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from remaster_catalog import audit, pixel_hash, make_ledger
-from remaster_pack import encode, quantize, read_bake
+from remaster_pack import encode, quantize, read_bake, display_bounds, unchanged_source
 
 
 class CoverageTest(unittest.TestCase):
@@ -82,6 +82,7 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(len(raw),12+16+12)
         self.assertEqual(struct.unpack_from('<H',raw,28)[0],256)
         with self.assertRaises(ValueError):encode([(meta,rows),(meta,rows)])
+        with self.assertRaises(ValueError):encode([])
 
     def test_bake_sampling_does_not_replace_ui_palette(self):
         palette=bytes([i%64 for i in range(768)])
@@ -97,6 +98,23 @@ class CoverageTest(unittest.TestCase):
             p=Path(d)/'bake'
             p.write_bytes(b'TPBAKE01'+struct.pack('<II',2,2)+b'\0'*4)
             with self.assertRaises(ValueError):read_bake(p)
+
+    def test_expanded_bake_preserves_binding_and_rejects_fake_padding(self):
+        original=[[1,2],[3,4]]
+        record=dict(bank=0,index=1,width=2,height=2,source_hash=f'{pixel_hash(original):016x}',
+                    display_bounds=dict(x=-1,y=-1,width=4,height=4))
+        rows=[[None]*4,[None,1,2,None],[None,3,4,None],[None]*4]
+        bounds=display_bounds(record)
+        self.assertTrue(unchanged_source(rows,bounds,record))
+        rows[3][2]=5
+        self.assertFalse(unchanged_source(rows,bounds,record))
+        raw=encode([(record,rows)])
+        self.assertEqual(raw[:8],b'TPRART02')
+        self.assertEqual(struct.unpack_from('<HHHHQ',raw,12),(0,1,2,2,int(record['source_hash'],16)))
+        self.assertEqual(struct.unpack_from('<hhHH',raw,28),(-1,-1,4,4))
+        self.assertEqual(len(raw),12+24+4*4*2)
+        record['display_bounds']['x']=3000
+        with self.assertRaises(ValueError):encode([(record,rows)])
 
 
 if __name__=='__main__':unittest.main()

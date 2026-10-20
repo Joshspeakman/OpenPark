@@ -25,7 +25,7 @@ def read_bake(path):
     return w, h, raw[16:]
 
 
-def quantize(bake, w, h, palette):
+def quantize(bake, w, h, palette, native_rle=True):
     """Sample at pixel centres. The UI's 256-colour palette is never replaced."""
     bw, bh, rgba = bake
     if bw % w or bh % h or bw//w != bh//h:
@@ -47,7 +47,7 @@ def quantize(bake, w, h, palette):
             row.append(cache[rgb])
         rows.append(row)
     # Native skip/run decoder cannot represent two adjacent skip commands.
-    for row in rows:
+    for row in rows if native_rle else []:
         gap = 0
         for p in row:
             if p is None:
@@ -59,19 +59,49 @@ def quantize(bake, w, h, palette):
     return rows
 
 
+def display_bounds(record):
+    bounds = record.get('display_bounds', dict(x=0,y=0,width=record['width'],height=record['height']))
+    if (not isinstance(bounds,dict) or set(bounds)!={'x','y','width','height'}
+        or any(type(v) is not int for v in bounds.values())
+        or not all(-2048<=bounds[k]<=2048 for k in ('x','y'))
+        or not all(1<=bounds[k]<=2048 for k in ('width','height'))):
+        raise ValueError('Invalid replacement display bounds')
+    return bounds
+
+
+def unchanged_source(rows, bounds, record):
+    """Transparent padding cannot turn unchanged original art into a remaster."""
+    w,h=record['width'],record['height'];x0,y0=bounds['x'],bounds['y']
+    crop=[[None]*w for _ in range(h)]
+    for y,row in enumerate(rows):
+        for x,pixel in enumerate(row):
+            xx,yy=x+x0,y+y0
+            if 0<=xx<w and 0<=yy<h:crop[yy][xx]=pixel
+            elif pixel is not None:return False
+    return pixel_hash(crop)==int(record['source_hash'],16)
+
+
 def encode(records):
     """Synthetic fixtures may call this directly; production CLI audits first."""
-    out = bytearray(b'TPRART01' + struct.pack('<I',len(records)))
+    if not 1<=len(records)<=8192:
+        raise ValueError('Invalid world part count')
+    expanded=any('display_bounds' in record for record,rows in records)
+    out = bytearray((b'TPRART02' if expanded else b'TPRART01') + struct.pack('<I',len(records)))
     previous = None
+    total=0
     for record, rows in records:
         key = record['bank'],record['index']
         w,h = record['width'],record['height']
         if (previous is not None and key <= previous) or key[0] not in (0,1) or not 0 <= key[1] < 8192:
             raise ValueError('Unsorted or invalid world part ID')
-        if not 1 <= w <= 255 or not 1 <= h <= 255 or len(rows)!=h or any(len(row)!=w for row in rows):
+        bounds=display_bounds(record);dw,dh=bounds['width'],bounds['height']
+        if not 1 <= w <= 255 or not 1 <= h <= 255 or len(rows)!=dh or any(len(row)!=dw for row in rows):
             raise ValueError('Invalid world part dimensions')
+        total+=dw*dh*2 if expanded else dw*dh*3+dh
+        if total>64*1024*1024:raise ValueError('World pack exceeds decoded memory limit')
         previous = key
         out += struct.pack('<HHHHQ',*key,w,h,int(record['source_hash'],16))
+        if expanded:out+=struct.pack('<hhHH',bounds['x'],bounds['y'],dw,dh)
         for row in rows:
             for pixel in row:
                 if pixel is not None and not 0 <= pixel <= 255:
@@ -101,16 +131,20 @@ def main():
             continue
         done=completion['parts'][part['id']]
         bake=read_bake(root/done['overhead_bake']['path'])
-        rows=quantize(bake,part['width'],part['height'],palette)
-        if pixel_hash(rows)==int(part['source_hash'],16):
+        record=dict(part)
+        if 'display_bounds' in done:record['display_bounds']=done['display_bounds']
+        bounds=display_bounds(record)
+        rows=quantize(bake,bounds['width'],bounds['height'],palette,native_rle='display_bounds' not in record)
+        if unchanged_source(rows,bounds,part):
             raise SystemExit(f"{part['id']}: unchanged original pixels are not a remaster")
         # Native draw logs identify a shared RLE pointer, not an alias's table
         # slot. Conflicting replacements for the same source would be ambiguous.
         key=part['bank'],part['source_offset'],part['width'],part['height']
-        if key in aliases and aliases[key]!=rows:
+        replacement=(bounds,rows)
+        if key in aliases and aliases[key]!=replacement:
             raise SystemExit(f"{part['id']}: conflicting artwork for aliased source data")
-        aliases[key]=rows
-        records.append((part,rows))
+        aliases[key]=replacement
+        records.append((record,rows))
     payload=encode(records)
     a.out.mkdir(parents=True,exist_ok=True)
     # Publish the completion receipt last, after the new payload is in place.

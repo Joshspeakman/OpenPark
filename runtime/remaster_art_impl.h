@@ -3,8 +3,12 @@
  * TPRART01: magic[8], u32 count; sorted records {u16 bank,index,w,h;
  * u64 original decoded-pixel FNV1a; u16 replacement[w*h]} (little endian).
  * Bank 0 is world sprites, bank 1 terrain. 256 denotes transparency.
- * Native palette and clipping remain unchanged; high resolution 3D materials
- * belong to canonical models. A source-content match is mandatory.
+ * TPRART02 adds {i16 dx,dy; u16 draw_w,draw_h} after each record's source
+ * metadata, followed by draw_w*draw_h indexed pixels. Expanded bounds never
+ * change the source binding or its mirror/flip pivot.
+ * Both formats retain the native palette. V1 keeps legacy clipping; V2 uses
+ * bounded rectangle clipping for its expanded pixels. Original/UI drawing
+ * remains unchanged. A source-content match is mandatory.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +20,8 @@ typedef struct {
     uint16_t bank,index,w,h;
     uint64_t hash;
     uint8_t *rle;
+    uint16_t *pixels;
+    int dx,dy,dw,dh;
 } RAEntry;
 static RAEntry *ra_entries;
 static unsigned ra_count;
@@ -27,12 +33,14 @@ static uint32_t ra_u32(const uint8_t *p) {
 static unsigned ra_u16(const uint8_t *p) { return p[0]|(unsigned)p[1]<<8; }
 static uint64_t ra_u64(const uint8_t *p) { return ra_u32(p)|((uint64_t)ra_u32(p+4)<<32); }
 static void ra_clear(void) {
-    for (unsigned i=0;i<ra_count;i++) free(ra_entries[i].rle);
+    for (unsigned i=0;i<ra_count;i++) {free(ra_entries[i].rle);free(ra_entries[i].pixels);}
     free(ra_entries);ra_entries=NULL;ra_count=0;
 }
 static int ra_read(FILE *f) {
     uint8_t header[12];
-    if (fread(header,1,12,f)!=12 || memcmp(header,"TPRART01",8)) return 0;
+    if (fread(header,1,12,f)!=12) return 0;
+    int expanded=!memcmp(header,"TPRART02",8);
+    if (!expanded && memcmp(header,"TPRART01",8)) return 0;
     unsigned count=ra_u32(header+8);
     if (!count || count>8192 || ra_entries) return 0;
     ra_entries=calloc(count,sizeof *ra_entries);
@@ -48,6 +56,21 @@ static int ra_read(FILE *f) {
         unsigned key=e->bank*65536u+e->index;
         if (e->bank>1 || e->index>8191 || !e->w || !e->h || e->w>255 || e->h>255 ||
             (i && key<=ra_entries[i-1].bank*65536u+ra_entries[i-1].index)) goto bad;
+        e->dw=e->w;e->dh=e->h;
+        if(expanded) {
+            uint8_t bounds[8];if(fread(bounds,1,8,f)!=8)goto bad;
+            e->dx=(int16_t)ra_u16(bounds);e->dy=(int16_t)ra_u16(bounds+2);
+            e->dw=ra_u16(bounds+4);e->dh=ra_u16(bounds+6);
+            if(e->dx < -2048 || e->dx > 2048 || e->dy < -2048 || e->dy > 2048 ||
+               e->dw<1 || e->dh<1 || e->dw>2048 || e->dh>2048)goto bad;
+            size_t n=(size_t)e->dw*e->dh;
+            total+=n*sizeof(uint16_t);if(total>64u*1024*1024)goto bad;
+            e->pixels=malloc(n*sizeof(uint16_t));if(!e->pixels)goto bad;
+            for(size_t j=0;j<n;j++){
+                uint8_t p[2];if(fread(p,1,2,f)!=2 || (e->pixels[j]=(uint16_t)ra_u16(p))>256)goto bad;
+            }
+            continue;
+        }
         size_t n=(size_t)e->w*e->h, cap=n*3+e->h;
         total+=cap;
         if (total>64u*1024*1024) goto bad;
@@ -105,10 +128,12 @@ static void ra_load(void) {
     int ok=ra_read(f);fclose(f);
     fprintf(stderr,"Reimagined world pack: %s (%u baked parts)\n",ok?"loaded":"invalid",ra_count);
 }
-const uint8_t *tp_remaster_source(const uint8_t *m,uint32_t source,int width,int height,int lo) {
-    if(tp_art_mode()!=TP_ART_REIMAGINED)return m+source;
+int tp_remaster_resolve(const uint8_t *m,uint32_t source,int width,int height,int lo,TPRemasterImage *out) {
+    if(!out || lo<0 || lo>1)return 0;
+    memset(out,0,sizeof *out);
+    if(tp_art_mode()!=TP_ART_REIMAGINED)return 0;
     ra_load();
-    if(!ra_count)return m+source;
+    if(!ra_count)return 0;
     /* Only entries in this pack are examined.
      * No simulation memory, sprite pointer, palette or animation link is edited. */
     int w=(width&255)>>lo,h=(height&255)>>lo;
@@ -119,7 +144,13 @@ const uint8_t *tp_remaster_source(const uint8_t *m,uint32_t source,int width,int
         uint64_t entry=(uint64_t)table+e->index*6;
         if(!table || entry+6>(64u<<20) || ra_u32(m+entry)!=source)continue;
         uint64_t hash=0;
-        return ra_hash(m,source,w,h,&hash) && hash==e->hash?e->rle:m+source;
+        if(!ra_hash(m,source,w,h,&hash) || hash!=e->hash)return 0;
+        *out=(TPRemasterImage){e->rle,e->pixels,e->dw,e->dh,e->dx,e->dy,e->w,e->h};
+        return 1;
     }
-    return m+source;
+    return 0;
+}
+const uint8_t *tp_remaster_source(const uint8_t *m,uint32_t source,int width,int height,int lo) {
+    TPRemasterImage image;
+    return tp_remaster_resolve(m,source,width,height,lo,&image) && image.rle?image.rle:m+source;
 }

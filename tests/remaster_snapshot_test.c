@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 static uint8_t *memory;
 uint8_t *tp_host_memory(void){return memory;}
 void tp_host_palette_rgba(uint32_t*p){memset(p,0,256*4);}
@@ -12,6 +13,8 @@ void tp_hooks_changed(void){}
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"snapshot line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static void put16(unsigned p,unsigned v){memory[p]=v;memory[p+1]=v>>8;}
 static void put32(unsigned p,unsigned v){put16(p,v);put16(p+2,v>>16);}
+static void file16(FILE*f,unsigned v){fputc(v&255,f);fputc((v>>8)&255,f);}
+static void file32(FILE*f,unsigned v){file16(f,v);file16(f,v>>16);}
 static int capture(Snap*s,int idx){
     s->ncards=0;s->npix=0;
     memset(sa,0,sizeof sa);memset(sb,255,sizeof sb);
@@ -74,6 +77,25 @@ int main(void){
     put16(thing+0x16,3*107);memory[thing+12]=4;put16(SCREEN_MODE,8);
     CHECK(geom(&s->g));CHECK(capture(s,1));
     CHECK(s->cards[0].rig_ok && s->cards[0].rig_x==12.5f && s->cards[0].rig_y==14.125f);
+    /* An expanded world part must be captured completely without moving the
+     * model's native origin. This fixture contains no source game artwork. */
+    mkdir("build",0755);mkdir("build/remaster_snapshot_fixture",0755);
+    mkdir("build/remaster_snapshot_fixture/reimagined",0755);
+    FILE*f=fopen("build/remaster_snapshot_fixture/reimagined/world.art","wb");CHECK(f);
+    fwrite("TPRART02",1,8,f);file32(f,1);
+    file16(f,0);file16(f,2);file16(f,4);file16(f,4);
+    uint64_t hash=14695981039346656037ull;
+    for(int i=0;i<16;i++){hash=(hash^42)*1099511628211ull;hash*=1099511628211ull;}
+    file32(f,(unsigned)hash);file32(f,(unsigned)(hash>>32));
+    file16(f,65534);file16(f,65534);file16(f,8);file16(f,8);
+    for(int i=0;i<64;i++)file16(f,88);
+    CHECK(fclose(f)==0);
+    setenv("TP_DATA","build/remaster_snapshot_fixture",1);setenv("TP_ART_MODE","reimagined",1);
+    put16(SCREEN_MODE,1);CHECK(geom(&s->g));CHECK(capture(s,1));
+    CHECK(s->cards[0].w==8 && s->cards[0].h==8 && s->npix==64);
+    CHECK(s->cards[0].rig_ok && s->cards[0].rig_x==12.5f && s->cards[0].rig_y==14.25f);
+    for(int i=0;i<64;i++)CHECK(s->pix[i]==88);
+    setenv("TP_ART_MODE","original",1);
     free(s);free(memory);
     puts("remaster snapshot: scenery/shop native origins, crop independence, tick-selected frames and composite guards passed");
     return 0;

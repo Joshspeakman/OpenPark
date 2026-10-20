@@ -170,6 +170,45 @@ void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, i
     }
 }
 
+/* World-only replacement path. UI and Original mode retain the exact legacy
+ * blitter above. Expanded artwork uses the original rectangle as its pivot,
+ * so adding transparent margins cannot move a mirrored actor. */
+void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
+                                int w,int h,int x,int y,int flags,int colour,int bounds[4]) {
+    TPRemasterImage image;
+    int replaced=tp_remaster_resolve(memory,source,w,h,t->lowres,&image);
+    int sx=x>>t->lowres,sy=y>>t->lowres;
+    int sw=(w&255)>>t->lowres,sh=(h&255)>>t->lowres;
+    if(!replaced || !image.pixels) {
+        if(bounds){bounds[0]=sx;bounds[1]=sy;bounds[2]=sx+sw+1;bounds[3]=sy+sh+1;}
+        tp_native_draw_sprite(t,replaced?image.rle:memory+source,w,h,x,y,flags,colour);
+        return;
+    }
+    int mirror=flags&1,flip=flags&2;
+    int left=sx+(mirror?sw-image.dx-image.width+1:image.dx);
+    int top=sy+(flip?sh-image.dy-image.height+1:image.dy);
+    if(bounds){bounds[0]=left;bounds[1]=top;bounds[2]=left+image.width;bounds[3]=top+image.height;}
+    int ghost=0,solid=0;
+    if(!mirror && !flip){
+        if(flags&4)ghost=1;
+        else if(flags&0x28){t->unsupported++;return;}
+        else if(flags&0x40)solid=1;
+    }
+    if(ghost && !t->ghost){t->unsupported++;return;}
+    int x0=left<0?0:left,y0=top<0?0:top;
+    int x1=left+image.width,y1=top+image.height;
+    if(x1>t->clip_w)x1=t->clip_w;
+    if(x1>t->clip_r+1)x1=t->clip_r+1;
+    if(y1>t->clip_h)y1=t->clip_h;
+    for(int yy=y0;yy<y1;yy++)for(int xx=x0;xx<x1;xx++){
+        int u=xx-left,v=yy-top;
+        if(mirror)u=image.width-1-u;if(flip)v=image.height-1-v;
+        unsigned pixel=image.pixels[(size_t)v*image.width+u];if(pixel==256)continue;
+        long at=t->base+(long)yy*t->pitch+xx;
+        put(t,at,solid?(uint8_t)colour:ghost?t->ghost[get(t,at)*256+pixel]:(uint8_t)pixel);
+    }
+}
+
 /* The small font (0x180e88 at 320x200, 0x180f34 at 640x480): glyphs of 6 rows of 3 pixels
  * from 6 bytes each at 0x1ba2fc + 6 * (c - 0x20), each row byte one of 8 patterns, written
  * in one colour straight into the screen (the screen's own origin, not the clip window's;

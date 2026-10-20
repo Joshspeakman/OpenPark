@@ -51,11 +51,28 @@ static void blit(const Target *t, uint32_t entry, int x, int y, int flags) {
     uint32_t data = r32(entry); int w = M[entry + 4], h = M[entry + 5];
     if (!h) return;
     if (flags & ~3) unsupported++;
+    TPRemasterImage image;
+    int replaced=tp_remaster_resolve(M,data,w,h,t->lowres,&image);
     if (t->lowres) { w >>= 1; h >>= 1; x >>= 1; y >>= 1; }
+    if(replaced && image.pixels) {
+        int left=x+((flags&1)?w-image.dx-image.width+1:image.dx);
+        int top=y+((flags&2)?h-image.dy-image.height+1:image.dy);
+        if(left+image.width<t->wx0 || left>t->wx1 || top+image.height<t->wy0 || top>t->wy1)return;
+        int x0=left<0?0:left,y0=top<0?0:top;
+        int x1=left+image.width,y1=top+image.height;
+        if(x1>t->w)x1=t->w;if(y1>t->h)y1=t->h;
+        for(int yy=y0;yy<y1;yy++)for(int xx=x0;xx<x1;xx++){
+            int u=xx-left,v=yy-top;
+            if(flags&1)u=image.width-1-u;if(flags&2)v=image.height-1-v;
+            unsigned pixel=image.pixels[(size_t)v*image.width+u];
+            if(pixel<256)t->buf[yy*t->pitch+xx]=(uint8_t)pixel;
+        }
+        return;
+    }
     if (x + w + 1 < t->wx0 || x > t->wx1 || y + h + 1 < t->wy0 || y > t->wy1) return;   /* nothing of it in the wanted part */
     int dx = flags & 1 ? -1 : 1, x0 = flags & 1 ? x + w : x;
     int dy = flags & 2 ? -1 : 1, y0 = flags & 2 ? y + h : y;
-    const uint8_t *s = tp_remaster_source(M, data, M[entry+4], M[entry+5], t->lowres);
+    const uint8_t *s = replaced?image.rle:M+data;
     for (int row = 0; row < h; row++) {
         int px = x0, py = y0 + dy * row;
         for (;;) {

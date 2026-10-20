@@ -335,6 +335,8 @@ static void addlog(LogE *l, int *n, int kind, int a, int b, int c, uint32_t d, i
 static uint8_t snap0[MAX_SCREEN + 65536], snap1[MAX_SCREEN + 65536]; static size_t snap_n; static int snapped;
 typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
 void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
+void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
+                                int w,int h,int x,int y,int flags,int colour,int bounds[4]);
 void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, const uint8_t *str, int colour);
 extern const uint8_t *tp_native_text;
 static NDTarget snap_t;
@@ -456,8 +458,7 @@ static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx)
     NPState *st = ctx;
     if (kind == 5) { st->colour = c; return; }
     if (kind == 2) {
-        const uint8_t *src=tp_remaster_source(M,d,c&255,c>>8,st->t.lowres);
-        tp_native_draw_sprite(&st->t,src,c&255,c>>8,a,b,e,st->colour);
+        tp_native_draw_world_sprite(&st->t,M,d,c&255,c>>8,a,b,e,st->colour,NULL);
         st->colour=0;return;
     }
     if (kind == 4) { if (tp_native_text) tp_native_draw_small_text(&st->t, M, a, b, tp_native_text, c); else st->fail = 1; return; }
