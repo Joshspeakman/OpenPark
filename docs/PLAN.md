@@ -5,6 +5,28 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, occupied Bouncy Castle motion review (Codex,
+`codex/faithful-geometry-detail`): the user requested a ride with its occupied
+animation. A bounded, muted 43-second native run captured 80 thing-array
+snapshots at a requested 10 Hz. Samples 11–55 show four linked guests (variants
+1, 3, 4 and 7) and the original five-frame bounce cycle: 200, 201, 202, 203,
+2327. The full sequence includes starting and stopping/unloading. The native
+rider-aware compositor supplies the actual occupied pixels, not generic guest
+figures or hand-authored animation timing.
+
+Review: `work/faithful-detail/bouncy-castle/index.html`, with pause/step, a full
+sequence option, front/angled cameras and three 45-frame GIFs. A fixed padded
+128-square source canvas preserves the foot anchor as composite bounds change
+between 61–72 pixels wide and 45–49 high. The depth prototype is explicitly an
+animated front surface on a shallow geometric base, not a fully modeled or
+rigged Bouncy Castle. It remains separate from installed study profiles.
+240 native replay views passed ASan/UBSan; 160 require the prototype model.
+All three views use byte-identical source PNGs per sample, all 45 bounce samples
+have four riders, and the occupied source loop has five unique images. GIF
+frame counts and viewer JavaScript syntax pass. These are offline replays of
+captured native states, not headed captures or a frame-pacing benchmark. No
+runtime or installed-app change in this review; owned-art code/data stay ignored.
+
 2026-10-19, Faithful geometry detail (Codex, `codex/faithful-geometry-detail`):
 the user returned to Faithful and requested more geometric detail. Refined five
 static models: Toy Land, Haunted House, Gift Shop, Coffee Shop and Palm. Added
