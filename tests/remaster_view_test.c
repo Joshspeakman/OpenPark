@@ -14,7 +14,8 @@ void tp_host_mouse_pos(int *x, int *y) { *x = *y = 0; }
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *a, int n, uint32_t m) { (void)fn; (void)a; (void)n; (void)m; return -1; }
 void tp_host_key(uint32_t k) { (void)k; }
 void tp_host_key_raw(uint8_t s, int d) { (void)s; (void)d; }
-uint32_t tp_get(unsigned i) { (void)i; return 0; }
+static uint32_t registers[10];
+uint32_t tp_get(unsigned i) { return i<10?registers[i]:0; }
 uint32_t tp_hook_pcs[32]; int tp_hook_which; uint64_t tp_insns, tp_rep;
 uint32_t tp_map_w = 64, tp_map_ext = 64;   /* (the game's park size; bigmap.c) */
 void tp_bigmap_setup_done(void) {}
@@ -74,6 +75,23 @@ int main(void) {
     tp_view_out_bgra=1;compose_band(&job,0);CHECK(pixels[4*20+4]==0xff563412u);tp_view_out_bgra=0;
     CHECK(compose_world_sample(0,0,&g,pub_pal)==pub_pal[9]);
     hd_pub.valid=0;CHECK(compose_world_sample(job.vx,job.vy,&g,pub_pal)==pub_pal[9]);
+    /* The live placement hooks borrow/restore slot 7 and route uncaptured
+     * changes through the ordered companion without touching source memory. */
+    G=geo(1);w16(SCREEN_MODE,1);uint32_t pitch=320,sh=200,buf=0x500000,sp=0x700000,ret=0x1145fbu;
+    memcpy(mem+DISP_PITCH,&pitch,4);memcpy(mem+DISP_H,&sh,4);memcpy(mem+DISP_BUF,&buf,4);memcpy(mem+sp,&ret,4);
+    registers[4]=sp;real_cx=10;real_cy=10;active=1;have_world=1;hd_pending=1;
+    CHECK(tp_remaster_surface_prepare(&hd_work,cam_ox(10,10),cam_oy(10),SW,SH,CW,CH));
+    memset(hd_work.pixels,0,hd_work.capacity*sizeof(uint32_t));
+    tp_hook_pcs[5]=TOOL_PREVIEW;tp_hook_pcs[7]=0x11be5a;tp_hook_which=5;tp_view_hook();
+    CHECK(tool_watching&&hd_tool.active&&tp_hook_pcs[7]==TOOL_BLIT&&tp_hook_pcs[6]==ret);
+    mem[buf+100*320+100]=55;
+    tp_hook_which=6;tp_view_hook();CHECK(!tool_watching&&!hd_tool.active&&tp_hook_pcs[7]==0x11be5a);
+    CHECK(tp_hook_pcs[6]==0xffffffffu&&hd_work.valid);
+    uint32_t preview_pixel;CHECK(tp_remaster_surface_sample(&hd_work,cam_ox(10,10)+100.125,cam_oy(10)+100.125,&preview_pixel));
+    CHECK(preview_pixel==hd_palette[55]);
+    tool_capture_begin();CHECK(tool_watching);buf+=320;memcpy(mem+DISP_BUF,&buf,4);
+    CHECK(tool_capture_end()&&!hd_work.valid&&tp_hook_pcs[7]==0x11be5a);
+    free(hd_work.pixels);
     free(hd_pub.pixels);free(mem);
     puts("remaster view: both native modes, trusted pass clipping, fine colour, UI/weather priority, BGRA, stride and camera bounds passed");return 0;
 }

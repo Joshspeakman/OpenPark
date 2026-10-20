@@ -43,6 +43,7 @@
 #include "platform.h"                               /* (timing, real-time thread, parallel bands: platform/<os>/) */
 #include "remaster_art.h"
 #include "remaster_surface.h"
+#include "remaster_preview.h"
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -343,6 +344,61 @@ extern const uint8_t *tp_native_text;
 static NDTarget snap_t;
 static struct { int ok, mode; long base, pitch; int clip_w, clip_h, clip_r; } clipinfo;   /* the things' clip window */
 static int capture_clip;
+/* Slot 7 is borrowed only while the game's placement renderer is running.
+ * Each core-blitter entry still has unhalved source dimensions/coordinates. */
+#define TOOL_BLIT 0x15ed21u
+static TPRemasterPreview hd_tool;
+static TPRemasterPaint hd_tool_paint;
+static uint8_t hd_tool_ignore[MAX_SCREEN];
+static uint32_t tool_saved_hook,tool_buffer;
+static int tool_watching,tool_calls;
+static void tool_capture_cancel(void) {
+    if(tool_watching && tp_hook_pcs[7]==TOOL_BLIT){tp_hook_pcs[7]=tool_saved_hook;tp_hooks_changed();}
+    tool_watching=0;hd_tool.active=0;
+}
+static void tool_capture_begin(void) {
+    tool_capture_cancel();
+    if(!(hd_pending && hd_work.valid) && !getenv("TP_VIEW_TOOL_TRACE"))return;
+    uint32_t buf=r32(DISP_BUF),pitch=r32(DISP_PITCH);
+    if(pitch!=(uint32_t)SW || (uint64_t)buf+(size_t)SW*SH>(64u<<20))return;
+    tool_buffer=buf;tool_calls=0;
+    if(hd_pending && hd_work.valid){
+        memset(hd_tool_ignore,0,sizeof hd_tool_ignore);
+        int hr[4];for(int r=0;hud_rect(r,hr);r++)
+            for(int y=hr[1];y<hr[3] && y<SH;y++)for(int x=hr[0];x<hr[2] && x<SW;x++)
+                if(x>=0 && y>=0)hd_tool_ignore[y*SW+x]=1;
+        hd_tool_paint=tp_remaster_surface_paint(&hd_work,hd_palette,cam_ox(real_cx,real_cy),cam_oy(real_cy));
+        tp_remaster_preview_begin(&hd_tool,M+buf,SW,SH,WORLD_H,&hd_tool_paint,hd_tool_ignore);
+    }
+    tool_saved_hook=tp_hook_pcs[7];tp_hook_pcs[7]=TOOL_BLIT;tool_watching=1;tp_hooks_changed();
+}
+static void tool_capture_blit(void) {
+    if(!tool_watching)return;
+    extern uint32_t tp_get(unsigned);
+    tool_calls++;
+    uint32_t wh=tp_get(2)&0xffff,source=tp_get(6),sp=tp_get(4);
+    int x=(int32_t)tp_get(3),y=(int32_t)tp_get(1),flags=(uint16_t)r16(0x1becbc);
+    if(getenv("TP_VIEW_TOOL_TRACE"))fprintf(stderr,"tool blit: source %#x size %u,%u xy %d,%d flags %#x\n",source,wh&255,wh>>8,x,y,flags);
+    if(!hd_tool.active)return;
+    uint32_t pitch=r32(DISP_PITCH),cx=r32(0x1de5d0),cy=r32(0x1de5e0);
+    uint32_t cw=r32(0x1de5c8),ch=r32(0x1de5f0),cr=r32(0x1de5ec),ghost=r32(0x1ba2f8);
+    if(r32(DISP_BUF)!=tool_buffer || pitch!=(uint32_t)SW || cx>640 || cy>480 || cw>640 || ch>480 || cr>640 ||
+       (uint64_t)ghost+65536>(64u<<20) || (uint64_t)sp+5>(64u<<20)){
+        hd_tool_paint.failed=1;return;
+    }
+    NDTarget t={NULL,0,(long)cy*pitch+cx,pitch,(int)cw,(int)ch,(int)cr,M[SCREEN_MODE]&1,ghost?M+ghost:NULL,0,NULL};
+    tp_remaster_preview_sprite(&hd_tool,M+tool_buffer,&t,M,source,wh&255,wh>>8,x,y,flags,M[sp+4]);
+}
+static int tool_capture_end(void) {
+    int captured=hd_tool.active;
+    if(captured){
+        if(r32(DISP_BUF)==tool_buffer)tp_remaster_preview_end(&hd_tool,M+tool_buffer);
+        else hd_tool_paint.failed=1;
+        if(hd_tool_paint.failed)hd_work.valid=0;
+    }
+    if(tool_watching && getenv("TP_VIEW_TOOL_TRACE"))fprintf(stderr,"tool capture: %d calls, %d full-colour, %zu reconciled pixels, failed %d\n",tool_calls,captured?hd_tool.sprites:0,captured?hd_tool.reconciled:0,captured?hd_tool_paint.failed:0);
+    tool_capture_cancel();return captured;
+}
 void tp_view_nested_hook(void) {
     extern uint32_t tp_get(unsigned); uint32_t pc = tp_get(9), sp = tp_get(4);
     if (pc == 0x11be5au && capture_clip) {                /* as the things loop starts: 0x14de1a(1) has set it */
@@ -350,6 +406,7 @@ void tp_view_nested_hook(void) {
         clipinfo.clip_w = (int)r32(0x1de5c8); clipinfo.clip_h = (int)r32(0x1de5f0); clipinfo.clip_r = (int)r32(0x1de5ec);
         clipinfo.mode = G.s; clipinfo.ok = 1; capture_clip = 0;
     }
+    if(pc==TOOL_BLIT && tool_watching){tool_capture_blit();return;}
     if (!logging) return;
     if (pc == 0x11be5au || pc == 0x11c01au) {
         size_t n = (size_t)r32(DISP_PITCH) * (size_t)SH; if (n > sizeof snap0) n = sizeof snap0;
@@ -892,6 +949,7 @@ static void sentinel_lift(void) {                       /* the park back where n
     sentinel_on = 0;
 }
 static void hooks(int on) {
+    tool_capture_cancel();
     tp_hook_pcs[0] = FRAME_RENDER;
     tp_hook_pcs[1] = on ? AFTER_RENDER : 0xffffffffu;
     tp_hook_pcs[2] = on ? (G.s == 2 ? PRESENT_HI : PRESENT) : 0xffffffffu;
@@ -939,6 +997,7 @@ void tp_view_hook(void) {
     }
     switch (tp_hook_which) {
     case 0:                                               /* FRAME_RENDER */
+        if(tool_watching){hd_work.valid=0;tool_capture_cancel();} /* interrupted placement return */
         { void tp_bigmap_setup_done(void); tp_bigmap_setup_done(); }   /* (the park is on: its size is settled; bigmap.c) */
         { void tp_free_park_shown(void); tp_free_park_shown(); }       /* (and its Free Mode rules; freemode.c) */
         tp_walk_frame();                                  /* the Visitor View's snapshot (walk.c), when walking */
@@ -1065,11 +1124,13 @@ void tp_view_hook(void) {
             extern uint32_t tp_get(unsigned);
             memcpy(pre_tool, M + r32(DISP_BUF), (size_t)SW * WORLD_H);
             tp_hook_pcs[6] = r32(tp_get(4)); tp_hooks_changed();   /* its return address */
+            tool_capture_begin();
         }
         break;
     case 6:                                               /* ... returned: its pixels are park */
         if (tp_hook_pcs[5] != TOOL_PREVIEW) goto probe;
         tp_hook_pcs[6] = 0xffffffffu; tp_hooks_changed();
+        { int captured=tool_capture_end();
         if (active && have_world) {
             const uint8_t *bb = M + r32(DISP_BUF); int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
             int n = 0, hr[4];
@@ -1081,7 +1142,7 @@ void tp_view_hook(void) {
                 world_only[i] = bb[i]; n++;
                 int X = bx + x, Y = by + y; if (X >= 0 && Y >= 0 && X < CW && Y < CH) {
                     canvas[(size_t)Y * CW + X] = bb[i];
-                    if(hd_pending && hd_work.valid){
+                    if(hd_pending && hd_work.valid && !captured){
                         TPRemasterPaint p=tp_remaster_surface_paint(&hd_work,hd_palette,0,0);
                         tp_remaster_paint_index(&p,X,Y,bb[i]);
                     }
@@ -1089,6 +1150,7 @@ void tp_view_hook(void) {
                 if (sentinel_on) M[r32(DISP_BUF) + i] = SENTINEL;   /* (park: marked again; the marker is not lifted around it) */
             }
             tool_shown = n > 0;
+        }
         }
         break;
     case 8: case 10:                                      /* WEATHER, WEATHER2: entered */
@@ -1117,6 +1179,7 @@ void tp_view_hook(void) {
         }
         break;
     case 7:
+        if(tool_watching && tp_hook_pcs[7]==TOOL_BLIT){tool_capture_blit();break;}
     probe:                                               /* development probes */
         { static int n[8]; if (getenv("TP_VIEW_DUMP") && ++n[tp_hook_which] == 30) {
             char path[512]; snprintf(path, sizeof path, "%s.%d.png", getenv("TP_VIEW_DUMP"), tp_hook_which);
@@ -1488,7 +1551,7 @@ static void poster_step(void) {
 static int enabled;
 void tp_view_enable(int main_game) {
     pthread_mutex_lock(&lock); enabled = main_game; if (!enabled) want = 0; pthread_mutex_unlock(&lock);
-    if (!main_game) { for (int h = 0; h < 12; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
+    if (!main_game) { tool_capture_cancel(); for (int h = 0; h < 12; h++) tp_hook_pcs[h] = 0xffffffffu; tp_hooks_changed(); }
     active = 0; have_world = 0; in_frame = 0;
     /* (a new game, also THEME.BAT's in-process restart: nothing of the last one's frame survives, issue #6) */
     sentinel_on = 0; world_ok = 0; coherent = 0; ngrid = 0; rr = rr_done = 0; seen_cx = seen_cy = -999;

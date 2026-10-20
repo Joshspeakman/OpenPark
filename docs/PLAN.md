@@ -5,6 +5,20 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, source-aware construction previews (Codex,
+`codex/reimagined-full-remaster`): placement sprite calls now paint their
+source-bound RGBA art directly, while private prediction of original indexed
+writes preserves ordering with outlines and labels. Hook restoration and
+unchanged-palette/ghost cases have sanitizer coverage. Five native checks,
+eighteen Python tests, both Visitor modes, 17,808 view checks and compile/signature
+pass. A 50.00-second Original-mode placement run observed 128 draws across a
+ride construction component, Arcade and Rose Bush; internal previews were
+inspected. macOS window capture failed again; no headed or remastered-art pass.
+The construction component's newly observed use does not establish all track
+assembly coverage. All 112 source hashes are unchanged; no installation.
+Full art/animation work, remaining effects and integrated acceptance continue.
+See `docs/reports/2026-10-20-remaster-placement.md`.
+
 2026-10-20, full-colour normal-view path (Codex,
 `codex/reimagined-full-remaster`): `TPRART03` retains higher-resolution RGBA
 bakes alongside source-bound indexed previews. Terrain and things draw into

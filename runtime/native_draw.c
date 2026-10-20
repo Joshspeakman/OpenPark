@@ -210,6 +210,27 @@ static void draw_world_indexed(NDTarget *t,const uint8_t *memory,uint32_t source
     }
 }
 
+static void paint_world_image(NDTarget *t,const TPRemasterImage *im,int x,int y,int flags,int colour) {
+    TPRemasterPaint *paint=t->paint;
+    if(t->pitch<=0 || t->base<0){paint->failed=1;return;}
+    TPRemasterPaint clipped=*paint;
+    int bx=(int)(t->base%t->pitch),by=(int)(t->base/t->pitch);
+    int left=paint->origin_x+bx*paint->density,top=paint->origin_y+by*paint->density;
+    int right=left+(t->clip_w<t->clip_r+1?t->clip_w:t->clip_r+1)*paint->density;
+    int bottom=top+t->clip_h*paint->density;
+    if(clipped.target.x0<left)clipped.target.x0=left;
+    if(clipped.target.y0<top)clipped.target.y0=top;
+    if(clipped.target.x1>right)clipped.target.x1=right;
+    if(clipped.target.y1>bottom)clipped.target.y1=bottom;
+    tp_remaster_paint_image(&clipped,im,bx+(x>>t->lowres),by+(y>>t->lowres),flags,(uint8_t)colour);
+    paint->failed|=clipped.failed;
+}
+int tp_native_paint_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
+                                int w,int h,int x,int y,int flags,int colour) {
+    TPRemasterImage im;
+    if(!t->paint || !tp_remaster_resolve(memory,source,w,h,t->lowres,&im) || !im.rgba)return 0;
+    paint_world_image(t,&im,x,y,flags,colour);return 1;
+}
 /* Draw the full-colour part at the same point in the native command stream.
  * The indexed preview still drives hit tests and interface extraction. */
 void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
@@ -218,20 +239,7 @@ void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t sour
     TPRemasterImage im;
     int replaced=tp_remaster_resolve(memory,source,w,h,t->lowres,&im);
     if(paint && replaced && im.rgba) {
-        if(t->pitch<=0 || t->base<0)paint->failed=1;
-        else {
-            TPRemasterPaint clipped=*paint;
-            int bx=(int)(t->base%t->pitch),by=(int)(t->base/t->pitch);
-            int left=paint->origin_x+bx*paint->density,top=paint->origin_y+by*paint->density;
-            int right=left+(t->clip_w<t->clip_r+1?t->clip_w:t->clip_r+1)*paint->density;
-            int bottom=top+t->clip_h*paint->density;
-            if(clipped.target.x0<left)clipped.target.x0=left;
-            if(clipped.target.y0<top)clipped.target.y0=top;
-            if(clipped.target.x1>right)clipped.target.x1=right;
-            if(clipped.target.y1>bottom)clipped.target.y1=bottom;
-            tp_remaster_paint_image(&clipped,&im,bx+(x>>t->lowres),by+(y>>t->lowres),flags,(uint8_t)colour);
-            paint->failed|=clipped.failed;
-        }
+        paint_world_image(t,&im,x,y,flags,colour);
         t->paint=NULL;                         /* preview must not cover fine texels */
     }
     draw_world_indexed(t,memory,source,w,h,x,y,flags,colour,bounds,replaced?&im:NULL);

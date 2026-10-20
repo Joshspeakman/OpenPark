@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include "../runtime/native_draw.c"
 #include "../runtime/remaster_surface.h"
+#include "../runtime/remaster_preview.h"
 uint32_t tp_map_w=64,tp_map_ext=64;
 int tp_native_landscape_paint(const uint8_t *,int,int,int,uint8_t *,int,int,int,int,int,int,int,TPRemasterPaint *);
 int tp_native_landscape_part(const uint8_t *,int,int,int,uint8_t *,int,int,int,int,int,int,int);
@@ -96,6 +97,51 @@ int main(void){
     memset(m+0x1ba2fc+6*('A'-0x20),0,6);
     tp_native_draw_small_text(&nd,m,4,0,(const uint8_t*)"A",42);
     CHECK(out[8]==pal[42]&&out[20+9]==pal[42]);
+    /* Placement capture predicts ORIGINAL writes privately; its full-colour
+     * result survives even where the game's palette result is unchanged. */
+    TPRemasterPreview *preview=calloc(1,sizeof *preview);CHECK(preview);
+    uint8_t actual[16*12],ignore[16*12]={0};memset(actual,1,sizeof actual);
+    ignore[2*16+5]=1;
+    paint=(TPRemasterPaint){.target={out,20,16,12,0,0,16,12},.palette=pal,.density=2};
+    for(int i=0;i<240;i++)out[i]=pal[1];
+    nd=(NDTarget){NULL,sizeof actual,0,16,16,12,15,1,NULL,0,NULL};
+    CHECK(tp_remaster_preview_begin(preview,actual,16,12,5,&paint,ignore));
+    CHECK(tp_remaster_preview_sprite(preview,actual,&nd,m,source,8,4,4,4,0,0));
+    CHECK(actual[2*16+2]==1&&actual[2*16+3]==1); /* game memory untouched */
+    CHECK(out[4*20+4]==texel(2*12+2));
+    /* The original draw: explicit fixture rows, not replacement samples. */
+    for(int y=0;y<2;y++)for(int x=0;x<4;x++)actual[(2+y)*16+2+x]=(uint8_t)(1+y*4+x);
+    tp_remaster_preview_sync(preview,actual);CHECK(!preview->reconciled);
+    CHECK(out[4*20+4]==texel(2*12+2)); /* original pixel 1 never changed */
+    actual[2*16+3]=200;actual[2*16+5]=201;actual[5*16+2]=202;
+    tp_remaster_preview_sync(preview,actual);
+    CHECK(preview->reconciled==1&&out[4*20+6]==pal[200]&&out[5*20+7]==pal[200]);
+    CHECK(out[4*20+4]==texel(2*12+2));
+    CHECK(out[4*20+10]==texel(2*12+8)&&out[10*20+4]==pal[1]);
+    /* A later replacement covers that unknown primitive, preserving order. */
+    CHECK(tp_remaster_preview_sprite(preview,actual,&nd,m,source,8,4,4,4,0,0));
+    CHECK(out[4*20+6]==texel(2*12+4));
+    for(int y=0;y<2;y++)for(int x=0;x<4;x++)actual[(2+y)*16+2+x]=(uint8_t)(1+y*4+x);
+    tp_remaster_preview_end(preview,actual);CHECK(!preview->active&&!paint.failed);
+    CHECK(preview->sprites==2&&preview->reconciled==1);
+    uint8_t *preview_ghost=m+0x800000;
+    for(int a=0;a<256;a++)for(int b=0;b<256;b++)preview_ghost[a*256+b]=(uint8_t)((a+b)/2);
+    nd.ghost=preview_ghost;memset(actual,1,sizeof actual);
+    for(int i=0;i<240;i++)out[i]=pal[1];
+    CHECK(tp_remaster_preview_begin(preview,actual,16,12,10,&paint,ignore));
+    CHECK(tp_remaster_preview_sprite(preview,actual,&nd,m,source,8,4,4,4,4,0));
+    uint32_t tex=texel(2*12+2);
+    uint32_t blended=0xff000000u|(((tex&255)+1)/2)|(((((tex>>8)&255)+1)/2)<<8)|(((((tex>>16)&255)+1)/2)<<16);
+    CHECK(out[4*20+4]==blended);
+    for(int y=0;y<2;y++)for(int x=0;x<4;x++)actual[(2+y)*16+2+x]=(uint8_t)((2+y*4+x)/2);
+    tp_remaster_preview_end(preview,actual);
+    CHECK(!paint.failed&&!preview->reconciled&&actual[2*16+2]==1&&out[4*20+4]==blended);
+    CHECK(!tp_remaster_preview_begin(preview,actual,641,12,10,&paint,ignore));
+    CHECK(!tp_remaster_preview_begin(preview,actual,16,12,13,&paint,ignore));
+    CHECK(tp_remaster_preview_begin(preview,actual,16,12,10,&paint,ignore));
+    nd.pitch=15;
+    CHECK(!tp_remaster_preview_sprite(preview,actual,&nd,m,source,8,4,4,4,0,0)&&paint.failed);
+    free(preview);
     /* Terrain uses the same high-resolution companion and still yields the
      * exact same indexed output used by game/UI bookkeeping. */
     uint32_t map=0x300000;memcpy(m+0x1d3b08,&map,4);memcpy(m+0x1d3b90,&table,4);

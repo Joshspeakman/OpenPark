@@ -11,5 +11,8 @@ typedef struct {
 } NDTarget;
 void tp_native_draw_sprite(NDTarget *, const uint8_t *, int, int, int, int, int, int);
 void tp_native_draw_world_sprite(NDTarget *, const uint8_t *, uint32_t, int, int, int, int, int, int, int[4]);
+/* Paint only the source-bound full-colour companion. The game can continue
+ * drawing its original pixels independently (construction-preview capture). */
+int tp_native_paint_world_sprite(NDTarget *, const uint8_t *, uint32_t, int, int, int, int, int, int);
 void tp_native_draw_small_text(NDTarget *, const uint8_t *, int, int, const uint8_t *, int);
 #endif
