@@ -49,6 +49,8 @@
 #include "walk_model.h"
 #include "walk_rig.h"
 #include "walk_layer.h"
+#include "art_mode.h"
+#include "remaster_art.h"
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
@@ -329,8 +331,9 @@ static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx
     if (kind == 7) { B->rider_slot=a;B->rider_variant=b;return; }
     if (kind == 2) {
         int w = (c & 0xff) >> lo, h = (c >> 8) >> lo, x = (int16_t)a >> lo, y = (int16_t)b >> lo;
-        tp_native_draw_sprite(&B->a, M + d, c & 0xff, c >> 8, a, b, e, B->colour);
-        tp_native_draw_sprite(&B->b, M + d, c & 0xff, c >> 8, a, b, e, B->colour);
+        const uint8_t *src=tp_remaster_source(M,d,c&255,c>>8,lo);
+        tp_native_draw_sprite(&B->a,src,c&255,c>>8,a,b,e,B->colour);
+        tp_native_draw_sprite(&B->b,src,c&255,c>>8,a,b,e,B->colour);
         touch(B, x - 2, y - 2, x + w + 3, y + h + 3);
         if(B->cls==4 && B->rider_slot>=0 && lp_find(4,(uint16_t)r16(r32(THINGS)+(uint32_t)B->idx*200+22)/200)) {
             static uint8_t ra[128*128],rb[128*128];
@@ -730,8 +733,9 @@ int tp_walk_status(char *buf, int n) {
     char what[96];
     if (W.follow && s && s->valid && s->f_cont) snprintf(what, sizeof what, "On %s with a visitor", s->f_name[0] ? s->f_name : "a ride");
     else if (W.follow) snprintf(what, sizeof what, "Following a visitor");
-    else snprintf(what, sizeof what, "%s", W.mesh ?
-        (getenv("TP_ART_MODE") && !strcmp(getenv("TP_ART_MODE"),"reimagined") ? "Reimagined animation study" : "Authored 3D preview") : "Walking (original cards)");
+    else snprintf(what, sizeof what, "%s", !W.mesh ? "Walking (original cards)" :
+        tp_art_mode()==TP_ART_REIMAGINED ? "Reimagined" :
+        getenv("TP_ART_MODE") && tp_art_mode()==TP_ART_ORIGINAL ? "Original artwork" : "Faithful 3D");
     if (now() < note_until) snprintf(buf, (size_t)n, "%s   ·   %s", what, note);
     else snprintf(buf, (size_t)n, "%s   ·   cell %d,%d   ·   F follow  R ride  V view  P compare  Esc leave", what, (int)W.cam_x, (int)W.cam_y);
     pthread_mutex_unlock(&lock);
@@ -846,8 +850,10 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             float forward=dx*cos(yaw)+dy*sin(yaw), lateral=dx*rx+dy*ry;
             if (dist-radius>FOG1 || forward+radius<.08f || fabsf(lateral)>fmaxf(0,forward)*tan(fov/2)+radius) continue;
             mr.texture=s->pix+c->off; mr.tw=c->w; mr.th=c->h;
-            const char *art=getenv("TP_ART_MODE");int reimagined=art && !strcmp(art,"reimagined");
-            int original=art && !strcmp(art,"original");
+            int reimagined=tp_art_mode()==TP_ART_REIMAGINED;
+            /* Retain the historical study default only if no explicit choice
+             * exists. The launcher always supplies an explicit selection. */
+            int original=getenv("TP_ART_MODE") && tp_art_mode()==TP_ART_ORIGINAL;
             const LPLayer *layer_asset=(!reimagined&&!original)?lp_find(c->cls,c->type):NULL;
             const LPLayer *layer=c->layer_ok?layer_asset:NULL;
             const LPPose *layer_pose=layer?lp_pose(layer,c->frame):NULL;

@@ -18,12 +18,17 @@ typedef struct {
     int side_fill; uint16_t side_colour;
     int row_lo[480],row_hi[480];
     unsigned triangles, fragments;
+    /* Canonical remaster textures can use full colour without changing the UI
+     * palette. Orthographic projection is also used by the offline park baker. */
+    const uint32_t *rgba;
+    int orthographic;
+    float offset_x,offset_y;
 } WMRender;
 
 static WMVertex wm_camera(const WMRender *r, float x, float y, float z, float u, float v) {
     x -= r->cx; y -= r->cy; z -= r->cz;
     return (WMVertex){x*r->rx+y*r->ry, x*r->ux+y*r->uy+z*r->uz,
-                      x*r->fx+y*r->fy+z*r->fz, u, v};
+                      x*r->fx+y*r->fy+z*r->fz+(r->orthographic?64:0), u, v};
 }
 static WMVertex wm_lerp(WMVertex a, WMVertex b, float t) {
     return (WMVertex){a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t,
@@ -33,10 +38,10 @@ static float wm_edge(float ax,float ay,float bx,float by,float x,float y) {
     return (x-ax)*(by-ay)-(y-ay)*(bx-ax);
 }
 static void wm_triangle_inner(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
-    float ia=1/a.z, ib=1/b.z, ic=1/c.z;
-    float ax=r->w*.5f+a.x*r->focal*ia, ay=r->h*.5f-a.y*r->focal*ia;
-    float bx=r->w*.5f+b.x*r->focal*ib, by=r->h*.5f-b.y*r->focal*ib;
-    float cx=r->w*.5f+c.x*r->focal*ic, cy=r->h*.5f-c.y*r->focal*ic;
+    float ia=r->orthographic?1:1/a.z, ib=r->orthographic?1:1/b.z, ic=r->orthographic?1:1/c.z;
+    float ax=r->w*.5f+r->offset_x+a.x*r->focal*ia, ay=r->h*.5f+r->offset_y-a.y*r->focal*ia;
+    float bx=r->w*.5f+r->offset_x+b.x*r->focal*ib, by=r->h*.5f+r->offset_y-b.y*r->focal*ib;
+    float cx=r->w*.5f+r->offset_x+c.x*r->focal*ic, cy=r->h*.5f+r->offset_y-c.y*r->focal*ic;
     float area=wm_edge(ax,ay,bx,by,cx,cy);
     if (!isfinite(area) || fabsf(area)<1e-5f) return;
     float xmin=fminf(ax,fminf(bx,cx)),xmax=fmaxf(ax,fmaxf(bx,cx));
@@ -53,19 +58,28 @@ static void wm_triangle_inner(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
         if (wa<-.00001f || wb<-.00001f || wc<-.00001f) continue;
         float iz=wa*ia+wb*ib+wc*ic;
         if (!(iz>0)) continue;
-        float z=1/iz; size_t at=(size_t)y*r->w+x;
+        float z=r->orthographic?wa*a.z+wb*b.z+wc*c.z:1/iz;
+        float uvscale=r->orthographic?1:z;size_t at=(size_t)y*r->w+x;
         /* Coplanar cards can share a guest position. Barycentric roundoff must
          * not alternate their ownership pixel by pixel; keep the first surface
          * within a tiny relative depth tolerance. Genuine nearer surfaces win. */
         float old_depth=r->depth[at];
         if (z>=old_depth-fmaxf(1e-6f,old_depth*1e-6f)) continue;
-        int u=(int)floorf((wa*a.u+wb*b.u+wc*c.u)*z);
-        int v=(int)floorf((wa*a.v+wb*b.v+wc*c.v)*z);
+        int u=(int)floorf((wa*a.u+wb*b.u+wc*c.u)*uvscale);
+        int v=(int)floorf((wa*a.v+wb*b.v+wc*c.v)*uvscale);
         if (u<0) u=0; if (u>=r->tw) u=r->tw-1;
         if (v<0) v=0; if (v>=r->th) v=r->th-1;
-        uint16_t colour=r->texture[(size_t)v*r->tw+u];
-        if (colour>=256) { if (!r->side_fill) continue; colour=r->side_colour; }
-        r->pixels[at]=r->palette[colour]; r->depth[at]=z; r->fragments++;
+        uint32_t output;
+        if(r->rgba) {
+            output=r->rgba[(size_t)v*r->tw+u];
+            if((output>>24)<128)continue;
+            output|=0xff000000u; /* cutout material, not premultiplied translucency */
+        } else {
+            uint16_t colour=r->texture[(size_t)v*r->tw+u];
+            if (colour>=256) { if (!r->side_fill) continue; colour=r->side_colour; }
+            output=r->palette[colour];
+        }
+        r->pixels[at]=output; r->depth[at]=z; r->fragments++;
     }
 }
 static void wm_triangle(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {

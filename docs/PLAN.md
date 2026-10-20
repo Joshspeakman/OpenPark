@@ -5,6 +5,37 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, full Reimagined scope (Codex, `codex/reimagined-full-remaster`):
+the user requested an autonomous complete world-art remaster, normal and
+Visitor perspectives, all assets/animations/expressions/riders, UI exempt,
+no placeholders or partial-art review pauses. This supersedes the previous
+slice-and-review acceptance sequence. Main and Nightly are untouched.
+
+Implemented groundwork: a saved Art Style row in the cloned launcher;
+source-bound world-part replacement shared by native park/Visitor capture;
+bounded full-colour textured rigs and a shared-model orthographic baker;
+exhaustive source/animation/resource ledger; fail-closed pack compilation and
+installation. The build reuses the existing Reimagined bundle identity and
+install location. **No new application was installed, and the full remaster is
+not complete.** There are zero accepted replacement assets in the new ledger.
+Generated candidate materials remain uninstalled; the earlier primitive guest
+studies are not production art.
+
+Inventory: 81 definition/guest records, 3,545 sprite/ground records (2,759
+nonempty), 11,408 frame records across two families, 1,380 animation slots,
+zero malformed source references. Runtime assembly/effects and unresolved
+resources are separately mandatory. Both walk modes, 17,808 view checks,
+existing sanitizer tests, new source-binding/texture/projection tests and six
+Python completeness tests pass. Native build/signature verification passes.
+The launcher now successfully captures in this environment; the old AppKit
+restriction no longer blocks that test. A 37.28-second muted native headed run
+also captured the populated normal park and occupied Visitor scene in Original
+mode, exited cleanly, and left all 112 DATA hashes unchanged. This is a shared
+renderer regression check, not a remastered-art pass. Full remastered game quality,
+animation coverage, HD overhead drawing, custom tracks and production model
+bindings remain outstanding. See
+`docs/reports/2026-10-19-full-remaster.md` for formats, evidence and limits.
+
 2026-10-19, Faithful layered ride runtime (Codex,
 `codex/faithful-layered-rides`): the user rejected the floating flat overlay and
 requested a detailed, animated approach that works in the game. New bounded

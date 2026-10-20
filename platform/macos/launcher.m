@@ -159,7 +159,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     NSImage *_keyart, *_logo, *_grass;
     Setting _top[3];
     NSArray<NSString *> *_groups;
-    Setting _display[8], _sound[9], _tweaks[7], _free[5];
+    Setting _display[9], _sound[9], _tweaks[7], _free[5];
 }
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -184,6 +184,12 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
                           @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
         _groups = @[@"Display", @"Sound", @"Controls", @"Files", @"Tweaks", @"Free Mode"];
+        _display[8] = setting(@"Art Style", @"ArtStyle",
+                              @[@"original", @"faithful3d", @"reimagined"],
+                              @[@"Original", @"Faithful 3D", @"Reimagined"],
+                              @[@"The original artwork in both views",
+                                @"Original park art; source-textured 3D Visitor View",
+                                @"Complete remaster pack required for both views"]);
         _display[7] = setting(@"Ride Videos", @"RideVideos", @[@0, @1, @2], @[@"PC", @"PC + 3DO", @"3DO"],
                               @[@"The PC's ride videos only", @"The PC's, and the 3DO's for Space Shuttle and Tree House",
                                 @"The 3DO's in full colour, the PC's for the rest"]);
@@ -269,7 +275,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 8 : self.open == 1 ? 9 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 9 : self.open == 1 ? 9 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];

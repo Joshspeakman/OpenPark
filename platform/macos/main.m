@@ -13,6 +13,7 @@
 #import <AVFoundation/AVFoundation.h>
 #include <pthread.h>
 #include "host.h"
+#include "sha256.h"
 int tp_audio_start(void);
 void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
@@ -904,8 +905,10 @@ static void *game_thread(void *arg) {
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     NSNumber *studyMapSize = [NSBundle.mainBundle objectForInfoDictionaryKey:@"TPStudyMapSize"] ?: @64;
     NSString *studyArtMode = [NSBundle.mainBundle objectForInfoDictionaryKey:@"TPStudyArtMode"];
-    if ([studyArtMode isEqualToString:@"reimagined"] || [studyArtMode isEqualToString:@"faithful"])
-        setenv("TP_ART_MODE", studyArtMode.UTF8String, 1);
+    if ([studyArtMode isEqualToString:@"faithful"]) studyArtMode = @"faithful3d";
+    if (![@[@"original", @"faithful3d", @"reimagined"] containsObject:studyArtMode ?: @""])
+        studyArtMode = @"original";
+    [u registerDefaults:@{@"ArtStyle": studyArtMode}];
     [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"RideVideos": @1, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
                           @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": studyMapSize, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
                           @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
@@ -919,6 +922,31 @@ static void *game_thread(void *arg) {
     BOOL selfTest = NSProcessInfo.processInfo.environment[@"TP_TEST"].length > 0 || NSProcessInfo.processInfo.environment[@"TP_CONTROL"].length > 0;
     if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
     if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }
+    /* Resolve after the launcher closes; an explicit test environment wins.
+     * NSUserDefaults belongs to this isolated bundle, never Nightly's domain. */
+    if (!getenv("TP_ART_MODE")) {
+        NSString *art = [u stringForKey:@"ArtStyle"];
+        if (![@[@"original", @"faithful3d", @"reimagined"] containsObject:art ?: @""])
+            art = @"original";
+        setenv("TP_ART_MODE", art.UTF8String, 1);
+    }
+    if ([[NSBundle.mainBundle objectForInfoDictionaryKey:@"TPRequireCompleteRemaster"] boolValue] &&
+        !strcmp(getenv("TP_ART_MODE"),"reimagined")) {
+        NSString *pack=[root stringByAppendingPathComponent:@"reimagined"];
+        NSData *receipt=[NSData dataWithContentsOfFile:[pack stringByAppendingPathComponent:@"release.json"]];
+        id decoded=receipt ? [NSJSONSerialization JSONObjectWithData:receipt options:0 error:nil] : nil;
+        NSDictionary *release=[decoded isKindOfClass:NSDictionary.class]?decoded:nil;
+        NSData *world=[NSData dataWithContentsOfFile:[pack stringByAppendingPathComponent:@"world.art"]
+                                            options:NSDataReadingMappedIfSafe error:nil];
+        uint8_t hash[32];char hex[65]={0};
+        if(world){tp_sha256(world.bytes,world.length,hash);for(int i=0;i<32;i++)snprintf(hex+i*2,3,"%02x",hash[i]);}
+        if (![release[@"complete"] isEqual:@YES] ||
+            ![release[@"art_mode"] isEqual:@"reimagined"] || !world ||
+            ![release[@"world_sha256"] isEqual:@(hex)]) {
+            [self fail:@"The complete Reimagined pack is not installed or did not pass its integrity check. This build will not substitute unfinished artwork. Select Original to play the original game."];
+            return;
+        }
+    }
     if (!getenv("TP_CYCLES")) tp_host_set_cycles([u doubleForKey:@"Cycles"]);
     if ([u boolForKey:@"PlayIntro"] && !getenv("TP_SKIP_INTRO")) _intro = [NSBundle.mainBundle pathForResource:@"INTRO" ofType:@"TPIMG"];
     [NSFileManager.defaultManager createDirectoryAtPath:_saves withIntermediateDirectories:YES attributes:nil error:nil];
@@ -1195,6 +1223,7 @@ static uint32_t key_of_char(unichar c) {
             fprintf(stderr, "walkshot %s drawn=%d | %s\n", [line substringFromIndex:9].UTF8String, ok, st);
         }
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
+        else if ([op isEqual:@"showbackground"]) { [_window orderBack:nil]; } /* owned headed capture without stealing focus */
         else if ([op isEqual:@"windowinfo"] && p.count > 1) {
             NSDictionary *info = @{@"window_id": @(_window.windowNumber), @"visible": @(_window.isVisible),
                                    @"pid": @(NSProcessInfo.processInfo.processIdentifier)};

@@ -41,6 +41,7 @@
 #include <string.h>
 #include <time.h>
 #include "platform.h"                               /* (timing, real-time thread, parallel bands: platform/<os>/) */
+#include "remaster_art.h"
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -454,7 +455,11 @@ typedef struct { NDTarget t; int colour, fail; } NPState;
 static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
     NPState *st = ctx;
     if (kind == 5) { st->colour = c; return; }
-    if (kind == 2) { tp_native_draw_sprite(&st->t, M + d, c & 0xff, c >> 8, a, b, e, st->colour); st->colour = 0; return; }
+    if (kind == 2) {
+        const uint8_t *src=tp_remaster_source(M,d,c&255,c>>8,st->t.lowres);
+        tp_native_draw_sprite(&st->t,src,c&255,c>>8,a,b,e,st->colour);
+        st->colour=0;return;
+    }
     if (kind == 4) { if (tp_native_text) tp_native_draw_small_text(&st->t, M, a, b, tp_native_text, c); else st->fail = 1; return; }
     if (kind == 3 && a) st->fail = 1;
 }

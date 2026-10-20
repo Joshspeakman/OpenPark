@@ -1,5 +1,11 @@
 # Two art directions — 2026-10-19
 
+Later direction: the user's full autonomous Reimagined request supersedes the
+slice/review acceptance sequence below. UI is exempt, all world assets and
+animations are mandatory, and no placeholders or concept-review pauses are
+allowed. Current work and truthful completion status:
+[full remaster](2026-10-19-full-remaster.md).
+
 The user requested two distinct options: the current faithful conversion of
 original sprites to 3D, and **Reimagined**, a faithful cartoon remaster of all
 game art. Reimagined must cover both the original overhead game and Visitor

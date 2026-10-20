@@ -21,6 +21,7 @@
  * clip window); only writes outside the whole buffer are dropped. */
 #include <stdint.h>
 #include <stddef.h>
+#include "remaster_art_impl.h"
 
 typedef struct {
     uint8_t *buf; size_t size;                  /* the screen buffer the game draws into */

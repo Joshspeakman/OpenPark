@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include "remaster_art.h"
 
 #define MAP_PTR     0x1d3b08u   /* cells of 4 bytes: tp_map_ext square, rows tp_map_w apart (bigmap.c) */
 extern uint32_t tp_map_w, tp_map_ext;
@@ -54,7 +55,7 @@ static void blit(const Target *t, uint32_t entry, int x, int y, int flags) {
     if (x + w + 1 < t->wx0 || x > t->wx1 || y + h + 1 < t->wy0 || y > t->wy1) return;   /* nothing of it in the wanted part */
     int dx = flags & 1 ? -1 : 1, x0 = flags & 1 ? x + w : x;
     int dy = flags & 2 ? -1 : 1, y0 = flags & 2 ? y + h : y;
-    const uint8_t *s = M + data;
+    const uint8_t *s = tp_remaster_source(M, data, M[entry+4], M[entry+5], t->lowres);
     for (int row = 0; row < h; row++) {
         int px = x0, py = y0 + dy * row;
         for (;;) {

@@ -5,34 +5,50 @@
  * TPRIG1 nv nt bones poses seats
  * vertices: xyz bone; triangles: indices RGBhex; poses: frame then 12 floats
  * per bone and seat, row-major affine matrices. Frame 65535 is seated guest.
+ * TPRIG2: the same counts, then tw th and tw*th RRGGBBAA hex texels.
+ * Vertices gain u v after bone (pixel coordinates). Triangle colours are
+ * retained for format compatibility; textured rigs use their atlas instead.
  */
 #ifndef TP_WALK_RIG_H
 #define TP_WALK_RIG_H
 #include <limits.h>
-typedef struct {float x,y,z;unsigned bone;} RMVertex;
+typedef struct {float x,y,z;unsigned bone;float u,v;} RMVertex;
 typedef struct {unsigned a,b,c;uint32_t colour;} RMTriangle;
 typedef struct {uint16_t frame;float *matrices;} RMPose;
-typedef struct {int cls,type,nv,nt,nb,np,ns;RMVertex*v;RMTriangle*t;RMPose*p;float*matrices;} RMRig;
+typedef struct {int cls,type,nv,nt,nb,np,ns;RMVertex*v;RMTriangle*t;RMPose*p;float*matrices;
+    int tw,th;uint32_t*texture;} RMRig;
 static RMRig rm_cache[96];static int rm_count;
-static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;}
+static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);free(rm_cache[i].texture);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;}
 static int rm_read(FILE*f,RMRig*r){
-    char magic[16];int nv,nt,nb,np,ns;
-    if(fscanf(f,"%15s%d%d%d%d%d",magic,&nv,&nt,&nb,&np,&ns)!=6 || strcmp(magic,"TPRIG1") ||
+    char magic[16];int nv,nt,nb,np,ns,tw=0,th=0;uint32_t*texture=NULL;
+    if(fscanf(f,"%15s%d%d%d%d%d",magic,&nv,&nt,&nb,&np,&ns)!=6 || (strcmp(magic,"TPRIG1") && strcmp(magic,"TPRIG2")) ||
        nv<3 || nv>8192 || nt<1 || nt>16384 || nb<1 || nb>64 || np<1 || np>8192 || ns<0 || ns>40 ||
        (uint64_t)np*(nb+ns)*12>2000000)return 0;
     RMVertex*v=calloc((size_t)nv,sizeof*v);RMTriangle*t=calloc((size_t)nt,sizeof*t);
     RMPose*p=calloc((size_t)np,sizeof*p);float*mat=calloc((size_t)np*(nb+ns)*12,sizeof*mat);
     if(!v||!t||!p||!mat)goto bad;
-    for(int i=0;i<nv;i++)if(fscanf(f,"%f%f%f%u",&v[i].x,&v[i].y,&v[i].z,&v[i].bone)!=4 ||
-        !isfinite(v[i].x)||!isfinite(v[i].y)||!isfinite(v[i].z)||fabsf(v[i].x)>32||fabsf(v[i].y)>32||fabsf(v[i].z)>32||v[i].bone>=(unsigned)nb)goto bad;
+    if(!strcmp(magic,"TPRIG2")) {
+        if(fscanf(f,"%d%d",&tw,&th)!=2 || tw<1||th<1||tw>2048||th>2048)goto bad;
+        texture=calloc((size_t)tw*th,sizeof*texture);if(!texture)goto bad;
+        for(int i=0;i<tw*th;i++){
+            unsigned rgba;if(fscanf(f,"%x",&rgba)!=1)goto bad;
+            texture[i]=((rgba>>24)&255)|((rgba>>8)&0xff00)|((rgba<<8)&0xff0000)|((rgba&255)<<24);
+        }
+    }
+    for(int i=0;i<nv;i++){
+        if(fscanf(f,"%f%f%f%u",&v[i].x,&v[i].y,&v[i].z,&v[i].bone)!=4 ||
+           !isfinite(v[i].x)||!isfinite(v[i].y)||!isfinite(v[i].z)||fabsf(v[i].x)>32||fabsf(v[i].y)>32||fabsf(v[i].z)>32||v[i].bone>=(unsigned)nb)goto bad;
+        if(texture && (fscanf(f,"%f%f",&v[i].u,&v[i].v)!=2 ||
+           !isfinite(v[i].u)||!isfinite(v[i].v)||v[i].u<0||v[i].v<0||v[i].u>tw||v[i].v>th))goto bad;
+    }
     for(int i=0;i<nt;i++){unsigned rgb;if(fscanf(f,"%u%u%u%x",&t[i].a,&t[i].b,&t[i].c,&rgb)!=4 ||
         t[i].a>=(unsigned)nv||t[i].b>=(unsigned)nv||t[i].c>=(unsigned)nv||rgb>0xffffff)goto bad;
         t[i].colour=0xff000000u|((rgb>>16)&255)|(rgb&0xff00)|((rgb&255)<<16);}
     for(int i=0;i<np;i++){unsigned frame;if(fscanf(f,"%u",&frame)!=1 || frame>65535 || (i && frame<=p[i-1].frame))goto bad;
         p[i].frame=(uint16_t)frame;p[i].matrices=mat+(size_t)i*(nb+ns)*12;
         for(int k=0;k<(nb+ns)*12;k++){float *a=&p[i].matrices[k];if(fscanf(f,"%f",a)!=1||!isfinite(*a)||fabsf(*a)>64)goto bad;}}
-    r->nv=nv;r->nt=nt;r->nb=nb;r->np=np;r->ns=ns;r->v=v;r->t=t;r->p=p;r->matrices=mat;return 1;
-bad:free(v);free(t);free(p);free(mat);return 0;
+    r->nv=nv;r->nt=nt;r->nb=nb;r->np=np;r->ns=ns;r->v=v;r->t=t;r->p=p;r->matrices=mat;r->tw=tw;r->th=th;r->texture=texture;return 1;
+bad:free(v);free(t);free(p);free(mat);free(texture);return 0;
 }
 static const RMRig*rm_find(int cls,int type){
     if(type<0)return NULL;for(int i=0;i<rm_count;i++)if(rm_cache[i].cls==cls&&rm_cache[i].type==type)return rm_cache[i].nv?&rm_cache[i]:NULL;
@@ -50,16 +66,17 @@ static void rm_point(const float*m,float x,float y,float z,float*out){
     out[0]=m[0]*x+m[1]*y+m[2]*z+m[3];out[1]=m[4]*x+m[5]*y+m[6]*z+m[7];out[2]=m[8]*x+m[9]*y+m[10]*z+m[11];
 }
 static void rm_draw(WMRender*r,const RMRig*rig,const RMPose*pose,float x,float y,float scale,const float*parent){
-    const uint32_t*oldpal=r->palette;const uint16_t*oldtex=r->texture;int tw=r->tw,th=r->th,fill=r->side_fill;
+    const uint32_t*oldpal=r->palette,*oldrgba=r->rgba;const uint16_t*oldtex=r->texture;int tw=r->tw,th=r->th,fill=r->side_fill;
     uint16_t tex=0;uint32_t colour;r->texture=&tex;r->palette=&colour;r->tw=r->th=1;r->side_fill=0;
+    r->rgba=rig->texture;if(r->rgba){r->tw=rig->tw;r->th=rig->th;}
     WMVertex transformed[8192];
     for(int i=0;i<rig->nv;i++){
         const RMVertex*v=&rig->v[i];float p[3],q[3];rm_point(pose->matrices+v->bone*12,v->x,v->y,v->z,p);
         if(parent){rm_point(parent,p[0],p[1],p[2],q);memcpy(p,q,sizeof p);}
-        transformed[i]=wm_camera(r,x+p[0]*scale,y+p[1]*scale,p[2]*scale,0,0);
+        transformed[i]=wm_camera(r,x+p[0]*scale,y+p[1]*scale,p[2]*scale,v->u,v->v);
     }
     for(int i=0;i<rig->nt;i++){const RMTriangle*t=&rig->t[i];colour=t->colour;wm_triangle(r,transformed[t->a],transformed[t->b],transformed[t->c]);}
-    r->palette=oldpal;r->texture=oldtex;r->tw=tw;r->th=th;r->side_fill=fill;
+    r->palette=oldpal;r->texture=oldtex;r->tw=tw;r->th=th;r->side_fill=fill;r->rgba=oldrgba;
 }
 /* Same descending slot order as native_land.c:ride_draw. 255 is an empty seat. */
 static int rm_seat_order(const uint8_t*guests,int n,int cap,int kind,unsigned phase,uint8_t out[40]){
