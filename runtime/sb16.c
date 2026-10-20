@@ -367,6 +367,7 @@ void sb16_pump(double t) {
     if (r_head - r_tail > RING) r_tail = r_head - RING;
     pthread_mutex_unlock(&ring_lock);
 }
+long sb16_underruns(void) { return underruns; }
 void sb16_play(float *out, int frames) {
     pthread_mutex_lock(&ring_lock);
     unsigned avail = r_head - r_tail, lead = ring_lead();
