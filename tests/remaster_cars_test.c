@@ -63,6 +63,9 @@ int main(void){
             for(int j=0;j<3;j++)memory[records+25+18+j]=(uint8_t)slopes[slope][j];
             CHECK(capture(s,0));Card *c=&s->cards[0];
             CHECK(c->rig_ok && c->frame==3+direction && c->cls==14 && c->type==family);
+            CHECK(c->vehicle.family==family && c->vehicle.shape==1 && c->vehicle.level==level);
+            CHECK(c->vehicle.direction==direction && c->vehicle.track_x==12 && c->vehicle.track_y==14);
+            CHECK(c->vehicle.car_x==12 && c->vehicle.car_y==14 && c->vehicle.frac_x==px && c->vehicle.frac_y==py && !c->vehicle.bounce);
             int ox=((mode?24:48)*px>>8)+(py>>(mode?5:4));
             int oy=mode?(py>>3)>>1:py>>3;
             float vy=(oy>>s->g.lo)/s->g.ths,vx=((ox>>s->g.lo)-vy*s->g.shear)/s->g.tws;
@@ -122,6 +125,20 @@ int main(void){
     /* A car with no track can display a guest-only fallback. It must not
      * accidentally become a car rig merely because one frame was captured. */
     put16(car+2,0);put16(guest+10,10);CHECK(capture(s,0));CHECK(!s->cards[0].rig_ok);put16(car+2,2);
+    /* Native speed-triggered shake remains observable after retargeting.
+     * Stable source seeds must produce the same bounce on repeated captures. */
+    put16(SCREEN_MODE,1);put16(TILE_W,48);put16(TILE_H,32);CHECK(geom(&s->g));
+    put16(track+22,2);memory[track+0x79]=0;memory[car+12]=10;put16(car+0x47,0);
+    put16(car+0x16,0);put16(0x400000+0x2e,1);memory[0x1ccf78]=0;
+    memset(memory+records+25+18,0,3);tp_native_stable_rng=1;unsigned shakes=0;
+    for(unsigned seed=0;seed<64;seed++){
+        put32(0x1d3af4,seed);CHECK(capture(s,0));Card first=s->cards[0];
+        CHECK(first.rig_ok && first.vehicle.bounce<=3);
+        CHECK(fabsf(first.rig_z-first.vehicle.bounce/40.f)<1e-6f);
+        CHECK(capture(s,0));CHECK(first.vehicle.bounce==s->cards[0].vehicle.bounce);
+        shakes|=1u<<first.vehicle.bounce;
+    }
+    CHECK(shakes==15);tp_native_stable_rng=0;
     float seat[12]={0,-1,0,.3f,1,0,0,.4f,0,0,1,.2f},lifted[12],q[3];
     rm_lift_attachment(lifted,seat,2.5f);rm_point(lifted,1,2,3,q);
     CHECK(fabsf(q[0]+1.7f)<1e-6f && fabsf(q[1]-1.4f)<1e-6f && fabsf(q[2]-5.7f)<1e-6f);

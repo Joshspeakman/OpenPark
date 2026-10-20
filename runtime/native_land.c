@@ -498,6 +498,7 @@ static int classE(uint32_t t, int x, int y) {
             uint32_t parent = things + (uint32_t)(uint16_t)r16(t + 0x16) * 0xc8;
             if ((uint16_t)r16(parent + 0x2e) > M[0x1ccf78 + (uint16_t)r16(parent + 0x16)]) off = (int16_t)(off - (rand15() & 3));
         }
+        int car_bounce=-off;
         uint32_t ride = find_in_cell(map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4), 0x12);
         if (!ride) ride = find_in_cell(map + (uint32_t)((int16_t)r16(t + 0x10) * 4), 0x12);
         uint32_t rider = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
@@ -518,6 +519,7 @@ static int classE(uint32_t t, int x, int y) {
         off = (int16_t)idiv_trunc(off, (M[FRAME_MODE] & 8) ? (uint16_t)r16(0x1d6642) : 1);
         if (hires) off = (int16_t)(off / 2);
         if(marks && dlog){
+            dlog(11,(int)((ride-things)/200u),car_bounce,0,0,0,dctx);
             dlog(10,f,x,y,(uint32_t)(-off*(hires?2:1)),(uint16_t)r16(ride+0x16),dctx);
             dlog(8,f,x,(int16_t)(y+off),0,0,dctx);
         }

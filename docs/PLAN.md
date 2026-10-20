@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, physical ordinary-vehicle paths (Codex, isolated remaster branch):
+Visitor car bodies and attached riders now use explicit authored route/root
+bindings, retaining native track selection, fractional progress, travel direction,
+frame identity and speed-triggered shake. The private candidate has 46 routes
+across wood, steel and Monorail. All 640 recorded car contact roots agree with
+the authored rails within 1.85e-6 world units; this is not individual-wheel or
+live timing acceptance. The replay produced 1,280 images in both projections,
+and twenty contextual images retain nearby ordinary track geometry.
+
+Eight native sanitizer checks, 21 Python tests, both walk modes and 17,808 view
+checks pass. Native probes preserve pixels/anchors in all 1,248 cases; a further
+64-seed test preserves all four shake states. Compile/signature pass. The
+36.84-second Original-mode app run exits normally, but both macOS window captures
+fail, so no headed pass is claimed. All 112 owned source hashes are unchanged;
+no installation or art acceptance. Ride-along camera/seat identity, source-hidden
+riders in reverse views, special tracks and full normal-gameplay packs remain
+unfinished. Details: `docs/reports/2026-10-20-remaster-vehicle-paths.md`.
+
 2026-10-20, ordinary coaster geometry (Codex,
 `codex/reimagined-full-remaster`): private steel and wooden modules now cover
 46 models / 91 source pose keys, including ordinary curves, slopes, stops,

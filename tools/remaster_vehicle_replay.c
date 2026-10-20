@@ -36,7 +36,7 @@ int main(int argc,char**argv){
     uint32_t bytes=last-base+200;
     char path[4096];snprintf(path,sizeof path,"%s/evidence.csv",argv[4]);
     log=fopen(path,"w");if(!log)goto done;
-    fprintf(log,"sample,frame,state,speed,linked_guests,attached_guests,visible_guests,variant_mask,origin_x,origin_y,origin_z,entity_x,entity_y,triangles\n");
+    fprintf(log,"sample,frame,state,speed,linked_guests,attached_guests,visible_guests,variant_mask,origin_x,origin_y,origin_z,entity_x,entity_y,triangles,track_family,track_shape,bounce,contact_x,contact_y,contact_z\n");
     img=malloc(960*600*sizeof*img);depth=malloc(640*640*sizeof*depth);
     if(!img||!depth)goto done;
     for(int sample=0;sample<count;sample++){
@@ -93,9 +93,17 @@ int main(int argc,char**argv){
             if(++linked>40||(uint64_t)base+next*200>last)goto done;
             next=(uint16_t)r16(base+next*200+0x47);
         }
+        float placement[12],posed_contact[3],contact[3];
+        if(!rm_vehicle_transform(&c->vehicle,ride,pose,placement)){
+            fprintf(stderr,"sample %d: missing or invalid authored vehicle path\n",sample);goto done;
+        }
+        const RMMotionBody*body=rm_motion_body((unsigned)ride->cls,(unsigned)ride->type);
+        rm_point(pose->matrices+body->bone*12,body->pivot[0],body->pivot[1],body->pivot[2],posed_contact);
+        rm_point(placement,posed_contact[0],posed_contact[1],posed_contact[2],contact);
+        float contact_x=c->vehicle.track_x+1.f/3+contact[0],contact_y=c->vehicle.track_y+.5f+contact[1];
         Card captured=*c;s->cards[0]=captured;s->ncards=1;c=&s->cards[0];
-        W.cam_x=c->rig_x+.4-cos(yaw)*6;W.cam_y=c->rig_y-1-sin(yaw)*6;
-        W.cam_yaw=yaw;W.cam_z=1.1+c->rig_z;W.cam_pitch=.07;
+        W.cam_x=contact_x+.4-cos(yaw)*6;W.cam_y=contact_y-1-sin(yaw)*6;
+        W.cam_yaw=yaw;W.cam_z=.9+contact[2];W.cam_pitch=.07;
         result=5;
         if(!tp_walk_render(img,960,600))goto done;
         snprintf(path,sizeof path,"%s/visitor-%03d.png",argv[4],sample);
@@ -103,18 +111,18 @@ int main(int argc,char**argv){
         for(int i=0;i<640*640;i++){img[i]=0xff332b24;depth[i]=FLT_MAX;}
         WMRender wr={.pixels=img,.depth=depth,.w=640,.h=640,
             .rx=1,.ry=1.f/3,.uy=-2.f/3,.uz=1/1.2f,.fy=-1,.fz=-1,
-            .focal=168,.orthographic=1,.offset_x=-40,.offset_y=200+140*c->rig_z};
-        float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
+            .cx=contact[0],.cy=contact[1],.cz=contact[2],
+            .focal=168,.orthographic=1,.offset_x=-40,.offset_y=200};
         rm_draw(&wr,ride,pose,0,0,1,placement);
         for(int seat=0;seat<ride->ns;seat++)if(guests[seat]){
-            float attachment[12];rm_lift_attachment(attachment,pose->matrices+(ride->nb+seat)*12,c->rig_z);
+            float attachment[12];rm_affine_product(attachment,placement,pose->matrices+(ride->nb+seat)*12);
             rm_draw(&wr,guests[seat],poses[seat],0,0,1,attachment);
         }
         snprintf(path,sizeof path,"%s/normal-%03d.png",argv[4],sample);
         if(!png(path,img,640,640))goto done;
-        fprintf(log,"%d,%u,%u,%u,%d,%d,%d,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%u\n",
+        fprintf(log,"%d,%u,%u,%u,%d,%d,%d,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u,%.6f,%.6f,%.6f\n",
                 sample,c->frame,M[t+12],(uint16_t)r16(t+0x2e),
-                linked,attached,visible,variants,c->rig_x,c->rig_y,c->rig_z,x,y,wr.triangles);
+                linked,attached,visible,variants,c->rig_x,c->rig_y,c->rig_z,x,y,wr.triangles,c->vehicle.family,c->vehicle.shape,c->vehicle.bounce,contact_x,contact_y,contact[2]);
     }
     result=ferror(log)?6:0;
     if(!result)printf("%d captured native states replayed in both projections\n",count);

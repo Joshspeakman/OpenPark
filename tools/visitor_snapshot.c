@@ -285,9 +285,10 @@ int main(int argc,char**argv){
             if(!draw_track_assembly(s,c,&wr,1)){free(p);free(depth);return 4;}
         }else{
             float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
-            rm_draw(&wr,rig,pose,0,0,1,c->rig_z?placement:NULL);
+            if(c->cls==14 && !rm_vehicle_transform(&c->vehicle,rig,pose,placement)){free(p);free(depth);return 4;}
+            rm_draw(&wr,rig,pose,0,0,1,placement);
             for(int i=0;i<rig->ns;i++)if(guests[i]){
-                float attachment[12];rm_lift_attachment(attachment,pose->matrices+(rig->nb+i)*12,c->rig_z);
+                float attachment[12];rm_affine_product(attachment,placement,pose->matrices+(rig->nb+i)*12);
                 rm_draw(&wr,guests[i],poses[i],0,0,1,attachment);
             }
         }

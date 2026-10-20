@@ -13,6 +13,7 @@
 #ifndef TP_WALK_RIG_H
 #define TP_WALK_RIG_H
 #include "remaster_rider.h"
+#include "remaster_motion.h"
 #include <limits.h>
 typedef struct {float x,y,z;unsigned bone;float u,v;} RMVertex;
 typedef struct {unsigned a,b,c;uint32_t colour;} RMTriangle;
@@ -27,7 +28,7 @@ static RMRig rm_cache[96];static int rm_count;
 typedef struct { unsigned cls,frame,model_cls,type; } RMBinding;
 static RMBinding *rm_bindings;static unsigned rm_nbindings;static int rm_bindings_loaded;
 static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);free(rm_cache[i].texture);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;
-    free(rm_bindings);rm_bindings=NULL;rm_nbindings=0;rm_bindings_loaded=0;}
+    free(rm_bindings);rm_bindings=NULL;rm_nbindings=0;rm_bindings_loaded=0;rm_motion_free(&rm_motion);rm_motion_loaded=0;}
 static int rm_read_bindings(FILE*f,RMBinding**out,unsigned*count){
     char magic[16];unsigned n;RMBinding*b=NULL;
     *out=NULL;*count=0;
@@ -101,6 +102,12 @@ static const RMRig*rm_find_frame(unsigned cls,unsigned frame){
 static const RMPose*rm_pose(const RMRig*r,unsigned frame){int lo=0,hi=r->np;
     while(lo<hi){int mid=lo+(hi-lo)/2;if(r->p[mid].frame<frame)lo=mid+1;else hi=mid;}
     return lo<r->np&&r->p[lo].frame==frame?&r->p[lo]:NULL;
+}
+static int rm_vehicle_transform(const TPRMVehicle*v,const RMRig*r,const RMPose*p,float*out){
+    const RMMotionBody*b=rm_motion_body((unsigned)r->cls,(unsigned)r->type);
+    const RMRoute*route=rm_motion_route(v->family,v->shape);
+    return b && b->bone<(unsigned)r->nb && route &&
+        rm_motion_transform(route,v,b->pivot,p->matrices+b->bone*12,out);
 }
 static void rm_point(const float*m,float x,float y,float z,float*out){
     out[0]=m[0]*x+m[1]*y+m[2]*z+m[3];out[1]=m[4]*x+m[5]*y+m[6]*z+m[7];out[2]=m[8]*x+m[9]*y+m[10]*z+m[11];

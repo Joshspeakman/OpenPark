@@ -20,6 +20,9 @@ build/remaster_tracks_test
 "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation \
   -fsanitize=address,undefined tests/remaster_cars_test.c runtime/native_land.c \
   runtime/native_draw.c -lm -lpthread -o build/remaster_cars_test
+"$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
+  tests/remaster_motion_test.c -lm -o build/remaster_motion_test
+build/remaster_motion_test
 build/remaster_cars_test
 PLAT=runtime/platform_posix.c; [[ $(uname -s) == Darwin ]] && PLAT=platform/macos/platform_macos.c
 "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-unused-variable -Wno-misleading-indentation \
