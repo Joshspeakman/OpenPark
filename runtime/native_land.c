@@ -469,6 +469,18 @@ int tp_native_stable_rng;
 static void rng_for(uint32_t t) { if (tp_native_stable_rng) rng = r32(0x1d3af4) ^ (t * 2654435761u); }
 static int rand15(void) { rng *= 0xbb40e62du; return (int)((rng >> 8) & 0x7fff); }
 static int idiv_trunc(int a, int b) { return a / b; }   /* (C division truncates, as idiv) */
+/* Cars retain their original substitution behavior, including table-entry
+ * zero. Metadata brackets a real blit or an explicitly omitted marker. */
+static void car_rider_blit(uint32_t entry,int x,int y,int flags,int seat,
+                           uint32_t person,int pose,unsigned original_offset){
+    uint32_t sprites=r32(SPRITES);
+    unsigned key=pose>=0?tp_remaster_rider_key(pose,0,(unsigned)flags):
+        tp_remaster_car_omitted_key(original_offset,(unsigned)flags);
+    int visible=entry>sprites && M[entry+4] && M[entry+5];
+    if(marks && dlog)dlog(7,seat,M[person+0x59],(int)key,(uint32_t)visible,flags,dctx);
+    if(entry)log_blit(entry,x,y,flags);
+    if(marks && dlog)dlog(7,-1,0,0,0,0,dctx);
+}
 /* Class 0x0e, ride cars (0x11dd27). Sub-kinds 8, 0x0a, 0x22: the car frame placed by the ride
  * (class 0x12 in its cell) with each rider element swapped for the rider's sprite (table
  * 0x1b9a78, 47 sprites per kind of visitor); 0x14..0x18: a train of frames; 0x20: one frame
@@ -505,22 +517,32 @@ static int classE(uint32_t t, int x, int y) {
         off = (int16_t)(off - (r16(ride + 0x16) == 3 ? 0x18 : M[ride + 0x79] * 0x18));
         off = (int16_t)idiv_trunc(off, (M[FRAME_MODE] & 8) ? (uint16_t)r16(0x1d6642) : 1);
         if (hires) off = (int16_t)(off / 2);
+        if(marks && dlog){
+            dlog(10,f,x,y,(uint32_t)(-off*(hires?2:1)),(uint16_t)r16(ride+0x16),dctx);
+            dlog(8,f,x,(int16_t)(y+off),0,0,dctx);
+        }
         y = (int16_t)(y + off);
+        int rider_part=0;
         for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10, guard = 0; e > elems && guard < 256;
              e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, guard++) {
             int fl = (uint16_t)r16(e + 6);
             if (fl & 0x80) {                                     /* a seat: the next rider's sprite */
+                int occurrence=rider_part++;
                 if (rider <= things) continue;
                 if (r16(ride + 0x16) == 3 && sub != 0x22) { rider = things + (uint32_t)(uint16_t)r16(rider + 0x47) * 0xc8; continue; }
+                int matched=0;
                 for (int i = 0; i < 0x2f; i++) if (r16(0x1b9a78 + (uint32_t)i * 2) == r16(e)) {
+                    matched=1;
                     if (r16(FRAME_MODE) != 8) {
                         uint32_t ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[rider + 0x59] * 0x5e + (uint32_t)i * 2);
                         uint32_t os = sprites + (uint16_t)r16(e);
                         int bx = (M[os + 4] >> 1) + ((int16_t)x - (M[ns + 4] >> 1)), by = y - M[ns + 5] + M[os + 5];
-                        log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+                        car_rider_blit(ns,(int16_t)(bx+r16(e+2)),(int16_t)(by+r16(e+4)),
+                            fl,occurrence,rider,i,(uint16_t)r16(e));
                     }
                     break;
                 }
+                if(!matched)car_rider_blit(0,0,0,fl,occurrence,rider,-1,(uint16_t)r16(e));
                 rider = things + (uint32_t)(uint16_t)r16(rider + 0x47) * 0xc8;
             } else {
                 if ((uint16_t)r16(e) == 0xba) continue;

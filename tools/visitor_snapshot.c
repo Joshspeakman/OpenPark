@@ -10,6 +10,7 @@
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth staff FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth track FRAME FAMILY yaw segment SHAPE LEVEL
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth car FAMILY SHAPE yaw motion DIR LEVEL X Y [guests IDENTITIES]
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -47,13 +48,14 @@ int main(int argc,char**argv){
     int staff=!strcmp(argv[5],"staff");
     int ride=!strcmp(argv[5],"ride");
     int track=!strcmp(argv[5],"track");
-    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||staff||ride||track;double x,y,yaw;
+    int car=!strcmp(argv[5],"car");
+    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||staff||ride||track||car;double x,y,yaw;
     if(gallery){
         if(!sweep&&argc<9)return 2;M=memory;
         uint32_t map=r32(MAP_PTR),things=r32(THINGS);
         memset(memory+map,0,tp_map_w*tp_map_ext*4);
         memset(memory+things,0,1200*200);
-        uint16_t idx=1,frame=sweep?1:track?0:(uint16_t)atoi(argv[6]);memcpy(memory+map+(32*tp_map_w+32)*4,&idx,2);
+        uint16_t idx=1,frame=sweep?1:(track||car)?0:(uint16_t)atoi(argv[6]);memcpy(memory+map+(32*tp_map_w+32)*4,&idx,2);
         uint8_t*t=memory+things+200;t[4]=0x18;t[7]=t[9]=32;memcpy(t+10,&frame,2);
         if(track){
             int family,shape,level,source_frame;
@@ -64,6 +66,28 @@ int main(int argc,char**argv){
                !bounded_arg(argv[11],255,&level))return 2;
             frame=(uint16_t)source_frame;memcpy(t+10,&frame,2);
             t[4]=0x12;t[12]=2;t[0x16]=(uint8_t)family;t[0x44]=(uint8_t)shape;t[0x79]=(uint8_t)level;
+        }
+        if(car){
+            int family,shape,direction,level,px,py;
+            if((argc!=14 && argc!=16) || strcmp(argv[9],"motion") ||
+               !bounded_arg(argv[6],3,&family) || family<1 ||
+               !bounded_arg(argv[7],family==1?20:family==2?22:10,&shape) ||
+               !bounded_arg(argv[10],3,&direction) || !bounded_arg(argv[11],255,&level) ||
+               !bounded_arg(argv[12],255,&px) || !bounded_arg(argv[13],255,&py))return 2;
+            uint16_t next=2;memcpy(t+2,&next,2);t[4]=14;t[12]=family==3?0x22:8;
+            t[6]=(uint8_t)px;t[8]=(uint8_t)py;t[0x12]=(uint8_t)direction;
+            uint8_t *track_record=memory+things+400;
+            track_record[4]=18;track_record[7]=track_record[9]=32;track_record[12]=2;
+            track_record[0x16]=(uint8_t)family;track_record[0x44]=(uint8_t)shape;track_record[0x79]=(uint8_t)level;
+            if(argc==16){
+                if(strcmp(argv[14],"guests"))return 2;size_t n=strlen(argv[15]);if(n>40)return 2;
+                for(size_t i=0;i<n;i++){
+                    if(argv[15][i]<'0' || argv[15][i]>'7')return 2;
+                    next=(uint16_t)(i+3);uint8_t *prev=i?memory+things+(i+2)*200:t;
+                    memcpy(prev+0x47,&next,2);uint8_t *guest_record=memory+things+next*200;
+                    guest_record[4]=2;guest_record[0x59]=(uint8_t)(argv[15][i]-'0');
+                }
+            }
         }
         if(shop){
             int type=atoi(argv[7]);if(type<0||type>=17)return 2;
@@ -137,12 +161,19 @@ int main(int argc,char**argv){
     }
     if(!gallery&&argc>8)setenv("TP_WALK_MESH","0",1);
     if(!tp_walk_start(x,y))return 3;tp_walk_frame();
+    if(car){
+        /* The parent record is necessary for native selection. The car
+         * gallery isolates its captured card, without changing that selection. */
+        Snap *s=&snaps[front];int found=-1;
+        for(int i=0;i<s->ncards;i++)if(s->cards[i].cls==14){found=i;break;}
+        if(found<0)return 4;s->cards[0]=s->cards[found];s->ncards=1;
+    }
     if(gallery && getenv("TP_SNAPSHOT_CAPTURE_DIGEST")){
         Snap*s=&snaps[front];if(s->ncards!=1)return 4;Card*c=&s->cards[0];
         uint32_t crc=(uint32_t)crc32(0,(const Bytef*)(s->pix+c->off),(size_t)c->w*c->h*2);
         FILE*out=fopen(argv[3],"w");if(!out)return 5;
-        fprintf(out,"{\"width\":%u,\"height\":%u,\"anchor\":[%d,%d],\"source_crc32\":\"%08x\",\"eligible\":%u,\"attachments\":[",
-                c->w,c->h,c->ax,c->ay,crc,c->rig_ok);
+        fprintf(out,"{\"width\":%u,\"height\":%u,\"anchor\":[%d,%d],\"source_crc32\":\"%08x\",\"eligible\":%u,\"native_frame\":%u,\"native_origin\":[%.7g,%.7g,%.7g],\"attachments\":[",
+                c->w,c->h,c->ax,c->ay,crc,c->rig_ok,c->frame,c->rig_x,c->rig_y,c->rig_z);
         int n=0;for(int i=0;i<40;i++)if(c->rig_riders[i].present){
             const TPRMRider*p=&c->rig_riders[i];
             fprintf(out,"%s{\"slot\":%d,\"identity\":%u,\"pose\":%u,\"visible\":%u}",
@@ -169,7 +200,7 @@ int main(int argc,char**argv){
     }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
-        Card*c=&s->cards[0];if(!shop && !guest && !staff && !ride && !track)c->shape=(uint8_t)atoi(argv[7]);
+        Card*c=&s->cards[0];if(!shop && !guest && !staff && !ride && !track && !car)c->shape=(uint8_t)atoi(argv[7]);
         if(argc>11 && !strcmp(argv[9],"model")) {
             c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
             const WMModel*m=wm_model_find(c->cls,c->type);
@@ -190,6 +221,11 @@ int main(int argc,char**argv){
                     c->rig_x,c->rig_y,c->rig_z,c->rig_ok);
         }
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
+        if(car){
+            dist=4;height=1.6;
+            x=c->rig_x-cos(yaw)*dist;y=c->rig_y-sin(yaw)*dist;
+            fprintf(stderr,"car frame %u: native origin %.6f %.6f lift %.6f eligible %u\n",c->frame,c->rig_x,c->rig_y,c->rig_z,c->rig_ok);
+        }
         if(track && c->ncomponents){
             const TPRMPlacedComponent *p=&s->components[c->component_first];
             x=p->x-cos(yaw)*dist;y=p->y-sin(yaw)*dist;
@@ -213,7 +249,7 @@ int main(int argc,char**argv){
                         i,c->seats[i],c->rig_riders[i].pose,
                         c->rig_riders[i].present,c->rig_riders[i].visible);
         }
-        W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55;W.cam_pitch=.07;
+        W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55+(car?c->rig_z:0);W.cam_pitch=.07;
     }else{
         if(getenv("TP_MODEL_INSPECT")) {
             Snap*s=&snaps[front];for(int i=0;i<s->ncards;i++) {
@@ -229,7 +265,7 @@ int main(int argc,char**argv){
     if(getenv("TP_SNAPSHOT_PITCH"))W.cam_pitch=atof(getenv("TP_SNAPSHOT_PITCH"));
     if(gallery && getenv("TP_SNAPSHOT_ORTHOGRAPHIC")){
         Snap*s=&snaps[front];if(s->ncards!=1)return 4;Card*c=&s->cards[0];
-        const RMRig*rig=c->rig_ok?rm_find(c->cls,c->type):NULL;
+        const RMRig*rig=c->rig_ok?((c->cls==14 || c->cls==24)?rm_find_frame(c->cls,c->frame):rm_find(c->cls,c->type)):NULL;
         const RMPose*pose=rig?rm_pose(rig,c->frame):NULL;
         if(!c->ncomponents && (!pose || !tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders)))return 4;
         const RMRig*guests[40]={0};const RMPose*poses[40]={0};
@@ -250,8 +286,10 @@ int main(int argc,char**argv){
         }else{
             float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
             rm_draw(&wr,rig,pose,0,0,1,c->rig_z?placement:NULL);
-            for(int i=0;i<rig->ns;i++)if(guests[i])
-                rm_draw(&wr,guests[i],poses[i],0,0,1,pose->matrices+(rig->nb+i)*12);
+            for(int i=0;i<rig->ns;i++)if(guests[i]){
+                float attachment[12];rm_lift_attachment(attachment,pose->matrices+(rig->nb+i)*12,c->rig_z);
+                rm_draw(&wr,guests[i],poses[i],0,0,1,attachment);
+            }
         }
         fprintf(stderr,"native composite orthographic: %u triangles, %u fragments\n",wr.triangles,wr.fragments);
         int ok=png(argv[3],p,640,640);free(p);free(depth);free(memory);return ok?0:5;

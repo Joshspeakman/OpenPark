@@ -105,6 +105,11 @@ static const RMPose*rm_pose(const RMRig*r,unsigned frame){int lo=0,hi=r->np;
 static void rm_point(const float*m,float x,float y,float z,float*out){
     out[0]=m[0]*x+m[1]*y+m[2]*z+m[3];out[1]=m[4]*x+m[5]*y+m[6]*z+m[7];out[2]=m[8]*x+m[9]*y+m[10]*z+m[11];
 }
+/* A seat matrix is local to its vehicle. The vehicle's native lift applies
+ * to both the body and every attachment, before the common world scale. */
+static void rm_lift_attachment(float out[12],const float seat[12],float lift){
+    memcpy(out,seat,12*sizeof(float));out[11]+=lift;
+}
 static void rm_draw(WMRender*r,const RMRig*rig,const RMPose*pose,float x,float y,float scale,const float*parent){
     const uint32_t*oldpal=r->palette,*oldrgba=r->rgba;uint32_t oldtint=r->texture_tint;
     const uint16_t*oldtex=r->texture;int tw=r->tw,th=r->th,fill=r->side_fill;

@@ -5,6 +5,20 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, native vehicle riders (Codex, `codex/reimagined-full-remaster`):
+coaster/Monorail cards now retain native ground position, height, exact frame,
+actual guest identity and explicit omitted-seat markers. Rider matrices inherit
+vehicle lift. Local candidates add two vehicle bodies / 24 poses and 88 seated
+poses across the eight canonical guests. These remain unaccepted artwork;
+family-specific slope orientation, full track integration and live transitions
+still require work. All 1,248 source probes preserve pixels and anchors;
+416 occupied combinations have 1,248 perspective/orthographic captures.
+Seven native sanitizer checks, 21 Python tests, both walk modes, 17,808 view
+checks and compile/signature pass. The 36.51-second Original-mode headed run
+captures both windows and exits normally; this is not remastered-art acceptance.
+No installation. Full remaster continues. See
+`docs/reports/2026-10-20-remaster-vehicles.md`.
+
 2026-10-20, modular tracks (Codex, `codex/reimagined-full-remaster`):
 native-selected track components now retain shared ground origins and separate
 heights, resolving whole assemblies before drawing. The catalog maps 55 records

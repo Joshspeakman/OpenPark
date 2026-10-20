@@ -41,6 +41,9 @@ int main(int argc,char**argv){
     float mx=(all_lo[0]+all_hi[0])*.5f,my=(all_lo[1]+all_hi[1])*.5f,mz=(all_lo[2]+all_hi[2])*.5f;
     float radius=.5f*sqrtf(powf(all_hi[0]-all_lo[0],2)+powf(all_hi[1]-all_lo[1],2)+powf(all_hi[2]-all_lo[2],2));
     float distance=fmaxf(.5f,radius)*2.7f;
+    /* Seat-local poses and track undersides can extend below their origin.
+     * Keep the measurement floor beneath them instead of hiding that art. */
+    float floor_z=fminf(0,all_lo[2])-.003f;
     for(int pose=0;pose<r->np;pose++){
         float lo[3]={FLT_MAX,FLT_MAX,FLT_MAX},hi[3]={-FLT_MAX,-FLT_MAX,-FLT_MAX};
         for(int i=0;i<r->nv;i++){
@@ -61,10 +64,10 @@ int main(int argc,char**argv){
             int y0=(int)floorf(all_lo[1]*4)-2,y1=(int)ceilf(all_hi[1]*4)+2;
             for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
                 floor_colour=((x+y)&1)?0xff484139:0xff453e36;
-                wm_quad(&wr,wm_camera(&wr,x*.25f,y*.25f,-.003f,0,0),
-                    wm_camera(&wr,(x+1)*.25f,y*.25f,-.003f,0,0),
-                    wm_camera(&wr,(x+1)*.25f,(y+1)*.25f,-.003f,0,0),
-                    wm_camera(&wr,x*.25f,(y+1)*.25f,-.003f,0,0));
+                wm_quad(&wr,wm_camera(&wr,x*.25f,y*.25f,floor_z,0,0),
+                    wm_camera(&wr,(x+1)*.25f,y*.25f,floor_z,0,0),
+                    wm_camera(&wr,(x+1)*.25f,(y+1)*.25f,floor_z,0,0),
+                    wm_camera(&wr,x*.25f,(y+1)*.25f,floor_z,0,0));
             }
             wr.rgba=NULL;
             unsigned floor_fragments=wr.fragments;

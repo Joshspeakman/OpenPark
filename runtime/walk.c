@@ -199,6 +199,7 @@ typedef struct {
     int rig_rider_error; TPRMRider rig_riders[40];
     int drawn_frame, frame_x, frame_y, frame_count;
     TPRMComponent components[TP_RM_ASSEMBLY_MAX]; int ncomponents, component_error;
+    TPRMComponent car_origin; int car_origins, car_error;
 } Build;
 static void touch(Build *B, int x0, int y0, int x1, int y1) {
     if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > SW_) x1 = SW_; if (y1 > SH_) y1 = SH_;
@@ -340,6 +341,31 @@ static void finish(Build *B) {
         }
         else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;
         else if (B->idx<0 || B->cls==0x18) c->shape=WM_TREE;
+        if(t && B->cls==0xe && (t[12]==8 || t[12]==0xa || t[12]==0x22) &&
+           B->car_origins==1 && !B->car_error && !B->rig_rider_error &&
+           !r16(0x1d667cu) && B->frame_count==1 && B->car_origin.frame==B->drawn_frame){
+            uint8_t guests[40];int n=0,valid=1;
+            unsigned next=(uint16_t)r16((uint32_t)(t-M)+0x47);
+            while(next && n<40){
+                uint64_t person=(uint64_t)r32(THINGS)+next*200u;
+                if(next>=NTH || person>r32(THING_LAST) || person+200>(64u<<20) ||
+                   M[person+4]!=2 || M[person+0x59]>=8){valid=0;break;}
+                guests[n++]=M[person+0x59];next=(uint16_t)r16((uint32_t)person+0x47);
+            }
+            if(next)valid=0;
+            for(int i=0;i<40;i++)if(c->rig_riders[i].present){
+                const TPRMRider *r=&c->rig_riders[i];
+                if(i>=n || r->variant!=guests[i] || !tp_remaster_car_pose_valid(r->pose,r->visible))valid=0;
+                c->seats[i]=r->variant;
+            }
+            if(valid){
+                const TPRMComponent *p=&B->car_origin;
+                double vy=((p->y>>g->lo)-OYS)/g->ths;
+                double vx=((p->x>>g->lo)-OXS-vy*g->shear)/g->tws;
+                c->rig_x=(float)(B->cx+vx);c->rig_y=(float)(B->cy+vy);c->rig_z=p->height/40.0f;
+                c->frame=p->frame;c->type=p->family;c->rig_ok=1;
+            }
+        }
         if(t && B->cls==0x12 && !r16(0x1d667cu) && t[12]!=0x13 && t[12]!=0x15 &&
            !B->component_error && B->ncomponents>0 && B->ncomponents==B->frame_count &&
            s->ncomponents<=TP_RM_COMPONENT_POOL-(unsigned)B->ncomponents){
@@ -388,7 +414,7 @@ static void finish(Build *B) {
             wx=B->cx+t[6]/256.0+layer->ox;wy=B->cy+t[8]/256.0+layer->oy;
             c->x=(float)wx;c->y=(float)wy;c->r=fmaxf(layer->hx,layer->hy);c->big=1;
         }
-        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==2 || B->cls==4 || B->cls==8) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
+        if(B->idx>=0 && B->cls!=0x18 && !((B->cls==0xa || B->cls==0xe || B->cls==2 || B->cls==4 || B->cls==8) && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {
@@ -407,8 +433,16 @@ static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx
     Build *B = ctx; int lo = B->g->lo;
     if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; B->rider_slot=-1;B->nriders=0;B->rider_error=0;B->frame_count=0;
         B->ncomponents=0;B->component_error=0;
+        B->car_origins=0;B->car_error=0;
         B->rig_rider_error=0;memset(B->rig_riders,0,sizeof B->rig_riders);return; }
     if (kind == 8) { B->drawn_frame=a;B->frame_x=b;B->frame_y=c;B->frame_count++;return; }
+    if(kind==10){
+        int height=(int32_t)d;
+        if(B->cls!=0xe || B->car_origins || a<1 || a>65535 || e<1 || e>3 ||
+           height < -256 || height > 24*256+256)B->car_error=1;
+        else B->car_origin=(TPRMComponent){(uint16_t)a,(uint8_t)e,(int16_t)b,(int16_t)c,(int16_t)height};
+        B->car_origins++;return;
+    }
     if(kind==9){
         int height=(int32_t)d;
         if(B->cls!=0x12 || B->ncomponents>=TP_RM_ASSEMBLY_MAX ||
@@ -982,7 +1016,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                 rigs_drawn++;rendered++;continue;
             }
             const RMRig *rig=reimagined && c->rig_ok ?
-                (c->cls==0x18?rm_find_frame(c->cls,c->frame):rm_find(c->cls,c->type)):NULL;
+                ((c->cls==0x18 || c->cls==0xe)?rm_find_frame(c->cls,c->frame):rm_find(c->cls,c->type)):NULL;
             const RMPose *pose=rig?rm_pose(rig,c->frame):NULL;
             if(pose) {
                 const RMRig *guests[40]={0};const RMPose *seated[40]={0};
@@ -1000,8 +1034,10 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                     float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
                     rm_draw(&mr,rig,pose,c->rig_x,c->rig_y,(float)W.hscale,c->rig_z?placement:NULL);
                     rigs_drawn++;
-                    for(int seat=0;seat<rig->ns;seat++)if(guests[seat])
-                        rm_draw(&mr,guests[seat],seated[seat],c->rig_x,c->rig_y,(float)W.hscale,pose->matrices+(rig->nb+seat)*12);
+                    for(int seat=0;seat<rig->ns;seat++)if(guests[seat]){
+                        float attachment[12];rm_lift_attachment(attachment,pose->matrices+(rig->nb+seat)*12,c->rig_z);
+                        rm_draw(&mr,guests[seat],seated[seat],c->rig_x,c->rig_y,(float)W.hscale,attachment);
+                    }
                     rendered++;continue;
                 }
             }
