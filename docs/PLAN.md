@@ -13,6 +13,15 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-20, the pointer jumping back to the middle in full screen (the top left, quick edge scrolling): the guard let
+go of the pointer in the menu bar's row (the top edge, 6 points or more from a side). Events queued before the let-go
+had the held pointer's place, the window's middle, and the next hold started there. Now, in full screen with the
+window in front, the pointer is held everywhere, the top row included (the menu bar from the keyboard: ⌃⌘F leaves
+full screen). Events from before a let-go use where the mouse was. The first move after the hold's warp has the
+warp's jump taken out when it shows it (logged, as each hold is: "mouse: held at"). Verified with posted moves
+(TP_CORNER_GUARD=1, work/playtest/hcbounce.sh): up into the top left, along the top, then down: one hold for the
+whole run, the cursor where the moves put it. Real-hardware timing (the queued events) is for the user's test.
+
 2026-10-20, dark flashes at the borders on a quick zoom out or scroll: the app moves the view at the display's rate,
 so canvas the next game frame had yet to draw showed for a moment (never drawn: black). render_visible now also draws
 passes off the view in a small budget: never-drawn ones nearest first (2 ms a frame until the canvas is whole), then a
