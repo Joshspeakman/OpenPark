@@ -5,6 +5,27 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, ordinary coaster geometry (Codex,
+`codex/reimagined-full-remaster`): private steel and wooden modules now cover
+46 models / 91 source pose keys, including ordinary curves, slopes, stops,
+base/stack supports and all four steel flag states. All 107 adjoining pairs
+checked in the recorded park agree in position, height and plan-view tangent.
+There are 364 sanitized model inspections, 405 native perspective/orthographic
+captures and 22 contextual images, with current hashes. Wood was darkened and
+its repeated grain crops reduced. These remain unaccepted candidates: car
+contact/turn retargeting, special pieces and full gameplay packs are unfinished.
+
+The recorded moving train uses family 1 (wood); the stationary train uses family
+2 (steel). Despite different car sprite-offset gradients, both recorded track
+layouts use matching .6-world-unit elevation steps. Do not derive physical
+track pitch from the car sprite-offset fields alone. The replay tool now keeps
+its model cache across samples; all 320 images / 160 evidence rows match the
+previous tool byte-for-byte. An offline optimized 960x600 context measurement
+has 27.553 ms median / 28.722 ms p95 over 141 stationary warmed samples; first
+draw is 161.958 ms. This is not full-park or live frame-pacing acceptance.
+All 112 source hashes are unchanged. No runtime change, game launch or install
+in this follow-up. See `docs/reports/2026-10-20-remaster-coaster-geometry.md`.
+
 2026-10-20, recorded coaster motion (Codex, same isolated branch): a bounded
 58.06-second Original-mode native demo run captured 160 thing-pool samples at
 nominal 10 Hz. Replaying four operating cars produces 640 exact state checks

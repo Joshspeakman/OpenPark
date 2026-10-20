@@ -61,7 +61,12 @@ int main(int argc,char**argv){
             memory[q+2]=memory[cell];memory[q+3]=memory[cell+1];
             memory[cell]=(uint8_t)idx;memory[cell+1]=(uint8_t)(idx>>8);
         }
-        if(!tp_walk_start(x,y))goto done;
+        /* Start once, as the actual Visitor session does. Reopening for every
+         * sample would discard all loaded models and conceal cache behavior.
+         * Force a fresh snapshot because offline samples can arrive sooner
+         * than the live observer's 60 Hz throttle. */
+        if(!sample){if(!tp_walk_start(x,y))goto done;}
+        else {W.x=x;W.y=y;last_snap=0;}
         tp_walk_frame();Snap*s=&snaps[front];Card*c=NULL;
         for(int i=0;i<s->ncards;i++)if(s->cards[i].idx==thing){c=&s->cards[i];break;}
         result=4;
