@@ -276,6 +276,15 @@ static int train_draw(uint32_t t, int x, int y, int h) {
     }
     return 0;
 }
+/* Component metadata does not replace or reorder any source draw. Preserve
+ * the ground-plane origin separately from the vertical stack displacement,
+ * so a raised track cannot slide backward across the park in Visitor View. */
+static void track_frame_logged(int family,int frame,int x,int y,int ground_y){
+    int height=(int16_t)(ground_y-y);
+    if(M[SCREEN_MODE]&8)height*=2;
+    if(marks && dlog)dlog(9,frame,x,ground_y,(uint32_t)height,family,dctx);
+    frame_logged(frame,x,y);
+}
 /* Class 0x12 (0x11f205): a base frame, a stack of repeated frames (count byte 0x79,
  * a step per level), then the animated top frame (word 10); kind word 0x16, sub-kind
  * byte 0x44, from the record table at 0x1b4399. Returns nonzero if a part is not native. */
@@ -289,26 +298,26 @@ static int class12(uint32_t t, int x, int y) {
     int q = (uint16_t)r16(0x1b44d9 + (uint32_t)cellb * 4);
     int typ = (uint16_t)r16(t + 0x16), sub = M[t + 0x44];
     if (typ == 1 || typ == 2) {
-        if (!sub) { frame_logged((uint16_t)r16(t + 0xa), xx, yy); return 0; }
+        if (!sub) { track_frame_logged(typ,(uint16_t)r16(t + 0xa),xx,yy,yy); return 0; }
         uint32_t rec = r32(0x1b4399 + (uint32_t)typ * 10) + (uint32_t)sub * 0x19;
         int f8 = (uint16_t)r16(deco + (uint32_t)(r16(rec + 2) * 2));
-        if (q == 0 || (q & 0x400)) frame_logged((uint16_t)r16(deco + (uint32_t)(r16(rec) * 2)), xx, yy);
-        else frame_logged(f8, xx, (int16_t)(yy + 0xc));
+        if (q == 0 || (q & 0x400)) track_frame_logged(typ,(uint16_t)r16(deco + (uint32_t)(r16(rec) * 2)),xx,yy,yy);
+        else track_frame_logged(typ,f8,xx,(int16_t)(yy+0xc),yy);
         int n = (uint16_t)((sub == 0xc || sub == 0xf) ? M[t + 0x79] - 1 : M[t + 0x79]);
         int i = 0;
-        for (; (uint16_t)i < (uint16_t)n && i < 4096; i++) frame_logged(f8, xx, (int16_t)(yy - (i * step) / div));
+        for (; (uint16_t)i < (uint16_t)n && i < 4096; i++) track_frame_logged(typ,f8,xx,(int16_t)(yy-(i*step)/div),yy);
         if (M[t + 0xc] == 0x13 || M[t + 0xc] == 0x15) return train_draw(t, xx, yy, (int16_t)-(((uint16_t)i + 1) * step / div));
         if (r16(t + 0xa)) {
             int f = (uint16_t)r16(t + 0xa); if (tick_is(3)) f = next_frame(f);
-            frame_logged(f, xx, (int16_t)(yy - ((M[t + 0x79] + 1) * step) / div));
+            track_frame_logged(typ,f,xx,(int16_t)(yy-((M[t+0x79]+1)*step)/div),yy);
         }
         return 0;
     }
     if (typ == 3) {
         if (sub) {
-            if (q == 0 || (q & 0x400)) frame_logged((uint16_t)r16(deco + 0x3aa), xx, yy);
-            if (r16(t + 0xa)) frame_logged((uint16_t)r16(t + 0xa), xx, (int16_t)(yy - (step * 2) / div));
-        } else frame_logged((uint16_t)r16(deco + 0x562), xx, yy);
+            if (q == 0 || (q & 0x400)) track_frame_logged(typ,(uint16_t)r16(deco+0x3aa),xx,yy,yy);
+            if (r16(t + 0xa)) track_frame_logged(typ,(uint16_t)r16(t+0xa),xx,(int16_t)(yy-(step*2)/div),yy);
+        } else track_frame_logged(typ,(uint16_t)r16(deco+0x562),xx,yy,yy);
     }
     return 0;
 }

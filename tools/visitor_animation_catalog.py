@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import struct
 from visitor_inventory import inventory
+from remaster_tracks import track_families, attach_track_references
 
 
 def graph(starts, frames, elements):
@@ -96,6 +97,8 @@ def build(memory, data):
             if v: refs.append(dict(field=f'+0x{off:x}', animation=v, role='definition reference; semantic role pending verification'))
         assets.append(dict(id=f"{a['category']}:{a['index']}", name=a['name'], category=a['category'], references=refs,
                            composite_required=not bool(refs), replacement='not animation validated'))
+    tracks = track_families(m)
+    attach_track_references(assets, m, tracks)
     assets.extend(staff_assets(m))
     # Preserve all eighteen table entries, distinguishing direct frame values
     # from animation indices before assigning behavior names.
@@ -155,12 +158,14 @@ def build(memory, data):
     for a in assets:
         a['acceptance_checks']=[dict(check=s,status='needs verification; applicability per asset') for s in checks[a['category']]]
     return dict(schema=1, snapshot_sha256=original['snapshot_sha256'], assets=assets, families=families, files=files,
+                track_families=tracks,
                 counts={k:original[k] for k in ('sprite_records','ground_records','animation_slots','unique_animation_frames')},
                 runtime_rules=[
                     dict(source='runtime/native_land.c:class2', rule='Guest main frame plus carried-item overlays; seat sprites substituted by guest variant; raised and special states exist.'),
                     dict(source='runtime/native_land.c:ride_draw', rule='Rider linked lists, capacity/kind, phase counter and seat element 0x80 determine identity and placement.'),
                     dict(source='runtime/native_land.c:class4', rule='Ride frame, speed-dependent overlay, shake, extra frames and raised states are separate channels.'),
                     dict(source='runtime/native_land.c:class8', rule='Staff main frame, shared special animation and job/selection markers are separate.'),
+                    dict(source='runtime/native_land.c:class12', rule='Track bases, repeated supports and tick-selected caps retain a shared ground origin and distinct native heights; train composites need car/rider bindings.'),
                     dict(source='runtime/native_land.c:cell_things', rule='Static scenery uses decoration lookup; animated class 24 advances on tick mask 15.')],
                 unresolved=['Meaning and transitions of every runtime state are not proven by these tables.',
                             'Frame links do not encode observed cadence. Preserve source frame/state; measure timing in native runs.',

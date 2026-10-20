@@ -5,6 +5,21 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, modular tracks (Codex, `codex/reimagined-full-remaster`):
+native-selected track components now retain shared ground origins and separate
+heights, resolving whole assemblies before drawing. The catalog maps 55 records
+across three elevated families to six ride definitions; train/car/rider and
+ground-track work remains. Eleven private Monorail candidates have fixed joins,
+44 individual views, 50 native assembly views and three sixteen-cell loop views;
+all sixteen endpoint pairs agree. These are unaccepted artwork, with cap-absent
+support geometry, construction, vehicles and other refinements unfinished.
+Six sanitizer checks (including 3,408 assemblies), 21 Python tests, both walk
+modes, 17,808 view checks and compile/signature pass. All 378 source component
+probes preserve original pixels. A 36.62-second Original-mode headed run captured
+both windows; this is shared-code regression, not remastered-art acceptance.
+All 112 source hashes are unchanged; no installation. Full remaster continues.
+See `docs/reports/2026-10-20-remaster-modular-tracks.md`.
+
 2026-10-20, native shop customers (Codex,
 `codex/reimagined-full-remaster`): exact customer identity/pose/visibility now
 binds canonical guests to shop attachment matrices, preserving empty and

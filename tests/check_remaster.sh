@@ -13,6 +13,10 @@ done
   -fsanitize=address,undefined tests/remaster_snapshot_test.c runtime/native_land.c \
   runtime/native_draw.c -lm -lpthread -o build/remaster_snapshot_test
 build/remaster_snapshot_test
+"$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation \
+  -fsanitize=address,undefined tests/remaster_tracks_test.c runtime/native_land.c \
+  runtime/native_draw.c -lm -lpthread -o build/remaster_tracks_test
+build/remaster_tracks_test
 PLAT=runtime/platform_posix.c; [[ $(uname -s) == Darwin ]] && PLAT=platform/macos/platform_macos.c
 "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-unused-variable -Wno-misleading-indentation \
   -fsanitize=address,undefined -I runtime tests/remaster_view_test.c runtime/walk.c runtime/native_land.c \

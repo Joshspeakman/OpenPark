@@ -130,7 +130,7 @@ def make_ledger(memory, data):
                 constraints=dict(ui_exempt=True, both_views=True, native_timing=True,
                                  canonical_walking_and_riding_identity=True,
                                  original_fallback_is_complete=False),
-                assets=catalog['assets'], parts=parts, frames=frames,
+                assets=catalog['assets'], track_families=catalog.get('track_families', []), parts=parts, frames=frames,
                 animations=animations, resources=resources, source_problems=problems,
                 runtime_channels=[
                     'track_assembly_tubing', 'track_assembly_race_cars',

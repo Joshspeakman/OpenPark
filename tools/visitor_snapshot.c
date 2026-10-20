@@ -9,6 +9,7 @@
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth guest FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth staff FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES]
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth track FRAME FAMILY yaw segment SHAPE LEVEL
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -30,6 +31,10 @@ static int png(const char*path,uint32_t*p,int w,int h){
     FILE*f=fopen(path,"wb");if(!f){free(z);free(raw);return 0;}fwrite("\x89PNG\r\n\x1a\n",1,8,f);
     uint8_t head[13]={w>>24,w>>16,w>>8,w,h>>24,h>>16,h>>8,h,8,2,0,0,0};chunk(f,"IHDR",head,13);chunk(f,"IDAT",z,zn);chunk(f,"IEND",NULL,0);fclose(f);free(z);free(raw);return 1;
 }
+static int bounded_arg(const char *s,int maximum,int *out){
+    char *end=NULL;long n=strtol(s,&end,10);
+    if(!*s || *end || n<0 || n>maximum)return 0;*out=(int)n;return 1;
+}
 int main(int argc,char**argv){
     if(argc<8){fprintf(stderr,"usage: snapshot memory palette output mapwidth x y yaw [original] | ... frame FRAME SHAPE yaw\n");return 2;}
     memory=malloc(64u<<20);FILE*f=fopen(argv[1],"rb");if(!memory||!f)return 2;
@@ -41,14 +46,25 @@ int main(int argc,char**argv){
     int guest=!strcmp(argv[5],"guest");
     int staff=!strcmp(argv[5],"staff");
     int ride=!strcmp(argv[5],"ride");
-    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||staff||ride;double x,y,yaw;
+    int track=!strcmp(argv[5],"track");
+    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop||guest||staff||ride||track;double x,y,yaw;
     if(gallery){
         if(!sweep&&argc<9)return 2;M=memory;
         uint32_t map=r32(MAP_PTR),things=r32(THINGS);
         memset(memory+map,0,tp_map_w*tp_map_ext*4);
         memset(memory+things,0,1200*200);
-        uint16_t idx=1,frame=sweep?1:(uint16_t)atoi(argv[6]);memcpy(memory+map+(32*tp_map_w+32)*4,&idx,2);
+        uint16_t idx=1,frame=sweep?1:track?0:(uint16_t)atoi(argv[6]);memcpy(memory+map+(32*tp_map_w+32)*4,&idx,2);
         uint8_t*t=memory+things+200;t[4]=0x18;t[7]=t[9]=32;memcpy(t+10,&frame,2);
+        if(track){
+            int family,shape,level,source_frame;
+            if(argc!=12 || strcmp(argv[9],"segment") ||
+               !bounded_arg(argv[6],65535,&source_frame) ||
+               !bounded_arg(argv[7],3,&family) || family<1 ||
+               !bounded_arg(argv[10],family==1?20:family==2?22:10,&shape) ||
+               !bounded_arg(argv[11],255,&level))return 2;
+            frame=(uint16_t)source_frame;memcpy(t+10,&frame,2);
+            t[4]=0x12;t[12]=2;t[0x16]=(uint8_t)family;t[0x44]=(uint8_t)shape;t[0x79]=(uint8_t)level;
+        }
         if(shop){
             int type=atoi(argv[7]);if(type<0||type>=17)return 2;
             uint16_t record=(uint16_t)(type*107);
@@ -132,6 +148,11 @@ int main(int argc,char**argv){
             fprintf(out,"%s{\"slot\":%d,\"identity\":%u,\"pose\":%u,\"visible\":%u}",
                     n++?",":"",i,p->variant,p->pose,p->visible);
         }
+        fputs("],\"components\":[",out);
+        for(unsigned i=0;i<c->ncomponents;i++){
+            const TPRMPlacedComponent *p=&s->components[c->component_first+i];
+            fprintf(out,"%s{\"frame\":%u,\"origin\":[%.7g,%.7g,%.7g]}",i?",":"",p->frame,p->x,p->y,p->z);
+        }
         fputs("]}\n",out);int failed=ferror(out);if(fclose(out))failed=1;
         free(memory);return failed?5:0;
     }
@@ -148,7 +169,7 @@ int main(int argc,char**argv){
     }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
-        Card*c=&s->cards[0];if(!shop && !guest && !staff && !ride)c->shape=(uint8_t)atoi(argv[7]);
+        Card*c=&s->cards[0];if(!shop && !guest && !staff && !ride && !track)c->shape=(uint8_t)atoi(argv[7]);
         if(argc>11 && !strcmp(argv[9],"model")) {
             c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
             const WMModel*m=wm_model_find(c->cls,c->type);
@@ -169,6 +190,11 @@ int main(int argc,char**argv){
                     c->rig_x,c->rig_y,c->rig_z,c->rig_ok);
         }
         x=c->x-cos(yaw)*dist;y=c->y-sin(yaw)*dist;
+        if(track && c->ncomponents){
+            const TPRMPlacedComponent *p=&s->components[c->component_first];
+            x=p->x-cos(yaw)*dist;y=p->y-sin(yaw)*dist;
+            fprintf(stderr,"track family %s segment %s: %u native components\n",argv[7],argv[10],c->ncomponents);
+        }
         if(ride){
             dist=6;height=2;
             x=c->rig_x+.4-cos(yaw)*dist;y=c->rig_y-1-sin(yaw)*dist;
@@ -188,8 +214,6 @@ int main(int argc,char**argv){
                         c->rig_riders[i].present,c->rig_riders[i].visible);
         }
         W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55;W.cam_pitch=.07;
-        if(getenv("TP_SNAPSHOT_EYE"))W.cam_z=atof(getenv("TP_SNAPSHOT_EYE"));
-        if(getenv("TP_SNAPSHOT_PITCH"))W.cam_pitch=atof(getenv("TP_SNAPSHOT_PITCH"));
     }else{
         if(getenv("TP_MODEL_INSPECT")) {
             Snap*s=&snaps[front];for(int i=0;i<s->ncards;i++) {
@@ -201,11 +225,13 @@ int main(int argc,char**argv){
         }
         tp_walk_teleport(x,y,yaw);tp_walk_input(0,0,0,0,0,0,0);
     }
+    if(getenv("TP_SNAPSHOT_EYE"))W.cam_z=atof(getenv("TP_SNAPSHOT_EYE"));
+    if(getenv("TP_SNAPSHOT_PITCH"))W.cam_pitch=atof(getenv("TP_SNAPSHOT_PITCH"));
     if(gallery && getenv("TP_SNAPSHOT_ORTHOGRAPHIC")){
         Snap*s=&snaps[front];if(s->ncards!=1)return 4;Card*c=&s->cards[0];
         const RMRig*rig=c->rig_ok?rm_find(c->cls,c->type):NULL;
         const RMPose*pose=rig?rm_pose(rig,c->frame):NULL;
-        if(!pose || !tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders))return 4;
+        if(!c->ncomponents && (!pose || !tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders)))return 4;
         const RMRig*guests[40]={0};const RMPose*poses[40]={0};
         for(int i=0;i<40;i++)if(c->seats[i]!=255 && c->rig_riders[i].visible){
             guests[i]=rm_find(2,c->seats[i]);poses[i]=guests[i]?rm_pose(guests[i],c->rig_riders[i].pose):NULL;
@@ -217,10 +243,16 @@ int main(int argc,char**argv){
         WMRender wr={.pixels=p,.depth=depth,.w=640,.h=640,
             .rx=1,.ry=1.f/3,.uy=-2.f/3,.uz=1/1.2f,.fy=-1,.fz=-1,
             .focal=160,.orthographic=1,.offset_y=170};
-        float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
-        rm_draw(&wr,rig,pose,0,0,1,c->rig_z?placement:NULL);
-        for(int i=0;i<rig->ns;i++)if(guests[i])
-            rm_draw(&wr,guests[i],poses[i],0,0,1,pose->matrices+(rig->nb+i)*12);
+        if(c->ncomponents){
+            if(c->component_first>=s->ncomponents){free(p);free(depth);return 4;}
+            wr.cx=s->components[c->component_first].x;wr.cy=s->components[c->component_first].y;
+            if(!draw_track_assembly(s,c,&wr,1)){free(p);free(depth);return 4;}
+        }else{
+            float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
+            rm_draw(&wr,rig,pose,0,0,1,c->rig_z?placement:NULL);
+            for(int i=0;i<rig->ns;i++)if(guests[i])
+                rm_draw(&wr,guests[i],poses[i],0,0,1,pose->matrices+(rig->nb+i)*12);
+        }
         fprintf(stderr,"native composite orthographic: %u triangles, %u fragments\n",wr.triangles,wr.fragments);
         int ok=png(argv[3],p,640,640);free(p);free(depth);free(memory);return ok?0:5;
     }

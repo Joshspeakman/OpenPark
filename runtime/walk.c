@@ -51,6 +51,7 @@
 #include "walk_layer.h"
 #include "art_mode.h"
 #include "remaster_art.h"
+#include "remaster_assembly.h"
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
@@ -114,11 +115,12 @@ static int geom(Geom *g) {
 #define SHR 8                       /* shadow samples per cell */
 typedef struct { float x, y, r, rig_x, rig_y, rig_z; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
     uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40];
-    TPRMRider rig_riders[40]; } Card;
+    TPRMRider rig_riders[40]; uint32_t component_first; uint16_t ncomponents; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
     Card cards[MAXCARDS]; int ncards;
+    TPRMPlacedComponent components[TP_RM_COMPONENT_POOL]; unsigned ncomponents;
     uint16_t pix[POOL]; uint32_t npix;
     uint8_t blocked[MAPN * MAPN];
     uint8_t shade[MAPN * SHR * MAPN * SHR];   /* contact shadows on the floor (SHR samples a cell, 0..255 dark) */
@@ -196,6 +198,7 @@ typedef struct {
     int rider_slot, rider_variant, nriders, rider_error; LPRider riders[40];
     int rig_rider_error; TPRMRider rig_riders[40];
     int drawn_frame, frame_x, frame_y, frame_count;
+    TPRMComponent components[TP_RM_ASSEMBLY_MAX]; int ncomponents, component_error;
 } Build;
 static void touch(Build *B, int x0, int y0, int x1, int y1) {
     if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > SW_) x1 = SW_; if (y1 > SH_) y1 = SH_;
@@ -255,6 +258,7 @@ static void finish(Build *B) {
         c->off = s->npix; c->idx = (int16_t)B->idx; c->cls = (uint8_t)(B->idx < 0 ? 0xff : B->cls); c->big = (uint8_t)big;
         c->type = -1; c->shape = WM_SMALL;
         c->frame=0;c->rig_ok=0;c->layer_ok=0;c->nriders=(uint8_t)B->nriders;
+        c->component_first=0;c->ncomponents=0;
         memcpy(c->riders,B->riders,(size_t)B->nriders*sizeof(LPRider));memset(c->seats,255,sizeof c->seats);
         memcpy(c->rig_riders,B->rig_riders,sizeof c->rig_riders);
         if(t) {
@@ -336,6 +340,24 @@ static void finish(Build *B) {
         }
         else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;
         else if (B->idx<0 || B->cls==0x18) c->shape=WM_TREE;
+        if(t && B->cls==0x12 && !r16(0x1d667cu) && t[12]!=0x13 && t[12]!=0x15 &&
+           !B->component_error && B->ncomponents>0 && B->ncomponents==B->frame_count &&
+           s->ncomponents<=TP_RM_COMPONENT_POOL-(unsigned)B->ncomponents){
+            int valid=!B->rig_rider_error;
+            for(int i=0;i<40;i++)if(B->rig_riders[i].present)valid=0;
+            for(int i=0;i<B->ncomponents;i++)
+                if(B->components[i].family!=(uint16_t)r16((uint32_t)(t-M)+0x16))valid=0;
+            if(valid){
+                c->component_first=s->ncomponents;c->ncomponents=(uint16_t)B->ncomponents;
+                for(int i=0;i<B->ncomponents;i++){
+                    const TPRMComponent *p=&B->components[i];
+                    double vy=((p->y>>g->lo)-OYS)/g->ths;
+                    double vx=((p->x>>g->lo)-OXS-vy*g->shear)/g->tws;
+                    s->components[s->ncomponents++]=(TPRMPlacedComponent){p->frame,
+                        (float)(B->cx+vx),(float)(B->cy+vy),p->height/40.0f};
+                }
+            }
+        }
         if(B->idx<0) {
             int animation=(uint16_t)r16(0x1b44c1+(uint32_t)(-B->idx)*2);
             c->type=(int16_t)animation; /* stable scenery key for authored models */
@@ -384,8 +406,17 @@ static int parts_log;                                    /* development: TP_WALK
 static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
     Build *B = ctx; int lo = B->g->lo;
     if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; B->rider_slot=-1;B->nriders=0;B->rider_error=0;B->frame_count=0;
+        B->ncomponents=0;B->component_error=0;
         B->rig_rider_error=0;memset(B->rig_riders,0,sizeof B->rig_riders);return; }
     if (kind == 8) { B->drawn_frame=a;B->frame_x=b;B->frame_y=c;B->frame_count++;return; }
+    if(kind==9){
+        int height=(int32_t)d;
+        if(B->cls!=0x12 || B->ncomponents>=TP_RM_ASSEMBLY_MAX ||
+           !tp_remaster_component_valid(a,e,height))B->component_error=1;
+        else B->components[B->ncomponents++]=(TPRMComponent){(uint16_t)a,(uint8_t)e,
+            (int16_t)b,(int16_t)c,(int16_t)height};
+        return;
+    }
     if (kind == 5) { B->colour = c; return; }
     if (kind == 7) {
         B->rider_slot=a;B->rider_variant=b;
@@ -550,7 +581,7 @@ static void make_shade(Snap *s, const Geom *g) {
 /* ---- the snapshot (emulation thread) ---- */
 static int cmp_float(const void *a, const void *b) { float x = *(const float *)a, y = *(const float *)b; return x < y ? -1 : x > y; }
 static void snapshot(Snap *s, const Geom *g, double ax, double ay, int follow) {
-    s->g = *g; s->ncards = 0; s->npix = 0; memset(s->blocked, 0, sizeof s->blocked);
+    s->g = *g; s->ncards = 0; s->npix = 0; s->ncomponents=0; memset(s->blocked, 0, sizeof s->blocked);
     tp_host_palette_rgba(s->pal);
     s->weather = M[WEATHER];
     int T = (int)g->tws; if (T > TMAX) T = TMAX; if (T < 8) T = 8;
@@ -832,6 +863,26 @@ static int shade_at(const Snap *s, double x, double y) {  /* the contact shadow 
 }
 typedef struct { float z; int i; float x, y; } Vis;
 static int cmp_vis(const void *a, const void *b) { float x = ((const Vis *)a)->z, y = ((const Vis *)b)->z; return x > y ? -1 : x < y; }
+/* Resolve the whole assembly before writing any pixels. Missing bases, caps,
+ * supports or poses must never leave a partially replaced track in the park. */
+static int draw_track_assembly(const Snap *s,const Card *c,WMRender *mr,float scale){
+    unsigned n=c->ncomponents,first=c->component_first;
+    if(c->cls!=0x12 || !n || n>TP_RM_ASSEMBLY_MAX || s->ncomponents>TP_RM_COMPONENT_POOL ||
+       first>s->ncomponents || n>s->ncomponents-first)return 0;
+    const RMRig *rigs[TP_RM_ASSEMBLY_MAX];const RMPose *poses[TP_RM_ASSEMBLY_MAX];
+    for(unsigned i=0;i<n;i++){
+        const TPRMPlacedComponent *p=&s->components[first+i];
+        if(!isfinite(p->x)||!isfinite(p->y)||!isfinite(p->z))return 0;
+        rigs[i]=rm_find_frame(0x12,p->frame);
+        if(!rigs[i] || rigs[i]->ns || !(poses[i]=rm_pose(rigs[i],p->frame)))return 0;
+    }
+    for(unsigned i=0;i<n;i++){
+        const TPRMPlacedComponent *p=&s->components[first+i];
+        float placement[12]={1,0,0,0,0,1,0,0,0,0,1,p->z};
+        rm_draw(mr,rigs[i],poses[i],p->x,p->y,scale,placement);
+    }
+    return 1;
+}
 #define FOG0 20.0
 #define FOG1 42.0
 /* The view at ow x oh RGBA (0xAABBGGRR as the app's bitmaps). Returns 0 when there is nothing yet. */
@@ -926,6 +977,9 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             if(layer_pose && lp_valid_riders(layer,c->riders,c->nriders)) {
                 lp_draw(&mr,layer,layer_pose,c->x,c->y,(float)W.hscale,c->riders,c->nriders,s->pix,kx,ky);
                 layers_drawn++;rendered++;continue;
+            }
+            if(reimagined && draw_track_assembly(s,c,&mr,(float)W.hscale)){
+                rigs_drawn++;rendered++;continue;
             }
             const RMRig *rig=reimagined && c->rig_ok ?
                 (c->cls==0x18?rm_find_frame(c->cls,c->frame):rm_find(c->cls,c->type)):NULL;
