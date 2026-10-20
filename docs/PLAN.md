@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, normal-view metadata (Codex, isolated remaster branch): native
+passes can now emit balanced/nested object scopes, selected frames, actual
+passenger poses, track components and car bindings without changing normal
+entrance redraws or sign clipping. A pixel-independent metadata collector is
+shared with Visitor capture. The live normal renderer still uses per-part
+replacements; complete-model painting is not yet connected.
+
+Twenty-four synthetic passes and 904 owned recorded-park passes match original
+draw calls/pixels with unchanged memory, including nested entrances. Eleven
+native sanitizer checks, 21 Python tests, both walk modes, 17,808 view checks,
+compile/signature and 72 unchanged occupied-carousel captures pass. All 112
+source resource hashes and 114 candidate model hashes are unchanged. No app
+launch, installation, release-gate change or art acceptance. Next: share model
+eligibility/placement descriptors, then connect complete assembly painting to
+the normal surface with depth, clipping, UI and picking preserved. Remaining
+artwork and final headed acceptance are still unfinished. Details:
+`docs/reports/2026-10-20-remaster-normal-scene.md`.
+
 2026-10-20, model capacity (Codex, isolated remaster branch): replaced the
 96-entry rig cache with a sparse index over the existing model key domain.
 Missing files no longer consume a resident-model allowance; loaded rigs/poses

@@ -94,9 +94,9 @@ int main(void){
      * fully clipped prior thing whose finish() has nothing to save. */
     Build b={.s=s,.g=&s->g};card_log(6,1,0x12,0,0,0,&b);
     for(int i=0;i<=TP_RM_ASSEMBLY_MAX;i++)card_log(9,3,0,0,0,1,&b);
-    CHECK(b.component_error && b.ncomponents==TP_RM_ASSEMBLY_MAX);
-    card_log(6,2,0x12,0,0,0,&b);CHECK(!b.component_error && !b.ncomponents);
-    card_log(9,3,0,0,(uint32_t)-25,1,&b);CHECK(b.component_error);
+    CHECK(b.capture.component_error && b.capture.ncomponents==TP_RM_ASSEMBLY_MAX);
+    card_log(6,2,0x12,0,0,0,&b);CHECK(!b.capture.component_error && !b.capture.ncomponents);
+    card_log(9,3,0,0,(uint32_t)-25,1,&b);CHECK(b.capture.component_error);
     /* Resolver tests use synthetic triangle fixtures directly in the private
      * cache. A missing LAST component must leave colour and depth untouched. */
     rm_bindings=calloc(2,sizeof *rm_bindings);CHECK(rm_bindings);

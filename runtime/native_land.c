@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "remaster_art.h"
+#include "native_scene.h"
 
 #define MAP_PTR     0x1d3b08u   /* cells of 4 bytes: tp_map_ext square, rows tp_map_w apart (bigmap.c) */
 extern uint32_t tp_map_w, tp_map_ext;
@@ -205,18 +206,18 @@ int tp_native_cell_ground(const uint8_t *mem, int cx, int cy, int gx, int gy, ui
  * (development) so they can be compared with the game's (view.c). */
 #define THINGS      0x1d3b10u
 #define STATIC_TAB  0x1b44c1u
-typedef void (*DrawLog)(int kind, int a, int b, int c, uint32_t d, int e, void *ctx);
+typedef TPNativeDrawLog DrawLog;
 static DrawLog dlog; static void *dctx;
-/* The Visitor View (walk.c) draws one cell at a time, each thing into a picture of its own: then
- * every thing starts with a mark (kind 6: the thing's index, negative for static scenery, and its
- * class), the entrance does not draw its neighbours' cells again, and signs show their text
- * wherever they are (the game leaves out text near its screen's edges). */
-static int marks;
+/* Metadata marks are independent of Visitor-only drawing exceptions. Visitor
+ * cell capture suppresses entrance neighbor redraws and keeps offscreen sign
+ * text; a normal metadata pass preserves those source draws and clip rules.
+ * native_scene.h documents object scopes and native animation/attachment keys. */
+static int marks,visitor_cells;
 static void log_blit(uint32_t entry, int x, int y, int flags) {
     if (dlog) dlog(2, x, y, M[entry + 4] | M[entry + 5] << 8, r32(entry), flags, dctx);
 }
 static void frame_logged(int f, int x, int y) {
-    /* Snapshot-only metadata: preserve the frame actually selected by native
+    /* Read-only metadata: preserve the frame actually selected by native
      * animation and its origin, independently of transparent sprite cropping. */
     if (marks && dlog) dlog(8, f, x, y, 0, 0, dctx);
     uint32_t frames = r32(FRAMES), elems = r32(ELEMENTS), sprites = r32(SPRITES);
@@ -593,7 +594,7 @@ static int class14(uint32_t t, int x, int y) {
         int px = (int16_t)(x + ((tw << 7) >> 8) + (hires ? 4 : 8)), py = (int16_t)(y + (hires ? 8 : 0x10));
         int lit = M[r32(0x1d3818) + 0x18] != 0;
         frame_logged((uint16_t)r16(deco + (lit ? (f == 0x13f ? 0x27a : 0x27c) : (f == 0x13f ? 0x27e : 0x440))), px, py);
-        if (!r16(0x1d6652) && !marks) {
+        if (!r16(0x1d6652) && !visitor_cells) {
             uint32_t cell = map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4);
             if (f == 0x13f) {
                 uint32_t str = lit ? r32(0x1d3814) + 0x20 : r32(r32(0x1d7bd0) + 0x19c);
@@ -691,7 +692,7 @@ static int rem_7be8;                                    /* 0x1d7be8: the last by
  * with an offset, from table 0x1b4e5a) picked at random, which the game remembers in word 0x4d;
  * other kinds draw the frame without seats. Scaled mode (0x167182) is not native. */
 /* Kind 7 brackets a substituted rider blit and identifies its native pose.
- * Ordinary renderer logs/pixels are unchanged; marks is the Visitor View path. */
+ * Ordinary renderer logs/pixels are unchanged; marks adds capture metadata. */
 static void rider_blit(uint32_t entry,int x,int y,int flags,int seat,uint32_t person,int pose,int alternate) {
     uint32_t sprites=r32(SPRITES);
     int visible=entry>sprites && M[entry+4] && M[entry+5];
@@ -893,7 +894,7 @@ static int class6(uint32_t t, int x, int y) {
     if (M[SCREEN_MODE] & 8) { dx /= 2; dy /= 2; }
     int tx = (int16_t)(dx + px), ty = (int16_t)(dy + py);
     int lim = (M[SCREEN_MODE] & 8) ? 0x1e0 : 0x190;
-    if (marks || (tx > 0 && tx < 0x280 - (lo ? 8 : 4) * 6 && ty > 0 && ty < lim - (lo ? 0xc : 6))) {
+    if (visitor_cells || (tx > 0 && tx < 0x280 - (lo ? 8 : 4) * 6 && ty > 0 && ty < lim - (lo ? 0xc : 6))) {
         uint32_t h = 2166136261u; for (int i = 0; i < 6 && win[i]; i++) h = (h ^ win[i]) * 16777619u;
         tp_native_text = win;
         if (dlog) dlog(4, tx, ty, M[0x1d7773], h, lo ? 1 : 0, dctx);
@@ -905,14 +906,15 @@ static int class6(uint32_t t, int x, int y) {
 static int cell_things(int idx, int x, int y) {
     int tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
     while (idx) {
-        if (marks && dlog) dlog(6, idx, idx < 0 ? -1 : M[r32(THINGS) + (uint32_t)idx * 0xc8 + 4], 0, 0, 0, dctx);
+        int cls=idx<0?-1:M[r32(THINGS)+(uint32_t)idx*0xc8+4];
+        if (marks && dlog) dlog(6,idx,cls,visitor_cells?0:x,visitor_cells?0:(uint32_t)y,0,dctx);
         if (idx < 0) {                                           /* static scenery: one frame, then the list ends */
             int f = (uint16_t)r16(r32(DECO_TABLE) + (uint16_t)r16(STATIC_TAB + (uint32_t)(-idx) * 2) * 2);
             frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 4 : 8)), (int16_t)((uint16_t)y + (hires ? 8 : 0x10)));
+            if(marks && !visitor_cells && dlog)dlog(12,idx,cls,0,0,0,dctx);
             return missing;
         }
         uint32_t t = r32(THINGS) + (uint32_t)idx * 0xc8;
-        int cls = M[t + 4];
         if (cls == 0x18) {
             int f = (uint16_t)r16(t + 0xa); if (tick_is(0xf)) f = next_frame(f);   /* advanced, then drawn */
             frame_logged(f, (int16_t)((uint16_t)x + ((tw << 7) >> 8) + (hires ? 7 : 0xf)),
@@ -942,13 +944,15 @@ static int cell_things(int idx, int x, int y) {
             int m = class4(t, x, y);
             if (m && !missing) missing = m;
         } else if (!missing) missing = cls ? cls : 0x100;
+        if(marks && !visitor_cells && dlog)dlog(12,idx,cls,0,0,0,dctx);
         idx = r16(t + 2);
     }
     return missing;
 }
 /* The things loop for camera (cx0, cy0): cell markers and draw calls to the log. */
-void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg, void *ctx) {
+static void native_things(const uint8_t *mem,int cx0,int cy0,int rows,DrawLog lg,void *ctx,int metadata) {
     M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); nbumps = 0; rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
+    marks=metadata;visitor_cells=0;
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR);
     uint32_t base = map + (uint32_t)((cy0 * (int)tp_map_w + cx0) * 4);
@@ -968,17 +972,23 @@ void tp_native_things(const uint8_t *mem, int cx0, int cy0, int rows, DrawLog lg
             lg(3, miss, 0, 0, 0, 0, ctx);
         }
     }
-    dlog = NULL;
+    dlog = NULL;marks=0;
+}
+void tp_native_things(const uint8_t *mem,int cx,int cy,int rows,DrawLog lg,void *ctx){
+    native_things(mem,cx,cy,rows,lg,ctx,0);
+}
+void tp_native_things_metadata(const uint8_t *mem,int cx,int cy,int rows,DrawLog lg,void *ctx){
+    native_things(mem,cx,cy,rows,lg,ctx,1);
 }
 /* One cell's things (cell (cx, cy), its corner at (gx, gy) in the game's units), each thing after a
  * mark (kind 6): the Visitor View's pictures of things (walk.c). Draws what a pass would. */
 int tp_native_cell_things(const uint8_t *mem, int cx, int cy, int gx, int gy, DrawLog lg, void *ctx) {
     M = mem; dlog = lg; dctx = ctx; anim_77a4 = (uint16_t)r16(0x1d77a4); nbumps = 0; rem_7be8 = (uint16_t)r16(0x1d7be8); rng = r32(0x1d3af4);
-    int missing = 0;
+    int missing = 0;marks=1;visitor_cells=1;
     if (cx >= 0 && cx < (int)tp_map_ext && cy >= 0 && cy < (int)tp_map_ext) {
         int16_t first = r16(r32(MAP_PTR) + (uint32_t)((cy * (int)tp_map_w + cx) * 4));
-        if (first) { marks = 1; missing = cell_things(first, gx, gy); marks = 0; }
+        if (first) missing = cell_things(first, gx, gy);
     }
-    dlog = NULL;
+    dlog = NULL;marks=0;visitor_cells=0;
     return missing;
 }
