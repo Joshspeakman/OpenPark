@@ -8,7 +8,7 @@
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw [customer ID]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth guest FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth staff FRAME VARIANT yaw [state SUBTYPE]
- * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES]
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES [phase ROTATION]]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth track FRAME FAMILY yaw segment SHAPE LEVEL
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth car FAMILY SHAPE yaw motion DIR LEVEL X Y [guests IDENTITIES]
  */
@@ -121,6 +121,11 @@ int main(int argc,char**argv){
             t[4]=4;t[12]=2;t[6]=t[8]=128;memcpy(t+0x16,&record,2);
             t[0x32]=1; /* occupied bouncy-castle dispatch, native kind 9 */
             if(argc>10 && !strcmp(argv[9],"guests")){
+                if(argc!=11 && argc!=13)return 2;
+                if(argc==13){
+                    int phase=0;if(strcmp(argv[11],"phase")||!bounded_arg(argv[12],INT_MAX,&phase))return 2;
+                    uint32_t value=(uint32_t)phase;memcpy(t+0x20,&value,4);
+                }
                 size_t n=strlen(argv[10]);
                 int cap=r16(0x1cced0+record+0xa6);
                 if(n>36 || n>(unsigned)cap)return 2;
@@ -276,6 +281,12 @@ int main(int argc,char**argv){
         WMRender wr={.pixels=p,.depth=depth,.w=640,.h=640,
             .rx=1,.ry=1.f/3,.uy=-2.f/3,.uz=1/1.2f,.fy=-1,.fz=-1,
             .focal=160,.orthographic=1,.offset_y=170};
+        const char*inspection_focal=getenv("TP_SNAPSHOT_ORTHO_FOCAL");
+        if(inspection_focal){
+            char*end=NULL;double focal=strtod(inspection_focal,&end);
+            if(!*inspection_focal||*end||!isfinite(focal)||focal<16||focal>512){free(p);free(depth);return 2;}
+            wr.focal=(float)focal;
+        }
         if(c->ncomponents){
             if(c->component_first>=s->ncomponents){free(p);free(depth);return 4;}
             wr.cx=s->components[c->component_first].x;wr.cy=s->components[c->component_first].y;

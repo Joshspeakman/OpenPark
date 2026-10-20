@@ -195,6 +195,16 @@ int main(void){
     CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
     CHECK(c.rig_riders[0].pose==65025 && c.rig_riders[1].pose==65090);
     CHECK(c.rig_riders[0].visible && c.rig_riders[1].visible);
+    /* Rotating rides advance the guest-to-seat mapping at the native phase
+     * boundary; a repeated frame must not pin people to stationary seats. */
+    memory[0x1cced0+0xb3]=0;
+    for(unsigned phase=0;phase<8;phase++){
+        put32(thing+0x20,phase);CHECK(capture(s,1));c=s->cards[0];
+        CHECK(c.rig_ok && c.seats[0]==(phase%2?7:3) && c.seats[1]==(phase%2?3:7));
+        CHECK(c.rig_riders[0].variant==c.seats[0] && c.rig_riders[1].variant==c.seats[1]);
+        CHECK(c.rig_riders[0].pose==65025 && c.rig_riders[1].pose==65090);
+    }
+    memory[0x1cced0+0xb3]=5;put32(thing+0x20,0);
     /* Different body/rider crops and either screen mode preserve the ride's
      * native origin. Occupancy must not move the entire authored ride. */
     for(int mode=0;mode<2;mode++){

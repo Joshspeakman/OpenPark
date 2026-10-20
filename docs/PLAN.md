@@ -5,6 +5,27 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Merry-Go-Round candidate (Codex, isolated remaster branch): the
+owned source is a four-cup spinner, not a horse carousel. A new local model
+contains the orange-backed metal cups, blue/white stepped turntable, inset seats,
+restraints, rim details and deck seams. Six native frame keys move the cups
+around one circular platform while turning them in the opposite direction.
+Forty missing exact rider keys were added to the eight canonical guests; all
+existing geometry and preceding pose lines remain unchanged.
+
+Native frame/phase probes cover 312 occupied/empty combinations with 936 images
+in two perspectives and the normal projection. Every guest's 24-step circular
+path and all four phase wraps agree geometrically. This is authored-sequence
+and native dispatch evidence, not an observed running lifecycle/timing pass.
+The copied demo records contain only an idle carousel; sixteen such states
+replay into 32 images. All 312 normal inspection images have clear borders after
+widening that diagnostic camera at one fixed scale. Model dimensions did not
+change. Nine native sanitizer checks, 21 Python tests, both walk modes and
+17,808 view checks pass; all 112 source hashes are unchanged. No game launch,
+app installation or artwork acceptance this turn. The complete normal gameplay
+pack, remaining rides/states and final headed acceptance are still unfinished.
+See `docs/reports/2026-10-20-remaster-carousel.md`.
+
 2026-10-20, source-hidden occupants and customer clearance (Codex, isolated
 remaster branch): Reimagined now resolves every occupied attachment's exact
 pose, even when the source sprite is blank. Source visibility remains metadata;
