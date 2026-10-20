@@ -5,6 +5,31 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, Faithful geometry detail (Codex, `codex/faithful-geometry-detail`):
+the user returned to Faithful and requested more geometric detail. Refined five
+static models: Toy Land, Haunted House, Gift Shop, Coffee Shop and Palm. Added
+folded thatch, roof/window trim, cup rim/handle and furniture structure, and
+separate folded palm leaflets. Original palette pixels and solid entrances are
+retained. The Haunted House tower now clears the lower roof. Side/rear layouts
+are inferred; texture stretching and some repeated material remain unresolved.
+The other three Faithful models and the previous profiles remain unchanged.
+
+Review: `work/faithful-detail/review/index.html`, with original sprites, 240
+strict paired turntable captures under ASan/UBSan, four copied-park comparisons,
+and five captures from a bounded 39-second native headless game run. Walk/view,
+mesh/model/rig checks pass, including 17,808 view assertions. Installed a third,
+separate **OpenPark Faithful Detail Study.app** with its own identity/profile;
+signature verifies. Headed test `headed-fyc5ikvp` exits -6 in 0.11 seconds before
+a window, so headed visual acceptance remains open.
+
+The user then asked about putting the original sprite over the front. Toy Land
+has two additional isolated comparisons: `overlay-review` tests a complete
+sprite plane (visibly doubled chimney/panel edge when turning); `facade-review`
+fits only the original facade pixels to a shallow front surface, keeping the
+roof/chimney geometric. Each has 48 sanitized captures. Neither overlay variant
+replaces the installed model. Details and remaining work:
+`docs/reports/2026-10-19-faithful-detail.md`.
+
 2026-10-19, Reimagined animation mapping (Codex,
 `codex/reimagined-animation-study`, separate worktree/install): the user accepted
 the sharper concept direction and requested a full animation map plus a running

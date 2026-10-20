@@ -19,15 +19,16 @@ import time
 def main():
     root = Path(__file__).resolve().parents[1]
     reimagined = sys.argv[1:] == ['--reimagined']
-    if sys.argv[1:] and not reimagined:
-        raise SystemExit('usage: check_visitor_headed.py [--reimagined]')
-    name = 'OpenPark Reimagined Study' if reimagined else 'OpenPark Visitor 3D Study'
-    identity = 'com.joshspeakman.openpark.reimaginedstudy' if reimagined else 'com.joshspeakman.openpark.visitor3dstudy'
+    detail = sys.argv[1:] == ['--faithful-detail']
+    if sys.argv[1:] and not (reimagined or detail):
+        raise SystemExit('usage: check_visitor_headed.py [--reimagined|--faithful-detail]')
+    name = 'OpenPark Reimagined Study' if reimagined else 'OpenPark Faithful Detail Study' if detail else 'OpenPark Visitor 3D Study'
+    identity = 'com.joshspeakman.openpark.reimaginedstudy' if reimagined else 'com.joshspeakman.openpark.faithfuldetailstudy' if detail else 'com.joshspeakman.openpark.visitor3dstudy'
     app = Path.home() / f"Applications/{name}.app"
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     if info.get("CFBundleIdentifier") != identity:
         raise RuntimeError("Refusing to test a different app")
-    study = root / ('work/reimagined' if reimagined else 'work/visitor-3d')
+    study = root / ('work/reimagined' if reimagined else 'work/faithful-detail' if detail else 'work/visitor-3d')
     source = study / 'profile'
     out = Path(tempfile.mkdtemp(prefix="headed-", dir=study))
     profile = out / "profile"
