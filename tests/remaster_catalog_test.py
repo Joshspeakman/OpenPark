@@ -6,12 +6,28 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from remaster_catalog import audit, pixel_hash
+from remaster_catalog import audit, pixel_hash, make_ledger
 from remaster_pack import encode, quantize, read_bake
 
 
 class CoverageTest(unittest.TestCase):
+    def test_shop_customer_identity_references_are_required(self):
+        catalog=dict(snapshot_sha256='synthetic',files=[],families={},assets=[
+            dict(id='guest:0',shop_action_sprite_offsets=[6,6]),
+            dict(id='guest:1',shop_action_sprite_offsets=[12,7])])
+        parts=[dict(id=f'MSPR-0:{i}',empty=False,owners=[],frame_uses=[],seated_uses=[]) for i in (1,2)]
+        with patch('remaster_catalog.build',return_value=catalog), \
+             patch('remaster_catalog.bank_records',side_effect=[parts,[]]):
+            ledger=make_ledger(Path('unused'),Path('unused'))
+        self.assertEqual(parts[0]['owners'],['guest:0'])
+        self.assertEqual([p['pose'] for p in parts[0]['seated_uses']],[0,1])
+        self.assertEqual(parts[1]['owners'],['guest:1'])
+        self.assertTrue(all(p['required'] for p in parts))
+        self.assertEqual(ledger['source_problems'][0]['table'],'shop_action_sprite_offsets')
+        self.assertIn('shop_customer_substitution',ledger['runtime_channels'])
+
     def test_original_fallback_and_concepts_never_complete(self):
         ledger=dict(parts=[dict(id='sprite:1',required=True,source_hash='00')],
                     assets=[dict(id='guest:0')],animations=[],resources=[],source_problems=[])

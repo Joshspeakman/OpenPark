@@ -91,13 +91,13 @@ def make_ledger(memory, data):
             if chain['termination'] == 'invalid':
                 problems.append(dict(id=animations[-1]['id'], problem='invalid frame reference'))
     for a in catalog['assets']:
-        for field in ('seated_sprite_offsets', 'alternate_seated_sprite_offsets'):
+        for field in ('seated_sprite_offsets', 'alternate_seated_sprite_offsets', 'shop_action_sprite_offsets'):
             for pose, offset in enumerate(a.get(field, [])):
                 if not offset:
                     continue
                 key = f'MSPR-0:{offset // 6}'
                 if offset % 6 or key not in by_id:
-                    problems.append(dict(id=a['id'], problem='unresolved seated sprite', offset=offset))
+                    problems.append(dict(id=a['id'], problem='unresolved substituted sprite', table=field, offset=offset))
                     continue
                 by_id[key]['seated_uses'].append(dict(guest=a['id'], table=field, pose=pose))
                 by_id[key]['owners'].append(a['id'])
@@ -130,7 +130,7 @@ def make_ledger(memory, data):
                 runtime_channels=[
                     'track_assembly_tubing', 'track_assembly_race_cars',
                     'track_assembly_coaster', 'track_assembly_big_dipper', 'track_assembly_monorail',
-                    'vehicle_train_assembly', 'seated_guest_substitution',
+                    'vehicle_train_assembly', 'seated_guest_substitution', 'shop_customer_substitution',
                     'ride_speed_damage_overlays', 'guest_carried_items', 'guest_thoughts_and_expressions',
                     'park_entrance_and_gates', 'animated_scenery', 'world_signs',
                     'litter_and_cleanup', 'weather_streaks', 'weather_particles', 'lightning',

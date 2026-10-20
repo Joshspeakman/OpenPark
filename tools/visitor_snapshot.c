@@ -5,6 +5,7 @@
  *    runtime/native_draw.c -lz -lm -lpthread -o work/visitor-3d/native/snapshot
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth x y yaw [original]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth frame FRAME SHAPE yaw
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -33,7 +34,8 @@ int main(int argc,char**argv){
     uint8_t pal[768];f=fopen(argv[2],"rb");if(!f||fread(pal,1,768,f)!=768)return 2;fclose(f);
     for(int i=0;i<256;i++)palette[i]=0xff000000u|(pal[i*3]*255/63)|((pal[i*3+1]*255/63)<<8)|((pal[i*3+2]*255/63)<<16);
     tp_map_w=tp_map_ext=(uint32_t)atoi(argv[4]);
-    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep;double x,y,yaw;
+    int shop=!strcmp(argv[5],"shop");
+    int sweep=!strcmp(argv[5],"sweep"),gallery=!strcmp(argv[5],"frame")||sweep||shop;double x,y,yaw;
     if(gallery){
         if(!sweep&&argc<9)return 2;M=memory;
         uint32_t map=r32(MAP_PTR),things=r32(THINGS);
@@ -41,6 +43,14 @@ int main(int argc,char**argv){
         memset(memory+things,0,1200*200);
         uint16_t idx=1,frame=sweep?1:(uint16_t)atoi(argv[6]);memcpy(memory+map+(32*tp_map_w+32)*4,&idx,2);
         uint8_t*t=memory+things+200;t[4]=0x18;t[7]=t[9]=32;memcpy(t+10,&frame,2);
+        if(shop){
+            int type=atoi(argv[7]);if(type<0||type>=17)return 2;
+            uint16_t record=(uint16_t)(type*107);
+            t[4]=0x0a;t[12]=2;t[6]=t[8]=128;memcpy(t+0x16,&record,2);
+            /* Isolate the base state in this private memory copy. Occupied and
+             * status states need separate composite fixtures. */
+            memory[0x1d3c62+record+0x67]=255;
+        }
         memory[0x1d3afc]=1;x=y=32;yaw=sweep?ART_YAW:atof(argv[8])*M_PI/180;
     }else{x=atof(argv[5]);y=atof(argv[6]);yaw=atof(argv[7])*M_PI/180;}
     if(sweep){
@@ -81,7 +91,7 @@ int main(int argc,char**argv){
     }
     if(gallery){
         Snap*s=&snaps[front];if(!s->ncards){fprintf(stderr,"empty frame %s\n",argv[6]);return 4;}
-        Card*c=&s->cards[0];c->shape=(uint8_t)atoi(argv[7]);
+        Card*c=&s->cards[0];if(!shop)c->shape=(uint8_t)atoi(argv[7]);
         if(argc>11 && !strcmp(argv[9],"model")) {
             c->cls=(uint8_t)atoi(argv[10]);c->type=(int16_t)atoi(argv[11]);
             const WMModel*m=wm_model_find(c->cls,c->type);

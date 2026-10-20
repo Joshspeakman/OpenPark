@@ -578,6 +578,9 @@ static int classA(uint32_t t, int x, int y) {
     int py = (int16_t)((int16_t)y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
     uint32_t rec = 0x1d3c62 + (uint32_t)(uint16_t)r16(t + 0x16);
     uint32_t rider = things + (uint32_t)(uint16_t)r16(t + 0x47) * 0xc8;
+    /* This composite uses the manual seat-substitution loop below, rather
+     * than frame_logged. Preserve the same native origin metadata. */
+    if (marks && dlog) dlog(8, (uint16_t)r16(t + 0xa), px, py, 0, 0, dctx);
     for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8) * 10, g = 0; e > elems && g < 256;
          e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, g++) {
         int fl = (uint16_t)r16(e + 6);

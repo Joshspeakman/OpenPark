@@ -5,6 +5,23 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Reimagined shops and character binding inventory (Codex,
+`codex/reimagined-full-remaster`): 12 shop base-state candidates now share
+canonical geometry between native perspective captures and park bakes.
+Native shop-frame origins replace crop-based model placement; linked
+customers and extra/status frames remain ineligible for a base-only model.
+The catalog now includes all 184 shop-customer sprite substitutions and a
+mandatory runtime coverage channel. These are not accepted complete assets.
+
+Verification: 48 sanitized native shop replays, 48 fixed-camera inspections,
+12 nonempty bakes and grounded geometry; three native sanitizer tests and
+nine Python tests pass. Both walk modes, 17,808 view checks and existing
+mesh/model/rig/layer tests pass. Compile-only native app/signature passes.
+No application was installed; no headed remastered-art pass is claimed.
+The refreshed ledger has zero malformed references and 3,847 blockers.
+Shared character/action authoring and all remaining remaster work continue.
+See `docs/reports/2026-10-20-remaster-shops.md`.
+
 2026-10-20, Reimagined scenery authoring and native placement (Codex,
 `codex/reimagined-full-remaster`): 19 local candidate scenery models now have
 canonical textured geometry, 21 source-keyed poses and 22 native sprite-part

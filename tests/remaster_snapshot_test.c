@@ -56,7 +56,25 @@ int main(void){
     CHECK(s->cards[0].frame==4); /* advance-before-draw, exactly like native */
     CHECK(s->cards[0].rig_x==c.rig_x && s->cards[0].rig_y==c.rig_y);
     CHECK(memory[thing+10]==3); /* snapshot never advances game state */
+    memory[thing+4]=10;memory[thing+12]=2;memory[thing+6]=128;memory[thing+8]=64;
+    put16(thing+0x16,3*107);memory[0x1d3c62+3*107+0x67]=255;
+    CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.cls==10 && c.type==3 && c.frame==3);
+    CHECK(c.rig_x==12.5f && c.rig_y==14.25f);
+    put16(thing+10,4);CHECK(capture(s,1));
+    CHECK(s->cards[0].frame==4 && s->cards[0].rig_x==c.rig_x && s->cards[0].rig_y==c.rig_y);
+    /* A linked customer or an extra overlay needs a complete composite rig. */
+    put16(thing+0x47,2);CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(thing+0x47,0);put16(thing+0x5f,3);CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(thing+0x5f,0);memory[0x1d3c62+3*107+0x67]=0;
+    put16(0x540000+0x49c,3); /* shop status marker is another drawn frame */
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    memory[0x1d3c62+3*107+0x67]=255;
+    put16(thing+0x16,3*107+1);CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(thing+0x16,3*107);memory[thing+12]=4;put16(SCREEN_MODE,8);
+    CHECK(geom(&s->g));CHECK(capture(s,1));
+    CHECK(s->cards[0].rig_ok && s->cards[0].rig_x==12.5f && s->cards[0].rig_y==14.125f);
     free(s);free(memory);
-    puts("remaster snapshot: static/animated native origins, crop independence and actual tick-selected frames passed");
+    puts("remaster snapshot: scenery/shop native origins, crop independence, tick-selected frames and composite guards passed");
     return 0;
 }

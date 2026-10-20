@@ -77,6 +77,7 @@ def build(memory, data):
         seated = [word(0x1b9a78 + i*94 + p*2) for p in range(47)]
         assets.append(dict(id=f'guest:{i}', name=f'Guest variant {i}', category='guest', references=refs,
                            seated_sprite_offsets=seated, alternate_seated_sprite_offsets=[word(0x1b9a58+i*4+p*2) for p in range(2)],
+                           shop_action_sprite_offsets=[word(0x1b9d68+i*46+p*2) for p in range(23)],
                            replacement='same canonical model required walking/seated; not animation validated'))
         # Slot zero is the base of four adjacent walking-direction chains.
         # Verified against native state 8 and byte 0x12 (N/E/S/W) in live traces.

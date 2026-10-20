@@ -293,8 +293,13 @@ static void finish(Build *B) {
         } else if (B->cls==0xa || B->cls==0x14 || B->cls==6 || B->cls==0x1c) {
             c->shape=WM_BOX;
             if(t && B->cls==0xa) {
-                int type=(uint16_t)r16((uint32_t)(t-M)+0x16)/107;
-                if(type<17)c->type=(int16_t)type;
+                uint32_t at=(uint32_t)(t-M);
+                int offset=(uint16_t)r16(at+0x16),type=offset/107;
+                if(type<17 && offset%107==0)c->type=(int16_t)type;
+                /* A base model must never consume a customer, extra frame or
+                 * status marker. Those require complete composite bindings. */
+                c->rig_ok=c->type>=0 && (t[12]==2 || t[12]==4) &&
+                    !r16(at+0x47) && !r16(at+0x5f) && B->frame_count==1;
             }
         }
         else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;
@@ -305,7 +310,7 @@ static void finish(Build *B) {
             if(animation==431) c->shape=WM_GROUND; /* lake */
             if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
         }
-        if((B->idx<0 || B->cls==0x18) && B->frame_count==1) {
+        if((B->idx<0 || B->cls==0x18 || (B->cls==0xa && c->rig_ok)) && B->frame_count==1) {
             /* The model is authored around the native frame origin. The old
              * card's cropped bottom is only a billboard placement heuristic. */
             double sy=((int16_t)B->frame_y>>g->lo)-OYS;
@@ -321,7 +326,7 @@ static void finish(Build *B) {
             wx=B->cx+t[6]/256.0+layer->ox;wy=B->cy+t[8]/256.0+layer->oy;
             c->x=(float)wx;c->y=(float)wy;c->r=fmaxf(layer->hx,layer->hy);c->big=1;
         }
-        if(B->idx>=0 && B->cls!=0x18){c->rig_x=c->x;c->rig_y=c->y;}
+        if(B->idx>=0 && B->cls!=0x18 && !(B->cls==0xa && c->rig_ok)){c->rig_x=c->x;c->rig_y=c->y;}
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {
