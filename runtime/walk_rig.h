@@ -27,8 +27,9 @@ static RMRig rm_cache[96];static int rm_count;
  * Decimal values, sorted by (source_class, source_frame), no duplicate keys. */
 typedef struct { unsigned cls,frame,model_cls,type; } RMBinding;
 static RMBinding *rm_bindings;static unsigned rm_nbindings;static int rm_bindings_loaded;
+static void rm_eyes_reset(void);
 static void rm_reset(void){for(int i=0;i<rm_count;i++){free(rm_cache[i].v);free(rm_cache[i].t);free(rm_cache[i].p);free(rm_cache[i].matrices);free(rm_cache[i].texture);}memset(rm_cache,0,sizeof rm_cache);rm_count=0;
-    free(rm_bindings);rm_bindings=NULL;rm_nbindings=0;rm_bindings_loaded=0;rm_motion_free(&rm_motion);rm_motion_loaded=0;}
+    free(rm_bindings);rm_bindings=NULL;rm_nbindings=0;rm_bindings_loaded=0;rm_motion_free(&rm_motion);rm_motion_loaded=0;rm_eyes_reset();}
 static int rm_read_bindings(FILE*f,RMBinding**out,unsigned*count){
     char magic[16];unsigned n;RMBinding*b=NULL;
     *out=NULL;*count=0;
@@ -112,6 +113,8 @@ static int rm_vehicle_transform(const TPRMVehicle*v,const RMRig*r,const RMPose*p
 static void rm_point(const float*m,float x,float y,float z,float*out){
     out[0]=m[0]*x+m[1]*y+m[2]*z+m[3];out[1]=m[4]*x+m[5]*y+m[6]*z+m[7];out[2]=m[8]*x+m[9]*y+m[10]*z+m[11];
 }
+#include "remaster_eye.h"
+static void rm_eyes_reset(void){rm_neye=0;rm_eyes_loaded=0;}
 /* A seat matrix is local to its vehicle. The vehicle's native lift applies
  * to both the body and every attachment, before the common world scale. */
 static void rm_lift_attachment(float out[12],const float seat[12],float lift){

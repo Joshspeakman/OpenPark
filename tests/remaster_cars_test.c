@@ -85,6 +85,7 @@ int main(void){
                 for(int flags=0;flags<4;flags++){
                     put16(0x510000+20+6,0x80+flags);CHECK(capture(s,0));Card *c=&s->cards[0];
                     CHECK(c->rig_ok && c->seats[0]==variant && c->seats[1]==255);
+                    CHECK(c->rider_ids[0]==3 && c->rider_ids[1]==0);
                     CHECK(c->rig_riders[0].present && c->rig_riders[0].visible && c->rig_riders[0].pose==65024+flags*64+slot);
                     CHECK(tp_remaster_riders_valid(1,c->seats,c->rig_riders));
                     CHECK(!tp_remaster_riders_valid(0,c->seats,c->rig_riders));bindings++;
@@ -106,6 +107,7 @@ int main(void){
     put16(track+22,3);memory[car+12]=0x22;
     CHECK(capture(s,0));c=s->cards[0];
     CHECK(c.rig_ok && c.seats[0]==7 && c.seats[1]==3);
+    CHECK(c.rider_ids[0]==3 && c.rider_ids[1]==4);
     CHECK(c.rig_riders[0].pose==65440 && !c.rig_riders[0].visible);
     CHECK(c.rig_riders[1].pose==65026 && c.rig_riders[1].visible);
     CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
@@ -143,6 +145,14 @@ int main(void){
     rm_lift_attachment(lifted,seat,2.5f);rm_point(lifted,1,2,3,q);
     CHECK(fabsf(q[0]+1.7f)<1e-6f && fabsf(q[1]-1.4f)<1e-6f && fabsf(q[2]-5.7f)<1e-6f);
     CHECK(seat[11]==.2f); /* shared authored matrices remain immutable */
+    /* A shared linked chain does not make every guest ride the first car. */
+    const unsigned second_car=0x400000+5*200;
+    put16(car+0x47,3);put16(guest+0x47,4);put16(guest+200+0x47,0);
+    memory[second_car+4]=14;put16(second_car+0x47,4);put32(THING_LAST,second_car);
+    s->ncards=2;memset(s->cards,0,2*sizeof(Card));
+    for(int k=0;k<2;k++){s->cards[k].cls=14;s->cards[k].idx=k?5:1;
+        s->cards[k].rig_ok=1;s->cards[k].rider_ids[0]=k?4:3;}
+    find_riders(s);CHECK(s->riding[3]==1 && s->riding[4]==5);
     free(s);free(memory);
     printf("remaster cars: %u movements, %u rider bindings, native omission, malformed chains and inherited attachment lift passed\n",movements,bindings);
     return 0;

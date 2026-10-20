@@ -115,7 +115,7 @@ static int geom(Geom *g) {
 #define SHR 8                       /* shadow samples per cell */
 typedef struct { float x, y, r, rig_x, rig_y, rig_z; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
     uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40];
-    TPRMRider rig_riders[40]; uint32_t component_first; uint16_t ncomponents; TPRMVehicle vehicle; } Card;
+    TPRMRider rig_riders[40]; uint16_t rider_ids[40]; uint32_t component_first; uint16_t ncomponents; TPRMVehicle vehicle; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
@@ -261,7 +261,7 @@ static void finish(Build *B) {
         c->frame=0;c->rig_ok=0;c->layer_ok=0;c->nriders=(uint8_t)B->nriders;
         c->component_first=0;c->ncomponents=0;
         memcpy(c->riders,B->riders,(size_t)B->nriders*sizeof(LPRider));memset(c->seats,255,sizeof c->seats);
-        memcpy(c->rig_riders,B->rig_riders,sizeof c->rig_riders);
+        memcpy(c->rig_riders,B->rig_riders,sizeof c->rig_riders);memset(c->rider_ids,0,sizeof c->rider_ids);
         if(t) {
             uint32_t at=(uint32_t)(t-M);c->frame=(uint16_t)r16(at+10);
             if(B->cls==2) {
@@ -344,7 +344,7 @@ static void finish(Build *B) {
         if(t && B->cls==0xe && (t[12]==8 || t[12]==0xa || t[12]==0x22) &&
            B->car_origins==1 && B->car_tracks==1 && !B->car_error && !B->rig_rider_error &&
            !r16(0x1d667cu) && B->frame_count==1 && B->car_origin.frame==B->drawn_frame){
-            uint8_t guests[40];int n=0,valid=1;
+            uint8_t guests[40];uint16_t ids[40];int n=0,valid=1;
             const uint8_t*track=M+r32(THINGS)+(unsigned)B->car_track*200u;
             if(track[7]>=MAPE || track[9]>=MAPE || t[7]>=MAPE || t[9]>=MAPE || t[0x12]>3 ||
                (uint16_t)r16((uint32_t)(track-M)+0x16)!=B->car_origin.family)valid=0;
@@ -353,12 +353,13 @@ static void finish(Build *B) {
                 uint64_t person=(uint64_t)r32(THINGS)+next*200u;
                 if(next>=NTH || person>r32(THING_LAST) || person+200>(64u<<20) ||
                    M[person+4]!=2 || M[person+0x59]>=8){valid=0;break;}
-                guests[n++]=M[person+0x59];next=(uint16_t)r16((uint32_t)person+0x47);
+                ids[n]=(uint16_t)next;guests[n++]=M[person+0x59];next=(uint16_t)r16((uint32_t)person+0x47);
             }
             if(next)valid=0;
             for(int i=0;i<40;i++)if(c->rig_riders[i].present){
                 const TPRMRider *r=&c->rig_riders[i];
                 if(i>=n || r->variant!=guests[i] || !tp_remaster_car_pose_valid(r->pose,r->visible))valid=0;
+                else c->rider_ids[i]=ids[i];
                 c->seats[i]=r->variant;
             }
             if(valid){
@@ -541,6 +542,13 @@ static void find_riders(Snap *s) {
             double ox = cls == 0x12 ? 0.5 : t[6] / 256.0, oy = cls == 0x12 ? 0.5 : t[8] / 256.0;
             s->conts[s->nconts++] = (Cont){(int16_t)i, (int16_t)first, (uint8_t)cls, (float)(t[7] + ox), (float)(t[9] + oy)};
         }
+    }
+    /* Car chains can include guests subsequently consumed by later cars.
+     * Native seat occurrences identify the actual container, not chain order. */
+    for(int k=0;k<s->ncards;k++){
+        const Card*c=&s->cards[k];if(c->cls!=14||!c->rig_ok)continue;
+        for(int seat=0;seat<40;seat++)if(c->rider_ids[seat]&&c->rider_ids[seat]<NTH)
+            s->riding[c->rider_ids[seat]]=c->idx;
     }
 }
 /* The ride type (0..28) of a container, or -1: rides keep the type record's offset in word 0x16;
@@ -929,6 +937,32 @@ static int draw_track_assembly(const Snap *s,const Card *c,WMRender *mr,float sc
     }
     return 1;
 }
+/* App/render thread only: no asset loading while the game captures memory.
+ * Camera and visible body share the exact vehicle, seat and guest-head pose. */
+static int vehicle_eye(const Snap*s,int guest,float scale,float*position,float*forward){
+    if(guest<=0)return 0;
+    const Card*c=NULL;int seat=-1;
+    for(int k=0;k<s->ncards;k++){
+        const Card*q=&s->cards[k];if(q->cls!=14||!q->rig_ok)continue;
+        for(int j=0;j<40;j++)if(q->rider_ids[j]==guest){if(c)return 0;c=q;seat=j;}
+    }
+    if(!c)return 0;
+    const RMRig*ride=rm_find_frame(c->cls,c->frame);const RMPose*pose=ride?rm_pose(ride,c->frame):NULL;
+    if(!pose||!tp_remaster_riders_valid(ride->ns,c->seats,c->rig_riders))return 0;
+    const RMRig*person=NULL;const RMPose*seated=NULL;
+    for(int j=0;j<ride->ns;j++)if(c->seats[j]!=255&&(c->rig_riders[j].visible||j==seat)){
+        const RMRig*r=rm_find(2,c->seats[j]);const RMPose*p=r?rm_pose(r,c->rig_riders[j].pose):NULL;
+        if(!p)return 0;if(j==seat){person=r;seated=p;}
+    }
+    if(!person)return 0;
+    const RMEye*eye=rm_eye_find(person->cls,person->type);
+    float placement[12],attachment[12];if(!rm_vehicle_transform(&c->vehicle,ride,pose,placement))return 0;
+    rm_affine_product(attachment,placement,pose->matrices+(ride->nb+seat)*12);
+    if(!rm_eye_transform(eye,person,seated,attachment,position,forward))return 0;
+    for(int k=0;k<3;k++)position[k]*=scale;
+    position[0]+=c->vehicle.track_x+1.f/3;position[1]+=c->vehicle.track_y+.5f;
+    return 1;
+}
 #define FOG0 20.0
 #define FOG1 42.0
 /* The view at ow x oh RGBA (0xAABBGGRR as the app's bitmaps). Returns 0 when there is nothing yet. */
@@ -948,6 +982,14 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
     const uint8_t *ft = floor_tex[s->fi], *ot = off_tex[s->fi];
     double cx = W.cam_x, cy = W.cam_y, cz = W.cam_z * W.hscale, yaw = W.cam_yaw, pitch = W.cam_pitch;
     if (W.mode == MODE_DIORAMA) cz = W.cam_z;
+    int seated_camera=0;float eye_position[3],eye_forward[3];
+    if(W.mesh&&W.mode==MODE_STREET&&tp_art_mode()==TP_ART_REIMAGINED&&
+       vehicle_eye(s,W.follow,(float)W.hscale,eye_position,eye_forward)){
+        cx=eye_position[0];cy=eye_position[1];cz=eye_position[2];
+        yaw=atan2(eye_forward[1],eye_forward[0])+W.head;
+        pitch=-atan2(eye_forward[2],hypot(eye_forward[0],eye_forward[1]))+W.pitch;
+        seated_camera=1;
+    }
     double fov = (W.mode == MODE_STREET ? 72 : 58) * M_PI / 180, f = ow / 2.0 / tan(fov / 2);
     /* camera basis: forward, right (horizontal), up; world x east, y south (down the map), z up */
     double fx = cos(yaw) * cos(pitch), fy = sin(yaw) * cos(pitch), fz = -sin(pitch);
@@ -1051,7 +1093,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                 if(ok) {
                     rm_draw(&mr,rig,pose,model_x,model_y,(float)W.hscale,placement);
                     rigs_drawn++;
-                    for(int seat=0;seat<rig->ns;seat++)if(guests[seat]){
+                    for(int seat=0;seat<rig->ns;seat++)if(guests[seat]&&!(seated_camera&&c->rider_ids[seat]==W.follow)){
                         float attachment[12];rm_affine_product(attachment,placement,pose->matrices+(rig->nb+seat)*12);
                         rm_draw(&mr,guests[seat],seated[seat],model_x,model_y,(float)W.hscale,attachment);
                     }

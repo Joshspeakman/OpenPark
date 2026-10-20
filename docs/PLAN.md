@@ -5,6 +5,26 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, actual-seat ride-along camera (Codex, isolated remaster branch):
+ordinary car snapshots retain guest entity IDs as well as appearance variants.
+Exact native seat occurrences correct the first-car/shared-chain follow mapping.
+Reimagined street view can now compose an explicit character eye/head anchor
+through the actual guest pose, seat and physical vehicle transform. Missing or
+ambiguous bindings do not guess an eye height; the followed guest is omitted
+from their own first-person image only when the exact camera resolves.
+
+Nine native sanitizer checks and 21 Python tests pass, including same-looking
+people in different seats, malformed anchors, missing poses, scale and slope.
+Both walk modes, 17,808 view checks and compile/signature pass. Recorded replay
+checks all 76 occupied states across four cars against exact native guest IDs,
+with 76 eye-level contextual captures; all 1,280 existing non-follow images
+remain byte-identical. Steep transition views still need visual refinement;
+this is not acceptance of the artwork or camera comfort. The 37.04-second
+Original-mode app run completes normally, but macOS again cannot capture either
+window. No headed pass, installation or accepted-art claims. Special tracks,
+source-hidden riders, other ride cameras and the complete pack remain open.
+See `docs/reports/2026-10-20-remaster-seat-camera.md`.
+
 2026-10-20, physical ordinary-vehicle paths (Codex, isolated remaster branch):
 Visitor car bodies and attached riders now use explicit authored route/root
 bindings, retaining native track selection, fractional progress, travel direction,

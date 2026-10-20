@@ -7,8 +7,8 @@
 #undef main
 
 int main(int argc,char**argv){
-    if(argc!=10){
-        fprintf(stderr,"usage: remaster_vehicle_replay BASE PALETTE CAPTUREDIR OUT THING COUNT YAW PROFILE MAPWIDTH\n");
+    if(argc!=10 && !(argc==11&&!strcmp(argv[10],"--seat-view"))){
+        fprintf(stderr,"usage: remaster_vehicle_replay BASE PALETTE CAPTUREDIR OUT THING COUNT YAW PROFILE MAPWIDTH [--seat-view]\n");
         return 2;
     }
     int result=2,thing=0,count=0,mapwidth=0;char *end=NULL;
@@ -17,7 +17,7 @@ int main(int argc,char**argv){
        !bounded_arg(argv[9],128,&mapwidth)||(mapwidth!=64&&mapwidth!=128))return 2;
     double yaw=strtod(argv[7],&end)*M_PI/180;
     if(!argv[7][0]||*end||!isfinite(yaw))return 2;
-    FILE*f=NULL,*log=NULL;
+    FILE*f=NULL,*log=NULL,*seatlog=NULL;int seatview=argc==11;
     uint32_t*img=NULL;float*depth=NULL;
     if(thing<1||thing>=12000||count<1||count>1000||!isfinite(yaw))goto done;
     memory=malloc(64u<<20);f=fopen(argv[1],"rb");
@@ -37,6 +37,10 @@ int main(int argc,char**argv){
     char path[4096];snprintf(path,sizeof path,"%s/evidence.csv",argv[4]);
     log=fopen(path,"w");if(!log)goto done;
     fprintf(log,"sample,frame,state,speed,linked_guests,attached_guests,visible_guests,variant_mask,origin_x,origin_y,origin_z,entity_x,entity_y,triangles,track_family,track_shape,bounce,contact_x,contact_y,contact_z\n");
+    if(seatview){
+        snprintf(path,sizeof path,"%s/seats.csv",argv[4]);seatlog=fopen(path,"w");if(!seatlog)goto done;
+        fprintf(seatlog,"sample,car,seat,guest,variant,pose,x,y,z,forward_x,forward_y,forward_z\n");
+    }
     img=malloc(960*600*sizeof*img);depth=malloc(640*640*sizeof*depth);
     if(!img||!depth)goto done;
     for(int sample=0;sample<count;sample++){
@@ -101,6 +105,19 @@ int main(int argc,char**argv){
         rm_point(pose->matrices+body->bone*12,body->pivot[0],body->pivot[1],body->pivot[2],posed_contact);
         rm_point(placement,posed_contact[0],posed_contact[1],posed_contact[2],contact);
         float contact_x=c->vehicle.track_x+1.f/3+contact[0],contact_y=c->vehicle.track_y+.5f+contact[1];
+        if(seatview)for(int seat=0;seat<ride->ns;seat++)if(c->rider_ids[seat]){
+            float eye[3],gaze[3];if(!vehicle_eye(s,c->rider_ids[seat],1,eye,gaze)){
+                fprintf(stderr,"sample %d seat %d: missing or ambiguous authored eye\n",sample,seat);goto done;
+            }
+            W.follow=c->rider_ids[seat];W.mode=MODE_STREET;W.head=0;W.pitch=0;
+            if(!tp_walk_render(img,960,600))goto done;
+            snprintf(path,sizeof path,"%s/seat-%03d-%02d.png",argv[4],sample,seat);
+            if(!png(path,img,960,600))goto done;
+            fprintf(seatlog,"%d,%d,%d,%u,%u,%u,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f\n",
+                sample,thing,seat,c->rider_ids[seat],c->seats[seat],c->rig_riders[seat].pose,
+                eye[0],eye[1],eye[2],gaze[0],gaze[1],gaze[2]);
+            W.follow=0;
+        }
         Card captured=*c;s->cards[0]=captured;s->ncards=1;c=&s->cards[0];
         W.cam_x=contact_x+.4-cos(yaw)*6;W.cam_y=contact_y-1-sin(yaw)*6;
         W.cam_yaw=yaw;W.cam_z=.9+contact[2];W.cam_pitch=.07;
@@ -129,6 +146,7 @@ int main(int argc,char**argv){
 done:
     if(f)fclose(f);
     if(log&&fclose(log)&&!result)result=6;
+    if(seatlog&&fclose(seatlog)&&!result)result=6;
     rm_reset();free(img);free(depth);free(memory);memory=NULL;
     return result;
 }
