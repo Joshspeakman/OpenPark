@@ -5,7 +5,7 @@
  *    runtime/native_draw.c -lz -lm -lpthread -o work/visitor-3d/native/snapshot
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth x y yaw [original]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth frame FRAME SHAPE yaw
- * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw
+ * snapshot memory.bin MPALETTE.DAT out.png mapwidth shop FRAME TYPE yaw [customer ID]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth guest FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth staff FRAME VARIANT yaw [state SUBTYPE]
  * snapshot memory.bin MPALETTE.DAT out.png mapwidth ride FRAME TYPE yaw [guests IDENTITIES]
@@ -53,9 +53,15 @@ int main(int argc,char**argv){
             int type=atoi(argv[7]);if(type<0||type>=17)return 2;
             uint16_t record=(uint16_t)(type*107);
             t[4]=0x0a;t[12]=2;t[6]=t[8]=128;memcpy(t+0x16,&record,2);
-            /* Isolate the base state in this private memory copy. Occupied and
-             * status states need separate composite fixtures. */
+            /* Isolate the requested state in this private memory copy. */
             memory[0x1d3c62+record+0x67]=255;
+            if(argc>9 && !strcmp(argv[9],"customer")){
+                if(argc!=11)return 2;
+                char*end=NULL;long variant=strtol(argv[10],&end,10);
+                if(!argv[10][0] || *end || variant<0 || variant>=8)return 2;
+                uint16_t customer=2;memcpy(t+0x47,&customer,2);
+                uint8_t*p=memory+things+400;p[4]=2;p[0x59]=(uint8_t)variant;
+            }
         }
         if(guest||staff){
             int variant=atoi(argv[7]);if(variant<0||variant>=(staff?9:8))return 2;
@@ -115,6 +121,20 @@ int main(int argc,char**argv){
     }
     if(!gallery&&argc>8)setenv("TP_WALK_MESH","0",1);
     if(!tp_walk_start(x,y))return 3;tp_walk_frame();
+    if(gallery && getenv("TP_SNAPSHOT_CAPTURE_DIGEST")){
+        Snap*s=&snaps[front];if(s->ncards!=1)return 4;Card*c=&s->cards[0];
+        uint32_t crc=(uint32_t)crc32(0,(const Bytef*)(s->pix+c->off),(size_t)c->w*c->h*2);
+        FILE*out=fopen(argv[3],"w");if(!out)return 5;
+        fprintf(out,"{\"width\":%u,\"height\":%u,\"anchor\":[%d,%d],\"source_crc32\":\"%08x\",\"eligible\":%u,\"attachments\":[",
+                c->w,c->h,c->ax,c->ay,crc,c->rig_ok);
+        int n=0;for(int i=0;i<40;i++)if(c->rig_riders[i].present){
+            const TPRMRider*p=&c->rig_riders[i];
+            fprintf(out,"%s{\"slot\":%d,\"identity\":%u,\"pose\":%u,\"visible\":%u}",
+                    n++?",":"",i,p->variant,p->pose,p->visible);
+        }
+        fputs("]}\n",out);int failed=ferror(out);if(fclose(out))failed=1;
+        free(memory);return failed?5:0;
+    }
     if(gallery && argc>9 && !strcmp(argv[9],"source")) {
         Snap*s=&snaps[front];if(!s->ncards)return 4;Card*c=&s->cards[0];
         int scale=6,sw=c->w*scale,sh=c->h*scale;
@@ -159,6 +179,14 @@ int main(int argc,char**argv){
                         i,c->seats[i],c->rig_riders[i].pose,
                         c->rig_riders[i].present,c->rig_riders[i].visible);
         }
+        if(shop){
+            fprintf(stderr,"shop %d frame %u: native origin %.6f %.6f eligible %u\n",
+                    c->type,c->frame,c->rig_x,c->rig_y,c->rig_ok);
+            for(int i=0;i<40;i++)if(c->seats[i]!=255)
+                fprintf(stderr,"customer part %d identity %u pose %u present %u visible %u\n",
+                        i,c->seats[i],c->rig_riders[i].pose,
+                        c->rig_riders[i].present,c->rig_riders[i].visible);
+        }
         W.cam_x=x;W.cam_y=y;W.cam_yaw=yaw;W.cam_z=height*.55;W.cam_pitch=.07;
         if(getenv("TP_SNAPSHOT_EYE"))W.cam_z=atof(getenv("TP_SNAPSHOT_EYE"));
         if(getenv("TP_SNAPSHOT_PITCH"))W.cam_pitch=atof(getenv("TP_SNAPSHOT_PITCH"));
@@ -172,6 +200,29 @@ int main(int argc,char**argv){
             }
         }
         tp_walk_teleport(x,y,yaw);tp_walk_input(0,0,0,0,0,0,0);
+    }
+    if(gallery && getenv("TP_SNAPSHOT_ORTHOGRAPHIC")){
+        Snap*s=&snaps[front];if(s->ncards!=1)return 4;Card*c=&s->cards[0];
+        const RMRig*rig=c->rig_ok?rm_find(c->cls,c->type):NULL;
+        const RMPose*pose=rig?rm_pose(rig,c->frame):NULL;
+        if(!pose || !tp_remaster_riders_valid(rig->ns,c->seats,c->rig_riders))return 4;
+        const RMRig*guests[40]={0};const RMPose*poses[40]={0};
+        for(int i=0;i<40;i++)if(c->seats[i]!=255 && c->rig_riders[i].visible){
+            guests[i]=rm_find(2,c->seats[i]);poses[i]=guests[i]?rm_pose(guests[i],c->rig_riders[i].pose):NULL;
+            if(!poses[i])return 4;
+        }
+        uint32_t*p=malloc(640*640*4);float*depth=malloc(640*640*sizeof*depth);
+        if(!p||!depth){free(p);free(depth);return 4;}
+        for(int i=0;i<640*640;i++){p[i]=0xff332b24;depth[i]=FLT_MAX;}
+        WMRender wr={.pixels=p,.depth=depth,.w=640,.h=640,
+            .rx=1,.ry=1.f/3,.uy=-2.f/3,.uz=1/1.2f,.fy=-1,.fz=-1,
+            .focal=160,.orthographic=1,.offset_y=170};
+        float placement[12]={1,0,0,0,0,1,0,0,0,0,1,c->rig_z};
+        rm_draw(&wr,rig,pose,0,0,1,c->rig_z?placement:NULL);
+        for(int i=0;i<rig->ns;i++)if(guests[i])
+            rm_draw(&wr,guests[i],poses[i],0,0,1,pose->matrices+(rig->nb+i)*12);
+        fprintf(stderr,"native composite orthographic: %u triangles, %u fragments\n",wr.triangles,wr.fragments);
+        int ok=png(argv[3],p,640,640);free(p);free(depth);free(memory);return ok?0:5;
     }
     int w=960,h=600;uint32_t*p=malloc((size_t)w*h*4);
     double began=now();if(!tp_walk_render(p,w,h))return 3;

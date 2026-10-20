@@ -316,10 +316,22 @@ static void finish(Build *B) {
                 uint32_t at=(uint32_t)(t-M);
                 int offset=(uint16_t)r16(at+0x16),type=offset/107;
                 if(type<17 && offset%107==0)c->type=(int16_t)type;
-                /* A base model must never consume a customer, extra frame or
-                 * status marker. Those require complete composite bindings. */
+                /* Every actually drawn customer part needs the actual guest
+                 * and source posture. A linked but undrawn guest adds no body.
+                 * The render path additionally requires all attachment poses
+                 * and enough authored seat matrices before consuming the card. */
+                unsigned customer=(uint16_t)r16(at+0x47);
+                uint64_t person=(uint64_t)r32(THINGS)+customer*200u;
+                int valid=!B->rig_rider_error && r16(0x1d667cu)!=8;
+                if(customer && (customer>=NTH || person>r32(THING_LAST) ||
+                   person+200>(64u<<20) || M[person+4]!=2 || M[person+0x59]>=8))valid=0;
+                for(int i=0;i<40;i++)if(c->rig_riders[i].present){
+                    if(!valid || !customer || c->rig_riders[i].variant!=M[person+0x59] ||
+                       !tp_remaster_shop_key_valid(c->rig_riders[i].pose)){valid=0;break;}
+                    c->seats[i]=c->rig_riders[i].variant;
+                }
                 c->rig_ok=c->type>=0 && (t[12]==2 || t[12]==4) &&
-                    !r16(at+0x47) && !r16(at+0x5f) && B->frame_count==1;
+                    valid && !r16(at+0x5f) && B->frame_count==1;
             }
         }
         else if (B->cls==0x12 || B->cls==0xe) c->shape=WM_TRACK;

@@ -5,6 +5,21 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, native shop customers (Codex,
+`codex/reimagined-full-remaster`): exact customer identity/pose/visibility now
+binds canonical guests to shop attachment matrices, preserving empty and
+identity-zero-only states. Local authoring adds 172 nonempty customer-pose
+candidates across the eight existing guest models; these remain unaccepted.
+All 1,640 occupied source states retain identical source pixels and exact
+metadata; current candidates have 1,640 native perspective captures, 560
+orthographic assemblies and 688 individual pose inspections. Five sanitizer
+checks, eighteen Python tests, both walk modes, 17,808 view checks and
+compile/signature pass. A 36.77-second Original-mode headed regression
+captured both views and exited normally; this is not remastered-art acceptance.
+All 112 source hashes are unchanged; no installation. Full customer visual
+refinement, live timing, source-part packs and the remaining remaster continue.
+See `docs/reports/2026-10-20-remaster-shop-customers.md`.
+
 2026-10-20, midway shop candidates (Codex,
 `codex/reimagined-full-remaster`): five additional local shop models bring
 canonical candidate authoring to all seventeen shop definitions. Source-base

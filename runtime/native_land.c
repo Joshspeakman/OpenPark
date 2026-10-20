@@ -597,6 +597,16 @@ static int class14(uint32_t t, int x, int y) {
  * (word 10) with its seats showing the rider (word 0x47) from table 0x1b9d68 (23 sprites per
  * kind of visitor), word 0x5f a frame over it, and a mark (deco 0x49c) while the record's
  * entry (byte 0x67 of 0x1d3c62 + word 0x16, into 0x1d3c04) has word 0 clear. */
+static void shop_customer_blit(uint32_t entry,int x,int y,int flags,int occurrence,
+                               uint32_t person,int slot,unsigned original_offset) {
+    uint32_t sprites=r32(SPRITES);
+    int visible=entry>sprites && M[entry+4] && M[entry+5];
+    if(marks && dlog)dlog(7,occurrence,M[person+0x59],
+        tp_remaster_shop_key(slot,original_offset,(unsigned)flags),
+        (uint32_t)visible,flags,dctx);
+    if(entry)log_blit(entry,x,y,flags);
+    if(marks && dlog)dlog(7,-1,0,0,0,0,dctx);
+}
 static int classA(uint32_t t, int x, int y) {
     int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
     if (sub != 2 && sub != 4) return 0;
@@ -608,22 +618,25 @@ static int classA(uint32_t t, int x, int y) {
     /* This composite uses the manual seat-substitution loop below, rather
      * than frame_logged. Preserve the same native origin metadata. */
     if (marks && dlog) dlog(8, (uint16_t)r16(t + 0xa), px, py, 0, 0, dctx);
+    int customer_part=0;
     for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8) * 10, g = 0; e > elems && g < 256;
          e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, g++) {
         int fl = (uint16_t)r16(e + 6);
         uint32_t os = sprites + (uint16_t)r16(e);
         if (fl & 0x80) {
+            int occurrence=customer_part++;
             if (rider <= things) continue;
+            int slot=-1;
+            for(int i=0;i<0x17;i++)if(r16(0x1b9d68+(uint32_t)i*2)==r16(e)){slot=i;break;}
             if (M[rider + 0x59]) {
-                for (int i = 0; i < 0x17; i++) if (r16(0x1b9d68 + (uint32_t)i * 2) == r16(e)) {
+                if(slot>=0){
                     if (r16(FRAME_MODE) != 8) {
-                        uint32_t ns = sprites + (uint16_t)r16(0x1b9d68 + (uint32_t)M[rider + 0x59] * 0x2e + (uint32_t)i * 2);
+                        uint32_t ns = sprites + (uint16_t)r16(0x1b9d68 + (uint32_t)M[rider + 0x59] * 0x2e + (uint32_t)slot * 2);
                         int bx = (int16_t)px - (M[ns + 4] >> 1) + (M[os + 4] >> 1), by = py - M[ns + 5] + M[os + 5];
-                        log_blit(ns, (int16_t)(bx + r16(e + 2)), (int16_t)(by + r16(e + 4)), fl);
+                        shop_customer_blit(ns,(int16_t)(bx+r16(e+2)),(int16_t)(by+r16(e+4)),fl,occurrence,rider,slot,(uint16_t)r16(e));
                     }
-                    break;
-                }
-            } else if (os > sprites) log_blit(os, (int16_t)(px + r16(e + 2)), (int16_t)(py + r16(e + 4)), fl);
+                }else shop_customer_blit(0,0,0,fl,occurrence,rider,-1,(uint16_t)r16(e));
+            } else shop_customer_blit(os>sprites?os:0,(int16_t)(px+r16(e+2)),(int16_t)(py+r16(e+4)),fl,occurrence,rider,slot,(uint16_t)r16(e));
         } else {
             if (r16(FRAME_MODE) == 8) { missing = 0x30a; continue; }   /* scaled (0x166dfa): not native */
             log_blit(os, (int16_t)(px + r16(e + 2)), (int16_t)(py + r16(e + 4)), fl);

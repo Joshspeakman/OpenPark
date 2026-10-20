@@ -240,6 +240,77 @@ int main(void){
     CHECK(c.rig_ok); /* an inactive stored overlay key draws no extra frame */
     put16(thing+0x2e,1);CHECK(capture(s,1));c=s->cards[0];
     CHECK(!c.rig_ok); /* active native overlay requires a composite binding */
+    /* Shop attachments use their separate 23-slot substitution table, even
+     * when the same guest contributes multiple marked source parts. */
+    memset(memory+thing,0,600);put32(THING_LAST,thing+400);
+    memory[thing+4]=10;memory[thing+12]=2;memory[thing+6]=memory[thing+8]=128;
+    put16(thing+10,3);put16(thing+0x16,12*107);put16(thing+0x47,2);
+    memory[0x1d3c62+12*107+0x67]=255;memory[thing+200+4]=2;
+    memset(memory+0x1b9d68,0,8*23*2);
+    put16(0x500000+3*8,1);
+    put16(0x510000+10,6);put16(0x510000+10+6,0);put16(0x510000+10+8,2);
+    put16(0x510000+20,12);put16(0x510000+20+8,0);
+    for(unsigned key=0;key<65536;key++){
+        int shopkey=key>=65312 && key<65440 && (key-65312)%32<25;
+        CHECK(tp_remaster_shop_key_valid(key)==shopkey);
+        CHECK(!(shopkey && tp_remaster_rider_key_valid(key)));
+    }
+    CHECK(!tp_remaster_shop_key(-2,58*6,0));
+    CHECK(!tp_remaster_shop_key(23,0,0));CHECK(!tp_remaster_shop_key(0,0,4));
+    CHECK(!tp_remaster_shop_key(-1,57*6,0));
+    for(int mode=0;mode<2;mode++){
+        put16(SCREEN_MODE,mode?8:1);CHECK(geom(&s->g));
+        for(int slot=0;slot<23;slot++){
+            memset(memory+0x1b9d68,0,8*23*2);put16(0x1b9d68+slot*2,12);
+            for(int variant=0;variant<8;variant++){
+                memory[thing+200+0x59]=(uint8_t)variant;
+                if(variant)put16(0x1b9d68+variant*46+slot*2,6);
+                for(int flip=0;flip<4;flip++){
+                    put16(0x510000+20+6,0x80+flip);CHECK(capture(s,1));c=s->cards[0];
+                    CHECK(c.rig_ok && c.type==12 && c.seats[0]==variant);
+                    CHECK(c.rig_x==12.5f && c.rig_y==(mode?14.25f:14.5f));
+                    CHECK(c.rig_riders[0].pose==65312+flip*32+slot);
+                    CHECK(c.rig_riders[0].visible && c.rig_riders[0].present);
+                    CHECK(tp_remaster_riders_valid(1,c.seats,c.rig_riders));
+                    CHECK(!tp_remaster_riders_valid(0,c.seats,c.rig_riders));
+                }
+            }
+        }
+    }
+    put16(SCREEN_MODE,1);CHECK(geom(&s->g));
+    put16(0x510000+20+6,0x80);memory[thing+200+0x59]=7;
+    put16(0x1b9d68+7*46+22*2,0);CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.rig_riders[0].present && !c.rig_riders[0].visible);
+    CHECK(c.rig_riders[0].pose==65334);
+    for(int exception=0;exception<2;exception++){
+        unsigned offset=(exception?65:58)*6;
+        memcpy(memory+0x520000+offset,memory+0x520000+12,6);
+        put16(0x510000+20,offset);
+        for(int variant=0;variant<8;variant++){
+            memory[thing+200+0x59]=(uint8_t)variant;CHECK(capture(s,1));c=s->cards[0];
+            CHECK(c.rig_ok && c.rig_riders[0].pose==65335+exception);
+            CHECK(c.rig_riders[0].visible==(variant==0));
+        }
+    }
+    put16(0x510000+20,57*6);CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(0x510000+20,12);put16(0x510000+20+6,0x84);
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
+    put16(0x510000+20+6,0x80);put16(0x1d667cu,8);
+    CHECK(!capture_missing(s,1,0x30a) && s->ncards==0);put16(0x1d667cu,0);
+    put16(0x1b9d68+7*46+22*2,6);
+    put16(0x510000+20+8,3);put16(0x510000+30,12);
+    put16(0x510000+30+6,0x81);put16(0x510000+30+8,0);
+    CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.seats[0]==7 && c.seats[1]==7);
+    CHECK(c.rig_riders[0].pose==65334 && c.rig_riders[1].pose==65366);
+    CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    CHECK(!tp_remaster_riders_valid(1,c.seats,c.rig_riders));
+    put16(0x510000+20+8,0);
+    put16(thing+0x47,0);CHECK(capture(s,1));c=s->cards[0];
+    CHECK(c.rig_ok && c.seats[0]==255 && !c.rig_riders[0].present);
+    put16(thing+0x47,2);memory[thing+200+4]=8;
+    CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);memory[thing+200+4]=2;
+    memory[thing+200+0x59]=8;CHECK(capture(s,1));CHECK(!s->cards[0].rig_ok);
     free(s);free(memory);
     puts("remaster snapshot: scenery/shop/guest native origins, crop independence, tick-selected frames and composite guards passed");
     return 0;
