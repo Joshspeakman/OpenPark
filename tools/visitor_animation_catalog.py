@@ -43,6 +43,39 @@ def graph(starts, frames, elements):
     return dict(chains=chains, frames=nodes, unreachable_frames=[i for i in range(1, nf) if i not in used])
 
 
+def staff_assets(memory, base=0x1d35c0, limit=64):
+    """Native 54-byte staff records, terminated by the zero word at +0x22.
+
+    Name/record base: 0x14f729. Animation lookups: 0x128729 (+0x26 plus
+    direction), 0x132366 (+0x28 plus direction), 0x132fa2 (+0x2a).
+    0x1d35ec is the first record's +0x2c job kind, not its beginning.
+    """
+    if base < 0 or limit < 1 or limit > 64:
+        raise ValueError('Invalid staff table bounds')
+    assets = []
+    for i in range(limit):
+        at = base + i*54
+        if at+54 > len(memory):
+            raise ValueError('Truncated staff table or missing terminator')
+        word = lambda offset: struct.unpack_from('<H', memory, at+offset)[0]
+        if not word(0x22):
+            return assets
+        name = memory[at:at+32].split(b'\0')[0].decode('latin1')
+        refs = [dict(field=f'+0x{o:x}', animation=word(o),
+                     role='staff animation definition; activity name unverified')
+                for o in (0x26, 0x28, 0x2a) if word(o)]
+        for offset in (0x26, 0x28):
+            if word(offset):
+                refs.extend(dict(field=f'direction:0x{offset:x}:{d}',
+                                 animation=word(offset)+d,
+                                 role=f'directional staff group +0x{offset:x}; native byte 0x12 selects direction')
+                            for d in range(4))
+        assets.append(dict(id=f'staff:{i}', name=name, category='staff',
+                           native_variant=i, record_offset=i*54,
+                           references=refs, replacement='not animation validated'))
+    raise ValueError('Staff table has no bounded terminator')
+
+
 def build(memory, data):
     original = inventory(memory, data)
     m = memory.read_bytes()
@@ -63,12 +96,7 @@ def build(memory, data):
             if v: refs.append(dict(field=f'+0x{off:x}', animation=v, role='definition reference; semantic role pending verification'))
         assets.append(dict(id=f"{a['category']}:{a['index']}", name=a['name'], category=a['category'], references=refs,
                            composite_required=not bool(refs), replacement='not animation validated'))
-    for i in range(8):
-        at = 0x1d35ec + i * 54
-        name = m[at+10:at+42].split(b'\0')[0].decode('latin1')
-        refs = [dict(field=f'+0x{o:x}', animation=word(at+o), role='staff definition animation; directional/activity variants need mapping')
-                for o in (48, 50, 52) if word(at+o)]
-        assets.append(dict(id=f'staff:{i}', name=name, category='staff', references=refs, replacement='not animation validated'))
+    assets.extend(staff_assets(m))
     # Preserve all eighteen table entries, distinguishing direct frame values
     # from animation indices before assigning behavior names.
     for i in range(8):

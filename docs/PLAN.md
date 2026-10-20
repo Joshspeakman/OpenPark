@@ -5,6 +5,16 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, staff inventory correction (Codex,
+`codex/reimagined-full-remaster`): verified native record layout fixes an
+off-by-one catalog error that omitted Shark Man and shifted staff IDs.
+There are nine staff identities; both directional animation groups are now
+fully enumerated. Fourteen Python tests pass; the refreshed 82-asset catalog
+has zero malformed references. Full audit: 3,848 blockers, zero accepted
+replacements. Native trace evidence identifies further mechanic/handyman
+activity frames still needing mapping and art. No staff model or application
+was installed. See `docs/reports/2026-10-20-remaster-staff-catalog.md`.
+
 2026-10-20, Reimagined actual rider poses (Codex,
 `codex/reimagined-full-remaster`): native ride capture now binds each
 occupant's identity, exact source pose/flip and explicit visibility without
