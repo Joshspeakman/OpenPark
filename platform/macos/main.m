@@ -133,7 +133,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     uint32_t *_walkPx; int _walkW, _walkH;
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
-    uint32_t *_clean; int _cleanW, _cleanH; double _cleanAt;   /* the park picture without a game window over it (present: menuWide) */
+    uint32_t *_clean; int _cleanW, _cleanH; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
     TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
     BOOL _cornerGuard, _held; NSPoint _virt;   /* full screen: the pointer kept out of the corners (pointOf:) */
 }
@@ -172,14 +172,25 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 /* What the park view occupies, and its width in the game screen's pixels. */
 - (NSRect)viewRect { return [self wide] ? self.bounds : [self screenRect]; }
 /* The game's own screen inside the wide view: the column its interface takes there (the panel's). */
-/* A full-screen game window in the wide view (present: menuWide) at the panel's size, as the panel is in the park
- * (view.c band_map: anchored at the bottom middle), so opening one from the panel keeps the panel where it was; at
- * most the view's height. The game's own videos: the whole height. */
-- (double)menuScale { double k = tp_view_ui_scale(); return tp_game_video || k > 1 ? 1 : k; }
+/* A full-screen game window in the wide view (present: menuWide): the window at its full size, its panel at the
+ * panel's size (at most 1, over nothing of the window), anchored at the bottom middle as in the park (view.c
+ * band_map), so opening one from the panel leaves the panel as it was. The game's own videos: no panel. */
+- (double)menuPanelScale { double k = tp_view_ui_scale(); return tp_game_video || k > 1 ? 1 : k; }
+- (int)panelRows:(int)h { return h == 480 ? 44 : h * 22 / 200; }   /* (the panel's rows: view.c band_map's) */
+/* A point in the column (0..1) to the game's screen: in the smaller panel, its place on the panel; elsewhere in the
+ * panel's strip (the park shows there), just above it. */
+- (void)menuMapX:(double *)fx y:(double *)fy {
+    double k = [self menuPanelScale]; if (k == 1 || _sh <= 0) return;
+    double band = (double)[self panelRows:_sh] / _sh, top = 1 - band, py0 = 1 - band * k, px0 = (1 - k) / 2;
+    if (*fy < top) return;
+    if (*fy >= py0 && *fx >= px0 && *fx < px0 + k) { *fx = (*fx - px0) / k; *fy = top + (*fy - py0) / k; }
+    else *fy = top - 0.5 / _sh;
+    *fx = fmin(fmax(*fx, 0), 0.9999); *fy = fmin(fmax(*fy, 0), 0.9999);
+}
 - (NSRect)columnRect {
-    NSRect v = [self viewRect]; double lw = _lastLW > 0 ? _lastLW : [self layoutW], k = [self menuScale];
-    CGFloat w = v.size.width * _sw / lw * k, h = v.size.height * k;
-    return NSMakeRect(v.origin.x + (v.size.width - w) / 2, v.origin.y, w, h);
+    NSRect v = [self viewRect]; double lw = _lastLW > 0 ? _lastLW : [self layoutW];
+    CGFloat w = v.size.width * _sw / lw;
+    return NSMakeRect(v.origin.x + (v.size.width - w) / 2, v.origin.y, w, v.size.height);
 }
 - (NSRect)pointerRect { return _live ? [self viewRect] : _menuWide ? [self columnRect] : [self screenRect]; }
 - (double)layoutW {
@@ -209,6 +220,13 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     }
     if (_viewOn) [self edgePan];
     BOOL live = _viewOn && tp_view_live() && fw == _sw;
+    /* A full-screen game window coming up: its first frames are still the park view's, the window and its panel at
+     * their own size (the panel's size changes when a window covers it), before the window takes the screen
+     * (menuWide). The last picture stays meanwhile (at most 0.3 s). */
+    if (live && _live && [self wide] && tp_view_ui_share() > 0.9) {
+        double t = CACurrentMediaTime(); if (!_coverAt) _coverAt = t;
+        if (t - _coverAt < 0.3) return;
+    } else _coverAt = 0;
     if (live && _live && _surf[_surfIdx] && !_viewMoved && !tp_view_frame_due()) return;   /* steady pacing: the last picture stays up */
     _viewMoved = NO;
     if (live) {                                      /* the park view, the game's interface and its panel */
@@ -271,18 +289,26 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
         size_t sp = IOSurfaceGetBytesPerRow(cur), dp = IOSurfaceGetBytesPerRow(nx);
         uint8_t *src = IOSurfaceGetBaseAddress(cur), *dst = IOSurfaceGetBaseAddress(nx);
         if (getenv("TP_DEV_GAME_VIDEO")) tp_game_video = 1;   /* (development: any game window drawn as the game's video) */
-        double lw = _lastLW > 0 ? _lastLW : [self layoutW], mk = [self menuScale]; BOOL video = tp_game_video;
-        int cw = (int)lround(_bigW * _sw / lw * mk), cx0 = (_bigW - cw) / 2; if (cw > _bigW) cw = _bigW; if (cx0 < 0) cx0 = 0;
+        double lw = _lastLW > 0 ? _lastLW : [self layoutW], pk = [self menuPanelScale]; BOOL video = tp_game_video;
+        int cw = (int)lround(_bigW * _sw / lw), cx0 = (_bigW - cw) / 2; if (cw > _bigW) cw = _bigW; if (cx0 < 0) cx0 = 0;
         BOOL clean = _clean && _cleanW == _bigW && _cleanH == _bigH && CACurrentMediaTime() - _cleanAt < 5;
-        int ch = (int)lround(_bigH * mk), cy0 = _bigH - ch; if (ch < 1) ch = 1; if (cy0 < 0) cy0 = 0;   /* (the panel's size, at the bottom: columnRect) */
+        /* The panel's rows at the panel's size, at the bottom middle as in the park; the rest of their strip shows the
+         * park (as it was before the window came); the window above at its full size. */
+        int pr = [self panelRows:fh], ys = video || pk == 1 ? _bigH : (int)lround((double)_bigH * (fh - pr) / fh);
+        int pw = (int)lround(cw * pk), ph = (int)lround((double)_bigH * pr / fh * pk), px0 = (_bigW - pw) / 2, py0 = _bigH - ph;
         for (int y = 0; y < _bigH; y++) {
             uint32_t *d = (uint32_t *)(dst + (size_t)y * dp);
             if (video) for (int x = 0; x < _bigW; x++) d[x] = 0xff000000u;   /* (a video: black beside it) */
             else if (!_menuWide && clean) memcpy(d, _clean + (size_t)y * _bigW, (size_t)_bigW * 4);   /* (entering: the park picture around it, */
-            else if (!_menuWide || y < cy0) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* as it was before the window came) */
+            else if (!_menuWide || y >= ys) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* as it was before the window came) */
             else { memcpy(d, src + (size_t)y * sp, (size_t)cx0 * 4); memcpy(d + cx0 + cw, src + (size_t)y * sp + (size_t)(cx0 + cw) * 4, (size_t)(_bigW - cx0 - cw) * 4); }
-            if (y < cy0) continue;
-            const uint32_t *row = _pixels + (size_t)((y - cy0) * fh / ch) * fw;
+            if (y >= ys) {                                  /* the panel's strip */
+                if (y < py0 || ph <= 0) continue;
+                const uint32_t *row = _pixels + (size_t)(fh - pr + (y - py0) * pr / ph) * fw;
+                for (int x = 0; x < pw; x++) { uint32_t c = row[(size_t)x * fw / pw]; d[px0 + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
+                continue;
+            }
+            const uint32_t *row = _pixels + (size_t)(y * fh / _bigH) * fw;
             for (int x = 0; x < cw; x++) { uint32_t c = row[(size_t)x * fw / cw];   /* (RGBA in memory -> BGRA) */
                 d[cx0 + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
         }
@@ -407,6 +433,11 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     return [self convertPoint:[self.window convertPointFromScreen:v] fromView:nil];
 }
 - (void)sendMouse:(NSEvent *)e {
+    /* The Mac sends a plain move only while no button is down: a button still held here then lost its release (the
+     * game kept it down: the right button scrolls the park and the game takes no clicks meanwhile). Let go. */
+    if (e.type == NSEventTypeMouseMoved && (_buttons & 7)) {
+        fprintf(stderr, "mouse: buttons %#x were still held at a plain move, let go\n", _buttons & 7); _buttons &= ~7u;
+    }
     NSPoint p = [self pointOf:e];
     _mouse = p; _mouseIn = YES;
     if (_walkDrop || tp_walk_active()) { [self setCursorHidden:NO]; return; }   /* (the Visitor View takes the pointer) */
@@ -418,6 +449,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     [self setCursorHidden:(inside && !_live && self.window.isKeyWindow && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"]) || _held];
     fx = fx < 0 ? 0 : fx > 0.9999 ? 0.9999 : fx;
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
+    if (_menuWide) [self menuMapX:&fx y:&fy];
     if (_live) tp_view_mouse(fx, fy, _buttons);      /* mapped into the park */
     else tp_host_mouse(fx, fy, _buttons);            /* the game's own screen */
 }
@@ -475,7 +507,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 /* A pointer from elsewhere (a game controller), in 0..1 of what is shown. */
 - (void)pointerAt:(double)fx :(double)fy buttons:(uint32_t)b {
     if (_menuWide) { NSRect v = [self viewRect], c = [self columnRect]; fx = (fx * v.size.width - (c.origin.x - v.origin.x)) / c.size.width; fx = fmin(fmax(fx, 0), 0.9999);   /* (into the column) */
-                     fy = 1 - ((1 - fy) * v.size.height - (c.origin.y - v.origin.y)) / c.size.height; fy = fmin(fmax(fy, 0), 0.9999); }
+                     [self menuMapX:&fx y:&fy]; }
     if (_live) tp_view_mouse(fx, fy, b); else tp_host_mouse(fx, fy, b);
 }
 

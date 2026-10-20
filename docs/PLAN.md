@@ -13,6 +13,21 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-19, the player: after d86f5c6, clicks stopped working in the park (placing, the panel) after a right-click
+while holding a fries stall; not reproduced (TESTPARK copy: right-click and right-drag while holding a stall, through
+the view's own path; clicks went on working). Most likely cause: the app's right button stayed down (its release
+lost), and the game, scrolling while it is down, took no clicks. The Mac sends a plain move only while no button is
+down, so a button still held then is let go, with a line in the log ("mouse: buttons ... let go"). The player's log
+also showed long frames of 13 to 20 s at the in-game load dialog: the player's time in the dialog (governed), not a
+stall; long_frame skips intervals that are mostly governor now.
+The player also asked for the menus at their full size again and only the panel at Panel Size, without the grow and
+shrink when one opens: the game's full-screen windows are drawn at the full height again, their panel's rows at the
+panel's size at the bottom middle (as in the park), the park beside it; clicks in the smaller panel go to the
+panel, elsewhere in its strip just above it (main.m menuMapX). The window's first frames, still drawn by the park
+view with the panel at its own size, are not shown (the last picture stays, at most 0.3 s). Checked at 0.5 on a
+TESTPARK copy: the face screen at full size with the small panel, a click on the small panel's shop button opened the
+shop menu.
+
 2026-10-19, the player: mouse and trackpad broken in the main menu (full screen, 454ad1b; the guard came in d22771b).
 The hot-corner guard moved the Mac's pointer (CGWarpMouseCursorPosition) with every event while it held it, and
 macOS ignores local mouse and trackpad input for about 0.25 s after such a move: the pointer barely moved in full
