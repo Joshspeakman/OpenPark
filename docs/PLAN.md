@@ -5,6 +5,21 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, midway shop candidates (Codex,
+`codex/reimagined-full-remaster`): five additional local shop models bring
+canonical candidate authoring to all seventeen shop definitions. Source-base
+matching maps 280 keys for the five midway shops, including 205 frames with
+customer markers; only non-customer assemblies are modeled here. Measured
+projection landmarks and side inspection corrected depth, grounding, roof
+intersections and disconnected structures. These remain unaccepted artwork.
+Current models have 1,120 sanitized native unoccupied captures, 1,120 fixed
+camera inspections and 280 padded normal-projection bakes with hashes.
+Customer mapping records all 23 table slots and ten identity-zero-only source
+occurrences outside that table. Live triggers, customer art/attachments and
+full art acceptance remain unfinished. All 112 source hashes are unchanged.
+No runtime change, app launch or installation. See
+`docs/reports/2026-10-20-remaster-midway.md`.
+
 2026-10-20, source-aware construction previews (Codex,
 `codex/reimagined-full-remaster`): placement sprite calls now paint their
 source-bound RGBA art directly, while private prediction of original indexed
