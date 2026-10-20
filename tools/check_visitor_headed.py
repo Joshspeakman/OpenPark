@@ -18,17 +18,22 @@ import time
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    reimagined = sys.argv[1:] == ['--reimagined']
-    detail = sys.argv[1:] == ['--faithful-detail']
-    if sys.argv[1:] and not (reimagined or detail):
-        raise SystemExit('usage: check_visitor_headed.py [--reimagined|--faithful-detail]')
-    name = 'OpenPark Reimagined Study' if reimagined else 'OpenPark Faithful Detail Study' if detail else 'OpenPark Visitor 3D Study'
-    identity = 'com.joshspeakman.openpark.reimaginedstudy' if reimagined else 'com.joshspeakman.openpark.faithfuldetailstudy' if detail else 'com.joshspeakman.openpark.visitor3dstudy'
+    profiles = {
+        '': ('OpenPark Visitor 3D Study', 'visitor3dstudy', 'visitor-3d'),
+        '--reimagined': ('OpenPark Reimagined Study', 'reimaginedstudy', 'reimagined'),
+        '--faithful-detail': ('OpenPark Faithful Detail Study', 'faithfuldetailstudy', 'faithful-detail'),
+        '--faithful-layered': ('OpenPark Faithful Layered Study', 'faithfullayeredstudy', 'faithful-layered'),
+    }
+    option = sys.argv[1] if len(sys.argv) == 2 else ''
+    if len(sys.argv)>2 or option not in profiles:
+        raise SystemExit('usage: check_visitor_headed.py [--reimagined|--faithful-detail|--faithful-layered]')
+    name, suffix, directory = profiles[option]
+    identity = 'com.joshspeakman.openpark.' + suffix
     app = Path.home() / f"Applications/{name}.app"
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     if info.get("CFBundleIdentifier") != identity:
         raise RuntimeError("Refusing to test a different app")
-    study = root / ('work/reimagined' if reimagined else 'work/faithful-detail' if detail else 'work/visitor-3d')
+    study = root / 'work' / directory
     source = study / 'profile'
     out = Path(tempfile.mkdtemp(prefix="headed-", dir=study))
     profile = out / "profile"
@@ -39,6 +44,8 @@ def main():
         shutil.copytree(source / "visitor3d", profile / "visitor3d")
     if (source / 'reimagined').exists():
         shutil.copytree(source / 'reimagined', profile / 'reimagined')
+    if (source / 'faithful').exists():
+        shutil.copytree(source / 'faithful', profile / 'faithful')
     control = out / "control.txt"
     control.write_text("show\nsize 960 600\nsleep 5\nkey 1c0d\nsleep 5\n"
                        "key 1454\nsleep 0.15\nkey 1245\nsleep 0.15\n"
@@ -54,6 +61,12 @@ def main():
              ("toyland-side", 75, 81, 180),
              ("toyland-rear", 69.5, 76, 90),
              ("toyland-quarter", 65, 85.5, -45)]
+    if option == '--faithful-layered':
+        poses = [('castle-front', 56.12, 114.7, -90),
+                 ('castle-quarter', 53.3, 114, -55),
+                 ('castle-side', 60.8, 109.9, 180),
+                 ('castle-rear', 56.12, 105.1, 90),
+                 ('castle-context', 56.12, 116.5, -90)]
     for name, x, y, yaw in poses:
         with control.open("a") as f:
             f.write(f"walkteleport {x} {y} {yaw}\nsleep 1\n"

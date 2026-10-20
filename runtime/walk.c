@@ -22,8 +22,10 @@
  * - Who rides what: a ride's riders are a chain through word 0x47 (class 4 rides, class 0x0e
  *   cars; class 0x0a holds one), a train's cars a chain through word 0x7a (class 0x12).
  *
- * Limits (explicit, see the plan): only Toy Land has an authored proof model so far. Hidden
- * surfaces reuse source material in inferred layouts; people and other assets remain cards.
+ * Layered rides (walk_layer.h) use a fixed authored footprint, source-palette surfaces,
+ * poses keyed by native frames, and separately composited riders at world-space foot points.
+ * Limits (explicit, see the plan): eight static studies and one layered ride prototype.
+ * Hidden surfaces are inferred; guests retain original sprites, including layered riders.
  * The rejected generic extrusion/lofting study is opt-in through TP_WALK_SHELL_STUDY.
  * The visitor AI is not reverse-engineered, so you cannot steer
  * a visitor, buy or queue yourself: you walk as an onlooker, or ride along with a real visitor
@@ -46,6 +48,7 @@
 #include "walk_mesh.h"
 #include "walk_model.h"
 #include "walk_rig.h"
+#include "walk_layer.h"
 
 uint8_t *tp_host_memory(void);
 void tp_host_palette_rgba(uint32_t pal[256]);
@@ -110,7 +113,7 @@ static int geom(Geom *g) {
 #define MAXCONT 256
 #define SHR 8                       /* shadow samples per cell */
 typedef struct { float x, y, r; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
-    uint8_t cls, big, shape, rig_ok, seats[40]; } Card;
+    uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40]; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
@@ -189,6 +192,7 @@ typedef struct {
     Snap *s; const Geom *g; int cx, cy;
     int idx, cls, colour, any; int x0, y0, x1, y1;      /* the thing being drawn and what it touched */
     NDTarget a, b;
+    int rider_slot, rider_variant, nriders, rider_error; LPRider riders[40];
 } Build;
 static void touch(Build *B, int x0, int y0, int x1, int y1) {
     if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > SW_) x1 = SW_; if (y1 > SH_) y1 = SH_;
@@ -246,7 +250,8 @@ static void finish(Build *B) {
         double ax = fx - x0; c->ax = (uint16_t)(ax < 0 ? 0 : ax > w ? w : ax); c->ay = (uint16_t)(fy - y0);
         c->off = s->npix; c->idx = (int16_t)B->idx; c->cls = (uint8_t)(B->idx < 0 ? 0xff : B->cls); c->big = (uint8_t)big;
         c->type = -1; c->shape = WM_SMALL;
-        c->frame=0;c->rig_ok=0;memset(c->seats,255,sizeof c->seats);
+        c->frame=0;c->rig_ok=0;c->layer_ok=0;c->nriders=(uint8_t)B->nriders;
+        memcpy(c->riders,B->riders,(size_t)B->nriders*sizeof(LPRider));memset(c->seats,255,sizeof c->seats);
         if(t) {
             uint32_t at=(uint32_t)(t-M);c->frame=(uint16_t)r16(at+10);
             if(B->cls==2) {
@@ -263,6 +268,7 @@ static void finish(Build *B) {
             if(type<29) {
                 uint32_t at=(uint32_t)(t-M),rec=0x1cced0+(uint32_t)type*200;
                 int cap=(uint16_t)r16(rec+0xa6),kind=M[rec+0xb3],n=0;
+                c->layer_ok=!B->rider_error && (kind==0 || kind==1 || kind==5 || kind==7 || kind==9) && (t[12]==2 || t[12]==4 || t[12]==6) && (uint16_t)r16(at+0x2e)<M[rec+0xa8];
                 uint8_t guests[36];uint32_t pool=r32(THINGS),last=r32(THING_LAST);
                 int next=(uint16_t)r16(at+0x47),valid=1;
                 while(next && n<36) {
@@ -295,29 +301,50 @@ static void finish(Build *B) {
             if(animation==431) c->shape=WM_GROUND; /* lake */
             if(animation==427 || animation==428 || animation==429 || animation==434) c->shape=WM_BOX;
         }
+        const LPLayer*layer=c->layer_ok?lp_find(c->cls,c->type):NULL;
+        if(layer && (!lp_pose(layer,c->frame)||!lp_valid_riders(layer,c->riders,c->nriders)))layer=NULL;
+        if(layer && t){
+            // A fixed authored footprint, never the current animation crop.
+            wx=B->cx+t[6]/256.0+layer->ox;wy=B->cy+t[8]/256.0+layer->oy;
+            c->x=(float)wx;c->y=(float)wy;c->r=fmaxf(layer->hx,layer->hy);c->big=1;
+        }
         s->npix += (uint32_t)(w * h); s->ncards++;
         /* cells the walker cannot enter: rides, shops and scenery (their estimated footprint) */
         if (B->idx < 0 || B->cls == 4 || B->cls == 0x12) {
             double d = B->idx < 0 ? 1 : w / (g->tws + g->shear);
             if (d < 1) d = 1; if (d > 6) d = 6;
-            for (int yy = (int)floor(wy - d / 2 + 0.25); yy <= (int)floor(wy + d / 2 - 0.25); yy++)
-                for (int xx = (int)floor(wx - d / 2 + 0.25); xx <= (int)floor(wx + d / 2 - 0.25); xx++)
+            for (int yy = (int)floor(wy - (layer?layer->hy:d/2) + 0.25); yy <= (int)floor(wy + (layer?layer->hy:d/2) - 0.25); yy++)
+                for (int xx = (int)floor(wx - (layer?layer->hx:d/2) + 0.25); xx <= (int)floor(wx + (layer?layer->hx:d/2) - 0.25); xx++)
                     if (xx >= 0 && xx < MAPE && yy >= 0 && yy < MAPE) s->blocked[yy * MAPN + xx] = 1;
         }
     }
     for (int y = B->y0; y < B->y1; y++) { memset(sa + y * SW_ + B->x0, 0, (size_t)(B->x1 - B->x0)); memset(sb + y * SW_ + B->x0, 0xff, (size_t)(B->x1 - B->x0)); }
-    B->any = 0;
+    B->any = 0;B->nriders=0;B->rider_error=0;B->rider_slot=-1;
 }
 static int parts_log;                                    /* development: TP_WALK_PARTS logs one snapshot's sprites */
 static void card_log(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
     Build *B = ctx; int lo = B->g->lo;
-    if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; return; }
+    if (kind == 6) { finish(B); B->idx = a; B->cls = b; B->colour = 0; B->rider_slot=-1;B->nriders=0;B->rider_error=0;return; }
     if (kind == 5) { B->colour = c; return; }
+    if (kind == 7) { B->rider_slot=a;B->rider_variant=b;return; }
     if (kind == 2) {
         int w = (c & 0xff) >> lo, h = (c >> 8) >> lo, x = (int16_t)a >> lo, y = (int16_t)b >> lo;
         tp_native_draw_sprite(&B->a, M + d, c & 0xff, c >> 8, a, b, e, B->colour);
         tp_native_draw_sprite(&B->b, M + d, c & 0xff, c >> 8, a, b, e, B->colour);
         touch(B, x - 2, y - 2, x + w + 3, y + h + 3);
+        if(B->cls==4 && B->rider_slot>=0 && lp_find(4,(uint16_t)r16(r32(THINGS)+(uint32_t)B->idx*200+22)/200)) {
+            static uint8_t ra[128*128],rb[128*128];
+            if(w<1 || h<1) { /* Native empty rider pose: preserve its absence. */ }
+            else if(B->nriders>=40 || B->rider_slot>=40 || w>128 || h>128 || B->s->npix+(uint32_t)w*h>POOL)B->rider_error=1;
+            else {
+                memset(ra,0,sizeof ra);memset(rb,255,sizeof rb);
+                NDTarget rt={ra,sizeof ra,0,128,128,128,127,lo,M+r32(GHOST_TAB),0};
+                tp_native_draw_sprite(&rt,M+d,c&255,c>>8,0,0,e,B->colour);rt.buf=rb;
+                tp_native_draw_sprite(&rt,M+d,c&255,c>>8,0,0,e,B->colour);
+                LPRider*q=&B->riders[B->nriders++];*q=(LPRider){B->s->npix,(uint16_t)w,(uint16_t)h,(uint8_t)B->rider_slot,(uint8_t)B->rider_variant};
+                for(int yy=0;yy<h;yy++)for(int xx=0;xx<w;xx++)B->s->pix[B->s->npix++]=ra[yy*128+xx]==rb[yy*128+xx]?ra[yy*128+xx]:256;
+            }
+        }
         if (parts_log) fprintf(stderr, "walk part: thing %d cls %d cell %d,%d sprite %d,%d %dx%d at %06x flags %x\n", B->idx, B->cls, B->cx, B->cy, x - OXS, y - OYS, w, h, d, e);
         B->colour = 0; return;
     }
@@ -546,6 +573,7 @@ int tp_walk_start(double wx, double wy) {
     W.mesh = !getenv("TP_WALK_MESH") || atoi(getenv("TP_WALK_MESH")) != 0;
     wm_models_reset();
     rm_reset();
+    lp_load();
     W.hscale = getenv("TP_WALK_SCALE") ? atof(getenv("TP_WALK_SCALE")) : 1; if (W.hscale < 0.25 || W.hscale > 4) W.hscale = 1;
     snaps[0].valid = snaps[1].valid = 0; last_snap = 0;     /* (front stays: the emulation thread may be swapping) */
     pthread_mutex_unlock(&lock);
@@ -810,7 +838,7 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
         WMRender mr={.pixels=out,.depth=depth,.w=ow,.h=oh,.cx=cx,.cy=cy,.cz=cz,
             .fx=fx,.fy=fy,.fz=fz,.rx=rx,.ry=ry,.ux=ux,.uy=uy,.uz=uz,.focal=f,.palette=s->pal};
         float kx=(float)(W.hscale/g->tws),ky=(float)(W.hscale*g->aspect/g->tws);
-        int hide=W.mode==MODE_STREET ? W.follow:0, rendered=0, rigs_drawn=0;
+        int hide=W.mode==MODE_STREET ? W.follow:0, rendered=0, rigs_drawn=0, layers_drawn=0;
         double began=now();
         for (int i=0;i<s->ncards;i++) {
             const Card *c=&s->cards[i]; if (hide && c->idx==hide) continue;
@@ -820,6 +848,13 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
             mr.texture=s->pix+c->off; mr.tw=c->w; mr.th=c->h;
             const char *art=getenv("TP_ART_MODE");int reimagined=art && !strcmp(art,"reimagined");
             int original=art && !strcmp(art,"original");
+            const LPLayer *layer_asset=(!reimagined&&!original)?lp_find(c->cls,c->type):NULL;
+            const LPLayer *layer=c->layer_ok?layer_asset:NULL;
+            const LPPose *layer_pose=layer?lp_pose(layer,c->frame):NULL;
+            if(layer_pose && lp_valid_riders(layer,c->riders,c->nriders)) {
+                lp_draw(&mr,layer,layer_pose,c->x,c->y,(float)W.hscale,c->riders,c->nriders,s->pix,kx,ky);
+                layers_drawn++;rendered++;continue;
+            }
             const RMRig *rig=reimagined && c->rig_ok ? rm_find(c->cls,c->type):NULL;
             const RMPose *pose=rig?rm_pose(rig,c->frame):NULL;
             if(pose) {
@@ -838,11 +873,11 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                     rendered++;continue;
                 }
             }
-            const WMModel *model=(reimagined||original)?NULL:wm_model_find(c->cls,c->type);
+            const WMModel *model=(reimagined||original||layer_asset)?NULL:wm_model_find(c->cls,c->type);
             if(model && wm_model_draw(&mr,model,c->x,c->y,(float)W.hscale)) {
                 rendered++;continue;
             }
-            if(reimagined || original || !getenv("TP_WALK_SHELL_STUDY")) {
+            if(reimagined || original || layer_asset || !getenv("TP_WALK_SHELL_STUDY")) {
                 /* Unmodeled assets retain their original presentation. A
                  * failed generic reconstruction is not a substitute model. */
                 WMShell card={.x=c->x,.y=c->y,.kx=kx,.ky=ky,.ax=c->ax,.ay=c->ay,
@@ -869,8 +904,8 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
         }
         if (getenv("TP_WALK_MESH_LOG")) {
             static double last; if (now()-last>1) { last=now();
-                fprintf(stderr,"pixel mesh: %d objects (%d Reimagined rigs), %u triangles, %u fragments, %.2f ms, %dx%d\n",
-                    rendered,rigs_drawn,mr.triangles,mr.fragments,(now()-began)*1000,ow,oh); }
+                fprintf(stderr,"pixel mesh: %d objects (%d Reimagined rigs, %d Faithful layers), %u triangles, %u fragments, %.2f ms, %dx%d\n",
+                    rendered,rigs_drawn,layers_drawn,mr.triangles,mr.fragments,(now()-began)*1000,ow,oh); }
         }
         pthread_mutex_unlock(&lock); return 1;
     }

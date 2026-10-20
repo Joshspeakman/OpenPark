@@ -5,6 +5,45 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-19, Faithful layered ride runtime (Codex,
+`codex/faithful-layered-rides`): the user rejected the floating flat overlay and
+requested a detailed, animated approach that works in the game. New bounded
+`TPLAYER1` assets carry a source-palette texture, textured articulated surfaces,
+native frame keys, rider foot transforms and a fixed footprint. Visitor View
+captures each rider's actual substituted sprite independently through marked
+native blits. The complete original composite remains available for fallback.
+The cache is immutable after the first walk start to protect snapshot/render
+readers; asset changes require a process restart.
+
+The Bouncy Castle now has 2,720 triangles, ten articulated groups and eleven
+source poses: grounded base/entry steps, ribbed bounce bed, separate walls and
+crenellations, four faceted towers, plus four separately positioned riders.
+The source frame controls all motion. Rider jump offsets use original foot
+markers; structural squash is an authored interpretation. Original palette
+texels supply surfaces; guests retain their original pixel sprites and walking
+scale. They are still camera-facing cutouts, not full 3D guest rigs. Hidden
+geometry and footprint dimensions are authored; this is one ride prototype.
+
+Review: `work/faithful-layered/index.html`. Evidence: 400 strict sanitized motion
+renders across five cameras and a 24-angle occupied orbit; every original
+composite matches the previous export byte for byte. All eleven poses touch
+z=0 and fit their fixed collision footprint, with identical world anchors across
+all 80 captured states. Four independent riders appear in every occupied bounce
+sample. Synthetic layered tests, existing mesh/model/rig tests, both walk modes
+and all 17,808 view checks pass. A final 51-second native game run captures 140
+sequence PNGs across frontal and quarter views; every logged render contains one
+Faithful layered ride. The moving floor has closed skirts and rider foot points
+follow its local height to preserve contact as it deforms.
+
+Installed **OpenPark Faithful Layered Study.app**, separate identity
+`com.joshspeakman.openpark.faithfullayeredstudy` and `work/faithful-layered/profile`.
+Build/signature checks pass. Direct headed launch still aborts during AppKit
+application registration before a window; Launch Services also fails with
+`kLSNoExecutableErr` despite the installed executable/signature being present.
+No headed pass is claimed. User's Nightly checkout and prior study installs are
+untouched. Architecture, measurements and remaining work:
+`docs/reports/2026-10-19-faithful-layered-rides.md`.
+
 2026-10-19, occupied Bouncy Castle motion review (Codex,
 `codex/faithful-geometry-detail`): the user requested a ride with its occupied
 animation. A bounded, muted 43-second native run captured 80 thing-array

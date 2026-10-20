@@ -14,12 +14,16 @@ if [[ ${1:-} == --reimagined ]]; then
   NAME="OpenPark Reimagined Study"
   ID="com.joshspeakman.openpark.reimaginedstudy"
   MODE="reimagined"
+elif [[ ${1:-} == --faithful-layered ]]; then
+  DATA="$ROOT/work/faithful-layered/profile"
+  NAME="OpenPark Faithful Layered Study"
+  ID="com.joshspeakman.openpark.faithfullayeredstudy"
 elif [[ ${1:-} == --faithful-detail ]]; then
   DATA="$ROOT/work/faithful-detail/profile"
   NAME="OpenPark Faithful Detail Study"
   ID="com.joshspeakman.openpark.faithfuldetailstudy"
 elif [[ $# != 0 ]]; then
-  echo 'usage: build_visitor_study.sh [--reimagined|--faithful-detail]' >&2; exit 2
+  echo 'usage: build_visitor_study.sh [--reimagined|--faithful-detail|--faithful-layered]' >&2; exit 2
 fi
 APP="$ROOT/build/visitor-study/$NAME.app"
 DEST="$HOME/Applications/$NAME.app"

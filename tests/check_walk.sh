@@ -22,3 +22,6 @@ build/walk_model_test
 "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation -fsanitize=address,undefined \
   tests/walk_rig_test.c -lm -o build/walk_rig_test
 build/walk_rig_test
+"$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation -fsanitize=address,undefined \
+  tests/walk_layer_test.c -lm -o build/walk_layer_test
+build/walk_layer_test
