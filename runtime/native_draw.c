@@ -21,17 +21,18 @@
  * clip window); only writes outside the whole buffer are dropped. */
 #include <stdint.h>
 #include <stddef.h>
+#include <math.h>
 #include "remaster_art_impl.h"
 
-typedef struct {
-    uint8_t *buf; size_t size;                  /* the screen buffer the game draws into */
-    long base; long pitch;                      /* the clip window's origin in it, and the row pitch */
-    int clip_w, clip_h, clip_r, lowres;         /* [0x1de5c8], [0x1de5f0], [0x1de5ec], [0x1de5f6] & 1 */
-    const uint8_t *ghost;                       /* 256x256 table ([0x1ba2f8]), or NULL */
-    long unsupported;
-} NDTarget;
+#include "native_draw.h"
 
-static inline void put(NDTarget *t, long off, uint8_t v) { if (off >= 0 && (size_t)off < t->size) t->buf[off] = v; }
+static inline void put(NDTarget *t, long off, uint8_t v) {
+    if (off >= 0 && (size_t)off < t->size) {
+        t->buf[off] = v;
+        if(t->paint && t->pitch>0)
+            tp_remaster_paint_index(t->paint,(int)(off%t->pitch),(int)(off/t->pitch),v);
+    }
+}
 static inline uint8_t get(NDTarget *t, long off) { return off >= 0 && (size_t)off < t->size ? t->buf[off] : 0; }
 
 /* Skip n rows of RLE data. */
@@ -173,10 +174,10 @@ void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, i
 /* World-only replacement path. UI and Original mode retain the exact legacy
  * blitter above. Expanded artwork uses the original rectangle as its pivot,
  * so adding transparent margins cannot move a mirrored actor. */
-void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
-                                int w,int h,int x,int y,int flags,int colour,int bounds[4]) {
-    TPRemasterImage image;
-    int replaced=tp_remaster_resolve(memory,source,w,h,t->lowres,&image);
+static void draw_world_indexed(NDTarget *t,const uint8_t *memory,uint32_t source,
+                                int w,int h,int x,int y,int flags,int colour,int bounds[4],const TPRemasterImage *replacement) {
+    TPRemasterImage image=replacement?*replacement:(TPRemasterImage){0};
+    int replaced=replacement!=NULL;
     int sx=x>>t->lowres,sy=y>>t->lowres;
     int sw=(w&255)>>t->lowres,sh=(h&255)>>t->lowres;
     if(!replaced || !image.pixels) {
@@ -209,6 +210,86 @@ void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t sour
     }
 }
 
+/* Draw the full-colour part at the same point in the native command stream.
+ * The indexed preview still drives hit tests and interface extraction. */
+void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
+                                int w,int h,int x,int y,int flags,int colour,int bounds[4]) {
+    TPRemasterPaint *paint=t->paint;
+    TPRemasterImage im;
+    int replaced=tp_remaster_resolve(memory,source,w,h,t->lowres,&im);
+    if(paint && replaced && im.rgba) {
+        if(t->pitch<=0 || t->base<0)paint->failed=1;
+        else {
+            TPRemasterPaint clipped=*paint;
+            int bx=(int)(t->base%t->pitch),by=(int)(t->base/t->pitch);
+            int left=paint->origin_x+bx*paint->density,top=paint->origin_y+by*paint->density;
+            int right=left+(t->clip_w<t->clip_r+1?t->clip_w:t->clip_r+1)*paint->density;
+            int bottom=top+t->clip_h*paint->density;
+            if(clipped.target.x0<left)clipped.target.x0=left;
+            if(clipped.target.y0<top)clipped.target.y0=top;
+            if(clipped.target.x1>right)clipped.target.x1=right;
+            if(clipped.target.y1>bottom)clipped.target.y1=bottom;
+            tp_remaster_paint_image(&clipped,&im,bx+(x>>t->lowres),by+(y>>t->lowres),flags,(uint8_t)colour);
+            paint->failed|=clipped.failed;
+        }
+        t->paint=NULL;                         /* preview must not cover fine texels */
+    }
+    draw_world_indexed(t,memory,source,w,h,x,y,flags,colour,bounds,replaced?&im:NULL);
+    t->paint=paint;
+}
+
+/* This operates in output pixels, independently of the indexed bookkeeping
+ * image. The native source rectangle remains the flip pivot at every scale. */
+int tp_remaster_blit_rgba(const TPRemasterImage *im, TPRemasterTarget *t,
+                         double x,double y,double sx,double sy,int flags,uint32_t colour) {
+    if(!im || !t || !im->rgba || !t->pixels || im->width<1 || im->height<1 ||
+       im->width>2048 || im->height>2048 || im->source_width<1 || im->source_height<1 ||
+       im->source_width>255 || im->source_height>255 ||
+       im->dx < -2048 || im->dx > 2048 || im->dy < -2048 || im->dy > 2048 ||
+       im->texture_width<1 || im->texture_height<1 || im->texture_width>2048 || im->texture_height>2048 ||
+       t->width<1 || t->height<1 || t->width>16384 || t->height>16384 ||
+       t->stride<(size_t)t->width || t->stride>SIZE_MAX/(sizeof(uint32_t)*(size_t)t->height) ||
+       !isfinite(x) || !isfinite(y) || !isfinite(sx) || !isfinite(sy) || sx<=0 || sy<=0 || sx>256 || sy>256)return 0;
+    int mirror=flags&1,flip=flags&2,ghost=0,solid=0;
+    if(!mirror && !flip){
+        if(flags&4)ghost=1;
+        else if(flags&0x28)return 0;
+        else if(flags&0x40)solid=1;
+    }
+    double left=x+(mirror?im->source_width-im->dx-im->width+1:im->dx)*sx;
+    double top=y+(flip?im->source_height-im->dy-im->height+1:im->dy)*sy;
+    double right=left+im->width*sx,bottom=top+im->height*sy;
+    if(!isfinite(left)||!isfinite(top)||!isfinite(right)||!isfinite(bottom))return 0;
+    int cx0=t->x0>0?t->x0:0,cy0=t->y0>0?t->y0:0;
+    int cx1=t->x1<t->width?t->x1:t->width,cy1=t->y1<t->height?t->y1:t->height;
+    if(cx0>=cx1 || cy0>=cy1 || right<=cx0+.5 || bottom<=cy0+.5 || left>cx1-.5 || top>cy1-.5)return 1;
+    /* Clamp floating bounds before conversion, including far-offscreen draws. */
+    int x0=(int)ceil(fmax(cx0,left-.5)),x1=(int)ceil(fmin(cx1,right-.5));
+    int y0=(int)ceil(fmax(cy0,top-.5)),y1=(int)ceil(fmin(cy1,bottom-.5));
+    for(int yy=y0;yy<y1;yy++){
+        int v=(int)floor((yy+.5-top)/(bottom-top)*im->texture_height);
+        if(v<0 || v>=im->texture_height)continue;
+        if(flip)v=im->texture_height-1-v;
+        for(int xx=x0;xx<x1;xx++){
+        int u=(int)floor((xx+.5-left)/(right-left)*im->texture_width);
+        if(u<0 || u>=im->texture_width)continue;
+        if(mirror)u=im->texture_width-1-u;
+        uint32_t pixel=im->rgba[(size_t)v*im->texture_width+u];if((pixel>>24)<128)continue;
+        size_t at=(size_t)yy*t->stride+xx;
+        if(solid)pixel=colour;
+        else if(ghost){
+            uint32_t old=t->pixels[at];
+            unsigned r=((pixel&255)+(old&255))/2;
+            unsigned g=(((pixel>>8)&255)+((old>>8)&255))/2;
+            unsigned b=(((pixel>>16)&255)+((old>>16)&255))/2;
+            pixel=r|(g<<8)|(b<<16);
+        }
+        t->pixels[at]=pixel|0xff000000u;
+        }
+    }
+    return 1;
+}
+
 /* The small font (0x180e88 at 320x200, 0x180f34 at 640x480): glyphs of 6 rows of 3 pixels
  * from 6 bytes each at 0x1ba2fc + 6 * (c - 0x20), each row byte one of 8 patterns, written
  * in one colour straight into the screen (the screen's own origin, not the clip window's;
@@ -230,3 +311,29 @@ void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, co
     }
 }
 const uint8_t *tp_native_text;                  /* the string of the last small-font call (native_land.c) */
+
+void tp_remaster_paint_index(TPRemasterPaint *p,int x,int y,unsigned pixel) {
+    if(!p)return;
+    TPRemasterTarget *t=&p->target;
+    if(!t->pixels || !p->palette || p->density<1 || p->density>8 || pixel>255 ||
+       t->width<1 || t->height<1 || t->stride<(size_t)t->width ||
+       t->stride>SIZE_MAX/(sizeof(uint32_t)*(size_t)t->height)){p->failed=1;return;}
+    int64_t left=(int64_t)p->origin_x+(int64_t)x*p->density;
+    int64_t top=(int64_t)p->origin_y+(int64_t)y*p->density;
+    int64_t right=left+p->density,bottom=top+p->density;
+    int x0=t->x0>0?t->x0:0,y0=t->y0>0?t->y0:0;
+    int x1=t->x1<t->width?t->x1:t->width,y1=t->y1<t->height?t->y1:t->height;
+    if(left>x0){if(left>=x1)return;x0=(int)left;}
+    if(top>y0){if(top>=y1)return;y0=(int)top;}
+    if(right<x1){if(right<=x0)return;x1=(int)right;}
+    if(bottom<y1){if(bottom<=y0)return;y1=(int)bottom;}
+    uint32_t c=p->palette[pixel];
+    for(int yy=y0;yy<y1;yy++)for(int xx=x0;xx<x1;xx++)t->pixels[(size_t)yy*t->stride+xx]=c;
+}
+int tp_remaster_paint_image(TPRemasterPaint *p,const TPRemasterImage *im,int x,int y,int flags,unsigned colour) {
+    if(!p || !im || !im->rgba)return 0;
+    if(!p->palette || p->density<1 || p->density>8 || colour>255 ||
+       !tp_remaster_blit_rgba(im,&p->target,(double)p->origin_x+(double)x*p->density,
+         (double)p->origin_y+(double)y*p->density,p->density,p->density,flags,p->palette[colour]))p->failed=1;
+    return 1;
+}

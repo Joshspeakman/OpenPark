@@ -41,7 +41,7 @@ static const uint8_t *M;
 static uint32_t r32(uint32_t a) { uint32_t v; memcpy(&v, M + a, 4); return v; }
 static int16_t r16(uint32_t a) { int16_t v; memcpy(&v, M + a, 2); return v; }
 
-typedef struct { uint8_t *buf; int pitch, w, h; int lowres; int wx0, wy0, wx1, wy1; } Target;   /* w*: the part wanted (others may be left) */
+typedef struct { uint8_t *buf; int pitch, w, h; int lowres; int wx0, wy0, wx1, wy1; TPRemasterPaint *paint; } Target;   /* w*: the part wanted (others may be left) */
 
 static int unsupported;                             /* blitter variants met that are not native yet */
 
@@ -55,6 +55,7 @@ static void blit(const Target *t, uint32_t entry, int x, int y, int flags) {
     TPRemasterImage image;
     int replaced=tp_remaster_resolve(M,data,w,h,t->lowres,&image);
     if (t->lowres) { w >>= 1; h >>= 1; x >>= 1; y >>= 1; }
+    int painted=t->paint && replaced && tp_remaster_paint_image(t->paint,&image,x,y,flags,0);
     if(replaced && image.pixels) {
         int left=x+((flags&1)?w-image.dx-image.width+1:image.dx);
         int top=y+((flags&2)?h-image.dy-image.height+1:image.dy);
@@ -66,7 +67,8 @@ static void blit(const Target *t, uint32_t entry, int x, int y, int flags) {
             int u=xx-left,v=yy-top;
             if(flags&1)u=image.width-1-u;if(flags&2)v=image.height-1-v;
             unsigned pixel=image.pixels[(size_t)v*image.width+u];
-            if(pixel<256)t->buf[yy*t->pitch+xx]=(uint8_t)pixel;
+            if(pixel<256){t->buf[yy*t->pitch+xx]=(uint8_t)pixel;
+                if(t->paint && !painted)tp_remaster_paint_index(t->paint,xx,yy,pixel);}
         }
         return;
     }
@@ -81,7 +83,8 @@ static void blit(const Target *t, uint32_t entry, int x, int y, int flags) {
             if (n == 0) break;
             if (n < 0) { px -= n * dx; continue; }
             if (py >= 0 && py < t->h)
-                for (int k = 0; k < n; k++) { int xx = px + dx * k; if (xx >= 0 && xx < t->w) t->buf[py * t->pitch + xx] = s[k]; }
+                for (int k = 0; k < n; k++) { int xx = px + dx * k; if (xx >= 0 && xx < t->w) {t->buf[py * t->pitch + xx] = s[k];
+                    if(t->paint)tp_remaster_paint_index(t->paint,xx,py,s[k]);} }
             s += n; px += n * dx;
         }
     }
@@ -107,11 +110,12 @@ int tp_native_landscape_part(const uint8_t *mem, int cx0, int cy0, int rows, uin
 int tp_native_landscape(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t *buf, int pitch, int w, int h) {
     return tp_native_landscape_part(mem, cx0, cy0, rows, buf, pitch, w, h, 0, 0, w, h);
 }
-/* The same, exact only in the part (wx0, wy0)..(wx1, wy1): sprites wholly outside it are skipped. */
-int tp_native_landscape_part(const uint8_t *mem, int cx0, int cy0, int rows, uint8_t *buf, int pitch, int w, int h,
-                             int wx0, int wy0, int wx1, int wy1) {
+/* Ordered full-colour companion for the normal view; the original entry
+ * points below use NULL and retain byte-for-byte indexed drawing. */
+int tp_native_landscape_paint(const uint8_t *mem,int cx0,int cy0,int rows,uint8_t *buf,int pitch,int w,int h,
+                             int wx0,int wy0,int wx1,int wy1,TPRemasterPaint *paint) {
     M = mem;
-    Target t = {buf, pitch, w, h, r16(SCREEN_MODE) & 1, wx0, wy0, wx1, wy1};
+    Target t = {buf, pitch, w, h, r16(SCREEN_MODE) & 1, wx0, wy0, wx1, wy1, paint};
     int tw = (uint16_t)r16(TILE_W), th = (uint16_t)r16(TILE_H), off = r16(VIEW_OFF);
     uint32_t map = r32(MAP_PTR), table = r32(BLOCK_TABLE);
     if (!tw || !th) return -1;
@@ -152,6 +156,11 @@ int tp_native_landscape_part(const uint8_t *mem, int cx0, int cy0, int rows, uin
         }
     }
     return skipped + unsupported;
+}
+
+int tp_native_landscape_part(const uint8_t *mem,int cx0,int cy0,int rows,uint8_t *buf,int pitch,int w,int h,
+                             int wx0,int wy0,int wx1,int wy1) {
+    return tp_native_landscape_paint(mem,cx0,cy0,rows,buf,pitch,w,h,wx0,wy0,wx1,wy1,NULL);
 }
 
 int tp_native_blit_flags(const uint8_t *mem) { M = mem; return (uint16_t)r16(BLIT_FLAGS); }

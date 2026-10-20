@@ -42,6 +42,7 @@
 #include <time.h>
 #include "platform.h"                               /* (timing, real-time thread, parallel bands: platform/<os>/) */
 #include "remaster_art.h"
+#include "remaster_surface.h"
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -189,6 +190,10 @@ typedef struct { double fx, fy; uint32_t buttons; } Ev;
 static Ev evq[256]; static int evn;
 static int restore, restore_cx, restore_cy;       /* camera for the game's own view after zooming */
 static uint8_t pub_canvas[MAX_CANVAS];
+static TPRemasterSurface hd_work,hd_pub;
+static uint32_t hd_palette[256];
+static int hd_rendering,hd_pending,hd_failed;
+
 static uint16_t pub_overlay[MAX_SCREEN], prev_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
 /* Panel size: see band_map. */
 static volatile double ui_scale = 1;
@@ -333,11 +338,7 @@ static void addlog(LogE *l, int *n, int kind, int a, int b, int c, uint32_t d, i
 /* Pixel check of the native things layer: the screen as the things loop starts (0x11be5a)
  * and ends (0x11c01a), and the clip window it draws in. */
 static uint8_t snap0[MAX_SCREEN + 65536], snap1[MAX_SCREEN + 65536]; static size_t snap_n; static int snapped;
-typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
-void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
-void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
-                                int w,int h,int x,int y,int flags,int colour,int bounds[4]);
-void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, const uint8_t *str, int colour);
+#include "native_draw.h"
 extern const uint8_t *tp_native_text;
 static NDTarget snap_t;
 static struct { int ok, mode; long base, pitch; int clip_w, clip_h, clip_r; } clipinfo;   /* the things' clip window */
@@ -450,6 +451,16 @@ static void things_check(int cx, int cy, int rows) {
         fprintf(stderr, "\n");
     }
 }
+int tp_native_landscape_paint(const uint8_t *,int,int,int,uint8_t *,int,int,int,int,int,int,int,TPRemasterPaint *);
+static TPRemasterPaint hd_pass_paint(int cx,int cy) {
+    TPRemasterPaint p=tp_remaster_surface_paint(&hd_work,hd_palette,cam_ox(cx,cy),cam_oy(cy));
+    int d=p.density;
+    int x0=p.origin_x+TX0*d,y0=p.origin_y+PT*d;
+    int x1=p.origin_x+TX1*d,y1=p.origin_y+PB*d;
+    if(p.target.x0<x0)p.target.x0=x0;if(p.target.y0<y0)p.target.y0=y0;
+    if(p.target.x1>x1)p.target.x1=x1;if(p.target.y1>y1)p.target.y1=y1;
+    return p;
+}
 /* Native passes (stage 3b): the landscape (native_land.c), copied to the screen, the things
  * drawn over it (native_land.c's call list through native_draw.c), in the clip window the
  * game's pass would use. Anything not native yet makes the pass the game's again. */
@@ -480,7 +491,14 @@ static int native_pass(int cx, int cy, int rows) {
     int th = (uint16_t)r16(TILE_H); if (th <= 0) th = 32;
     int rows_t = (PH * (G.s == 1 ? 2 : 1) + th - 1) / th + 3; if (rows_t > rows) rows = rows_t;   /* (rows in 640-space units) */
     double tq0 = now();
-    if (tp_native_landscape_part(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, PH, TX0, PT, TX1, PB) != 0) return -1;
+    TPRemasterPaint paint={0},*paint_ptr=NULL;
+    if(hd_rendering && !hd_failed){
+        paint=hd_pass_paint(cx,cy);paint_ptr=&paint;
+        /* Match the indexed pass's retained map-edge pixels before its draws. */
+        for(int y=PT;y<PB;y++)for(int x=TX0;x<TX1;x++)
+            tp_remaster_paint_index(&paint,x,y,np_cache[(size_t)y*clipinfo.pitch+x]);
+    }
+    if (tp_native_landscape_paint(M, cx, cy, rows, np_cache, (int)clipinfo.pitch, clipinfo.clip_w, PH, TX0, PT, TX1, PB,paint_ptr) != 0) return -1;
     /* (only TX0..TX1 x PT..PB of a pass is used: the rest of its landscape is left out, ~3x faster) */
     double tq1 = now();
     memcpy(np_out, np_cache, nt);
@@ -488,7 +506,9 @@ static int native_pass(int cx, int cy, int rows) {
       tp_native_stable_rng = mode == 1 && !getenv("TP_NATIVE_THINGS"); }   /* (checks compare with the game: its sequence) */
     NPState st = {{np_out, nt, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, PH, clipinfo.clip_r,
                    M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0}, 0, 0};
+    st.t.paint=paint_ptr;
     tp_native_things(M, cx, cy, rows, np_draw, &st);
+    if(paint.failed)hd_failed=1;
     if (getenv("TP_VIEW_PROF")) { static double tl, tt, last; static long np; double tq2 = now(); tl += tq1 - tq0; tt += tq2 - tq1; np++;
         if (tq2 - last > 2) { last = tq2; fprintf(stderr, "view prof: %ld passes, landscape %.3f ms, things %.3f ms a pass\n", np, tl / np * 1e3, tt / np * 1e3); tl = tt = 0; np = 0; } }
     return st.fail || st.t.unsupported ? -1 : 0;
@@ -555,6 +575,7 @@ static int pass(int cx, int cy) {
 }
 static void blit_to_canvas(int cx, int cy, int x0, int x1, int y0, int y1) {
     const uint8_t *src = pass_src ? pass_src : M + r32(DISP_BUF);
+    if(hd_rendering && pass_src!=np_out)hd_failed=1;
     int bx = cam_ox(cx, cy), by = cam_oy(cy);
     for (int y = y0; y < y1; y++) {
         int cy2 = by + y; if (cy2 < 0 || cy2 >= CH) continue;
@@ -688,6 +709,14 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
     int nosave = getenv("TP_VIEW_NOSAVE") != NULL, nopass = getenv("TP_VIEW_NOPASS") != NULL;
     if (getenv("TP_VIEW_DEBUG")) { static double l; static int c; c++; if (now() - l > 1) { fprintf(stderr, "view: %d frames/s\n", c); c = 0; l = now(); } }
     if (nopass) { if (getenv("TP_VIEW_SAVEONLY")) { find_regions(); state_save(); state_restore(); } tp_insns = insns; tp_rep = reps; return; }
+    hd_pending=0;hd_failed=0;
+    hd_rendering=tp_remaster_has_rgba() && tp_remaster_surface_prepare(&hd_work,vx,vy,vw,vh,CW,CH);
+    if(hd_rendering){
+        tp_host_palette_rgba(hd_palette);
+        TPRemasterPaint p=tp_remaster_surface_paint(&hd_work,hd_palette,0,0);
+        for(int y=hd_work.y;y<hd_work.y+hd_work.h;y++)for(int x=hd_work.x;x<hd_work.x+hd_work.w;x++)
+            tp_remaster_paint_index(&p,x,y,canvas[(size_t)y*CW+x]);
+    }
     /* The landscape cache too (passes redraw it for their cameras): put back as it was, with
      * its dirty flag, so the game's frame does not redraw its landscape (that costs game time). */
     static uint8_t cache_keep[MAX_SCREEN]; uint32_t cache = r32(LAND_CACHE); size_t cache_n = (size_t)SW * SH;
@@ -703,6 +732,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         Pass *p = &grid[k];
         if (drawn[k] || p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
         if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
+        else if(hd_rendering)hd_failed=1;
         pass_src = NULL; drawn[k] = 1;
     }
     rr_done = 0;
@@ -711,6 +741,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue;
         (void)rx0; (void)rx1; (void)ry0; (void)ry1;      /* (passes cover the real view too: its frame is trusted only in a band) */
         if (pass(p->cx, p->cy) == 0) blit_to_canvas(p->cx, p->cy, TX0, TX1, PT, pass_src == np_out ? PB : (PB < WORLD_H ? PB : WORLD_H));
+        else if(hd_rendering)hd_failed=1;
         pass_src = NULL; drawn[(start + k) % ngrid] = 1; rr_done++;   /* (other copies are of the real frame) */
         rr = (start + k + 1) % ngrid;
         (void)budget;   /* every visible pass, every frame: a pass left for a later frame shows that area from another
@@ -721,6 +752,7 @@ static void render_visible(double vx, double vy, double vw, double vh, int all) 
         for (int k = 0; k < ngrid; k++) { Pass *p = &grid[k]; if (p->x1 < vx - 8 || p->x0 > vx + vw + 8 || p->y1 < vy - 8 || p->y0 > vy + vh + 8) continue; vis++; }
         done = rr_done; fr++; vis_total += vis; done_total += done; if (done < vis) partial++;
         if (now() - l > 1) { l = now(); fprintf(stderr, "view: %ld frames, %ld partial (visible passes %.1f, refreshed %.1f a frame)\n", fr, partial, (double)vis_total / fr, (double)done_total / fr); fr = partial = vis_total = done_total = 0; } }
+    hd_pending=1;hd_work.valid=hd_rendering && !hd_failed;hd_rendering=0;
     tp_insns = insns; tp_rep = reps; edge_fresh = 1; st_pass += now() - t0;
     if (state_saved) state_restore();                         /* (the dirty flag is among the globals) */
     lazy_save = 0;
@@ -894,7 +926,8 @@ void tp_view_hook(void) {
     if (sc != G.s || geo_ext != tp_map_ext) {             /* the game changed its screen mode ([R]) or the park size: start again */
         G = geo(sc); ngrid = 0; memset(canvas, 0, (size_t)CW * CH);
         have_world = have_pre_extras = pre_ok = 0; in_frame = 0;
-        pthread_mutex_lock(&lock); pub_time = 0; pub_cur_ok = 0; pthread_mutex_unlock(&lock);
+        hd_work.valid=0;hd_pending=0;hd_rendering=0;
+        pthread_mutex_lock(&lock); pub_time = 0; pub_cur_ok = 0; hd_pub.valid=0; pthread_mutex_unlock(&lock);
         if (active) { active = 0; hooks(0); }
         return;
     }
@@ -1046,7 +1079,13 @@ void tp_view_hook(void) {
                 for (int r = 0; hud_rect(r, hr); r++) if (x >= hr[0] && x < hr[2] && y >= hr[1] && y < hr[3]) furniture = 1;
                 if (furniture) continue;
                 world_only[i] = bb[i]; n++;
-                int X = bx + x, Y = by + y; if (X >= 0 && Y >= 0 && X < CW && Y < CH) canvas[(size_t)Y * CW + X] = bb[i];
+                int X = bx + x, Y = by + y; if (X >= 0 && Y >= 0 && X < CW && Y < CH) {
+                    canvas[(size_t)Y * CW + X] = bb[i];
+                    if(hd_pending && hd_work.valid){
+                        TPRemasterPaint p=tp_remaster_surface_paint(&hd_work,hd_palette,0,0);
+                        tp_remaster_paint_index(&p,X,Y,bb[i]);
+                    }
+                }
                 if (sentinel_on) M[r32(DISP_BUF) + i] = SENTINEL;   /* (park: marked again; the marker is not lifted around it) */
             }
             tool_shown = n > 0;
@@ -1290,6 +1329,8 @@ void tp_view_hook(void) {
             for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] != 0xffff) { n++; int x = i % SW, y = i / SW; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             fprintf(stderr, "view overlay: %d px, %d,%d..%d,%d\n", n, x0, y0, x1, y1); } }
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
+        if(hd_pending){TPRemasterSurface old=hd_pub;hd_pub=hd_work;hd_work=old;hd_pending=0;}
+        else if(!tp_remaster_has_rgba())hd_pub.valid=0;
         memcpy(pub_panel + (size_t)SW * WORLD_H, bb + (size_t)SW * WORLD_H, (size_t)SW * (SH - WORLD_H));
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
@@ -1580,6 +1621,13 @@ void tp_view_count_game_frames(int on) { fps_game_hook = on; if (on) { tp_hook_p
 typedef struct { uint32_t *out; int ow, oh, smooth; Geo g; double z, vx, vy, lw, col, lpx, lpy, sx, sy; int ss; const uint32_t *pal; size_t stride; double k; } ComposeJob;
 static size_t compose_stride;                           /* pixels per output row (0: the width) */
 void tp_view_compose_stride(size_t px) { compose_stride = px; }
+static uint32_t compose_world_sample(double x,double y,const Geo *g,const uint32_t *pal) {
+    uint32_t c;
+    if(tp_remaster_surface_sample(&hd_pub,x,y,&c))
+        return tp_view_out_bgra?(c&0xff00ff00u)|((c&255)<<16)|((c>>16)&255):c;
+    int ix=(int)floor(x),iy=(int)floor(y);
+    return ix>=0 && iy>=0 && ix<g->cw && iy<g->ch?pal[pub_canvas[(size_t)iy*g->cw+ix]]:0xff000000u;
+}
 static void compose_band(void *ctx, size_t band) {
     const ComposeJob *j = ctx;
     uint32_t *out = j->out; int ow = j->ow, oh = j->oh, smooth = j->smooth, ss = j->ss; Geo g = j->g;
@@ -1618,17 +1666,16 @@ static void compose_band(void *ctx, size_t band) {
             }
             double px = vx + lx / z;
             if (ss == 1 && !smooth) {
-                int cx = (int)floor(px), cy = (int)floor(py);
-                o[x] = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
+                o[x] = compose_world_sample(px,py,&g,pal);
                 continue;
             }
             /* 2x2 samples: an average when minifying, bilinear-ish when smooth */
             uint32_t r = 0, gg = 0, b = 0;
             for (int k = 0; k < 4; k++) {
-                double qx = ss == 2 ? px + ((k & 1) - 0.5) * sx * 0.5 : px - 0.5 + (k & 1);
-                double qy = ss == 2 ? py + ((k >> 1) - 0.5) * sy * 0.5 : py - 0.5 + (k >> 1);
-                int cx = (int)floor(qx), cy = (int)floor(qy);
-                uint32_t c = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
+                double texel=hd_pub.valid?1.0/hd_pub.density:1.0;
+                double qx = ss == 2 ? px + ((k & 1) - 0.5) * sx * 0.5 : px + ((k & 1)-0.5)*texel;
+                double qy = ss == 2 ? py + ((k >> 1) - 0.5) * sy * 0.5 : py + ((k >> 1)-0.5)*texel;
+                uint32_t c = compose_world_sample(qx,qy,&g,pal);
                 r += c & 255; gg += (c >> 8) & 255; b += (c >> 16) & 255;
             }
             o[x] = 0xff000000u | ((b / 4) << 16) | ((gg / 4) << 8) | (r / 4);

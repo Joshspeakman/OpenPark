@@ -6,7 +6,12 @@
  * TPRART02 adds {i16 dx,dy; u16 draw_w,draw_h} after each record's source
  * metadata, followed by draw_w*draw_h indexed pixels. Expanded bounds never
  * change the source binding or its mirror/flip pivot.
- * Both formats retain the native palette. V1 keeps legacy clipping; V2 uses
+ * TPRART03 retains the V2 indexed preview, and adds {u16 scale,u16 reserved=0}
+ * immediately after the bounds and, after the preview, draw_w*scale by
+ * draw_h*scale RGBA texels. Scale is 1..8, texture sides at most 2048.
+ * Indexed previews retain the native low-resolution/UI extraction path;
+ * the full-colour plane is for ordered high-resolution world composition.
+ * V1 keeps legacy clipping; V2/V3 use
  * bounded rectangle clipping for its expanded pixels. Original/UI drawing
  * remains unchanged. A source-content match is mandatory.
  */
@@ -21,6 +26,8 @@ typedef struct {
     uint64_t hash;
     uint8_t *rle;
     uint16_t *pixels;
+    uint32_t *rgba;
+    int scale;
     int dx,dy,dw,dh;
 } RAEntry;
 static RAEntry *ra_entries;
@@ -33,20 +40,21 @@ static uint32_t ra_u32(const uint8_t *p) {
 static unsigned ra_u16(const uint8_t *p) { return p[0]|(unsigned)p[1]<<8; }
 static uint64_t ra_u64(const uint8_t *p) { return ra_u32(p)|((uint64_t)ra_u32(p+4)<<32); }
 static void ra_clear(void) {
-    for (unsigned i=0;i<ra_count;i++) {free(ra_entries[i].rle);free(ra_entries[i].pixels);}
+    for (unsigned i=0;i<ra_count;i++) {free(ra_entries[i].rle);free(ra_entries[i].pixels);free(ra_entries[i].rgba);}
     free(ra_entries);ra_entries=NULL;ra_count=0;
 }
 static int ra_read(FILE *f) {
     uint8_t header[12];
     if (fread(header,1,12,f)!=12) return 0;
-    int expanded=!memcmp(header,"TPRART02",8);
+    int full_colour=!memcmp(header,"TPRART03",8);
+    int expanded=full_colour || !memcmp(header,"TPRART02",8);
     if (!expanded && memcmp(header,"TPRART01",8)) return 0;
     unsigned count=ra_u32(header+8);
     if (!count || count>8192 || ra_entries) return 0;
     ra_entries=calloc(count,sizeof *ra_entries);
     if (!ra_entries) return 0;
     ra_count=count;
-    size_t total=0;
+    size_t total=0, rgba_total=0;
     for (unsigned i=0;i<count;i++) {
         uint8_t meta[16];
         if (fread(meta,1,16,f)!=16) goto bad;
@@ -64,10 +72,25 @@ static int ra_read(FILE *f) {
             if(e->dx < -2048 || e->dx > 2048 || e->dy < -2048 || e->dy > 2048 ||
                e->dw<1 || e->dh<1 || e->dw>2048 || e->dh>2048)goto bad;
             size_t n=(size_t)e->dw*e->dh;
+            if(full_colour){
+                uint8_t detail[4];if(fread(detail,1,4,f)!=4)goto bad;
+                e->scale=(int)ra_u16(detail);
+                if(ra_u16(detail+2) || e->scale<1 || e->scale>8 ||
+                   e->dw*e->scale>2048 || e->dh*e->scale>2048)goto bad;
+            }
             total+=n*sizeof(uint16_t);if(total>64u*1024*1024)goto bad;
             e->pixels=malloc(n*sizeof(uint16_t));if(!e->pixels)goto bad;
             for(size_t j=0;j<n;j++){
                 uint8_t p[2];if(fread(p,1,2,f)!=2 || (e->pixels[j]=(uint16_t)ra_u16(p))>256)goto bad;
+            }
+            if(full_colour){
+                size_t texels=n*(unsigned)e->scale*(unsigned)e->scale;
+                rgba_total+=texels*sizeof(uint32_t);
+                if(rgba_total>512u*1024*1024)goto bad;
+                e->rgba=malloc(texels*sizeof(uint32_t));if(!e->rgba)goto bad;
+                if(fread(e->rgba,1,texels*4,f)!=texels*4)goto bad;
+                /* One bulk read, then explicit little-endian conversion. */
+                for(size_t j=0;j<texels;j++)e->rgba[j]=ra_u32((const uint8_t*)e->rgba+j*4);
             }
             continue;
         }
@@ -128,6 +151,12 @@ static void ra_load(void) {
     int ok=ra_read(f);fclose(f);
     fprintf(stderr,"Reimagined world pack: %s (%u baked parts)\n",ok?"loaded":"invalid",ra_count);
 }
+int tp_remaster_has_rgba(void) {
+    if(tp_art_mode()!=TP_ART_REIMAGINED)return 0;
+    ra_load();
+    for(unsigned i=0;i<ra_count;i++)if(ra_entries[i].rgba)return 1;
+    return 0;
+}
 int tp_remaster_resolve(const uint8_t *m,uint32_t source,int width,int height,int lo,TPRemasterImage *out) {
     if(!out || lo<0 || lo>1)return 0;
     memset(out,0,sizeof *out);
@@ -145,7 +174,11 @@ int tp_remaster_resolve(const uint8_t *m,uint32_t source,int width,int height,in
         if(!table || entry+6>(64u<<20) || ra_u32(m+entry)!=source)continue;
         uint64_t hash=0;
         if(!ra_hash(m,source,w,h,&hash) || hash!=e->hash)return 0;
-        *out=(TPRemasterImage){e->rle,e->pixels,e->dw,e->dh,e->dx,e->dy,e->w,e->h};
+        *out=(TPRemasterImage){.rle=e->rle,.pixels=e->pixels,
+            .width=e->dw,.height=e->dh,.dx=e->dx,.dy=e->dy,
+            .source_width=e->w,.source_height=e->h,.rgba=e->rgba,
+            .texture_width=e->rgba?e->dw*e->scale:0,
+            .texture_height=e->rgba?e->dh*e->scale:0};
         return 1;
     }
     return 0;

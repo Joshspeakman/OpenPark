@@ -5,6 +5,20 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, full-colour normal-view path (Codex,
+`codex/reimagined-full-remaster`): `TPRART03` retains higher-resolution RGBA
+bakes alongside source-bound indexed previews. Terrain and things draw into
+a bounded visible-region companion in native order; publication, UI/weather
+priority and BGRA presentation are connected. Reimagined keeps the compositor
+on at 1×/4:3. This is renderer integration, not accepted remastered artwork.
+Five sanitizer checks, eighteen Python tests, both walk modes, 17,808 view
+checks and native build/signature pass. A 37.17-second Original-mode run
+exited normally and saved inspected internal frames, but macOS window capture
+failed: no headed pass is claimed. All 112 source hashes are unchanged; no
+installation. Full-colour tool previews, effects/lighting, real-asset seams,
+performance and all remaining art/animation acceptance continue. See
+`docs/reports/2026-10-20-remaster-normal-colour.md`.
+
 2026-10-20, mapped staff routine candidates (Codex,
 `codex/reimagined-full-remaster`): all 371 keys in the current 44-chain staff
 action inventory now have local candidate poses, bringing the nine models to

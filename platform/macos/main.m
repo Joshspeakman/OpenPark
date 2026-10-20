@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include "host.h"
 #include "sha256.h"
+#include "art_mode.h"
 int tp_audio_start(void);
 void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
@@ -192,7 +193,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     if (!tp_host_frame_size(&w, &h) || !tp_host_frame_rgba_any(_pixels, 640 * 480)) return;
     int fw = w, fh = h; uint32_t *px = _pixels;
     [self updateGeometry];
-    if ((_zoom != 1 || [self wide]) != _viewOn || (_viewOn && fabs([self layoutW] - _lastLW) > 0.5)) [self applyView];
+    if ((_zoom != 1 || [self wide] || tp_art_mode()==TP_ART_REIMAGINED) != _viewOn || (_viewOn && fabs([self layoutW] - _lastLW) > 0.5)) [self applyView];
     if (_viewOn && tp_view_camera_moves() != _camMoves) {   /* the game moved its camera itself: look there */
         if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "app: recentre on the game's camera (moves %d -> %d)\n", _camMoves, tp_view_camera_moves());
         _camMoves = tp_view_camera_moves();
@@ -426,7 +427,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
 }
 /* Turns the park view on or off as zoom and the window's shape ask, and tells view.c where it looks. */
 - (void)applyView {
-    BOOL on = _zoom != 1 || [self wide];
+    BOOL on = _zoom != 1 || [self wide] || tp_art_mode()==TP_ART_REIMAGINED;
     if (on && !_viewOn && CACurrentMediaTime() - _offAt > 1.0) tp_view_camera_center(&_cx, &_cy);   /* start where the game looks */
     if (on) [self clampCenter];
     if (!on && _viewOn) _offAt = CACurrentMediaTime();
@@ -449,7 +450,7 @@ static GameView *game_view;                         /* (the 3DO ride videos: rid
     [self applyViewKeepingCenter];
 }
 - (void)applyViewKeepingCenter {
-    BOOL on = _zoom != 1 || [self wide];
+    BOOL on = _zoom != 1 || [self wide] || tp_art_mode()==TP_ART_REIMAGINED;
     if (on) [self clampCenter];
     if (!on) _offAt = CACurrentMediaTime();
     _lastLW = [self layoutW];

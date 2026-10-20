@@ -59,11 +59,7 @@ void tp_hooks_changed(void);
 typedef void (*DrawLog)(int kind, int a, int b, int c, uint32_t d, int e, void *ctx);
 int tp_native_cell_ground(const uint8_t *mem, int cx, int cy, int gx, int gy, uint8_t *buf, int pitch, int w, int h);
 int tp_native_cell_things(const uint8_t *mem, int cx, int cy, int gx, int gy, DrawLog lg, void *ctx);
-typedef struct { uint8_t *buf; size_t size; long base, pitch; int clip_w, clip_h, clip_r, lowres; const uint8_t *ghost; long unsupported; } NDTarget;
-void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, int y, int flags, int colour);
-void tp_native_draw_world_sprite(NDTarget *t,const uint8_t *memory,uint32_t source,
-                                int w,int h,int x,int y,int flags,int colour,int bounds[4]);
-void tp_native_draw_small_text(NDTarget *t, const uint8_t *mem, int x, int y, const uint8_t *str, int colour);
+#include "native_draw.h"
 extern const uint8_t *tp_native_text;
 extern int tp_native_stable_rng;
 

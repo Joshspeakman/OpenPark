@@ -24,7 +24,7 @@ void tp_bigmap_setup_done(void) {}
 void tp_free_park_shown(void) {} int tp_free_waiting(void) { return 0; }
 void sb16_pump(double t) { (void)t; }
 double tp_dbg_run, tp_dbg_gov; int tp_host_timer_behind(void) { return 0; }
-void tp_host_card_clock(double period) { (void)period; }
+double tp_host_card_clock(void) { return 0; }
 void tp_hooks_changed(void) {}
 volatile double tp_frame_paced_at; double tp_host_cycles(void) { return 10000; }   /* (nightly's pacing) */
 int tp_view_point_to_world(double fx, double fy, double *wx, double *wy);

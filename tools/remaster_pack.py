@@ -110,6 +110,66 @@ def encode(records):
     return bytes(out)
 
 
+def encode_rgba(records):
+    """V3 stores the full bake and a separate indexed bookkeeping preview.
+
+    Placement remains in decoded source pixels; texel density never changes
+    the native pivot or footprint. The production CLI still requires audit.
+    """
+    if not 1 <= len(records) <= 8192:
+        raise ValueError('Invalid world part count')
+    out = bytearray(b'TPRART03' + struct.pack('<I', len(records)))
+    previous, preview_total, rgba_total = None, 0, 0
+    for record, rows, bake in records:
+        key = record['bank'], record['index']
+        w, h = record['width'], record['height']
+        bounds = display_bounds(record)
+        dw, dh = bounds['width'], bounds['height']
+        bw, bh, rgba = bake
+        if (previous is not None and key <= previous) or key[0] not in (0, 1) or not 0 <= key[1] < 8192:
+            raise ValueError('Unsorted or invalid world part ID')
+        if not 1 <= w <= 255 or not 1 <= h <= 255 or len(rows) != dh or any(len(row) != dw for row in rows):
+            raise ValueError('Invalid world part dimensions')
+        if (not 1 <= bw <= 2048 or not 1 <= bh <= 2048 or len(rgba) != bw*bh*4
+            or bw % dw or bh % dh or bw//dw != bh//dh or not 1 <= bw//dw <= 8):
+            raise ValueError('RGBA bake must have uniform density 1..8 within 2048 texels per side')
+        preview_total += dw*dh*2
+        rgba_total += len(rgba)
+        if preview_total > 64*1024*1024 or rgba_total > 512*1024*1024:
+            raise ValueError('World pack exceeds decoded memory limit')
+        previous = key
+        out += struct.pack('<HHHHQhhHHHH', *key, w, h, int(record['source_hash'], 16),
+                           bounds['x'], bounds['y'], dw, dh, bw//dw, 0)
+        for row in rows:
+            for pixel in row:
+                if pixel is not None and not 0 <= pixel <= 255:
+                    raise ValueError('Invalid palette index')
+                out += struct.pack('<H', 256 if pixel is None else pixel)
+        out += rgba
+    return bytes(out)
+
+
+def palette_expansion(bake, rows, palette):
+    """True only for nearest-expanded palette artwork with no new detail.
+
+    A faithful new bake may retain the same low-resolution centre samples
+    while adding actual geometry/detail between them; do not discard that.
+    """
+    bw, bh, rgba = bake
+    h, w = len(rows), len(rows[0])
+    colours = [bytes(v*255//63 for v in palette[i:i+3]) for i in range(0, 768, 3)]
+    for y in range(bh):
+        for x in range(bw):
+            pixel = rows[y*h//bh][x*w//bw]
+            p = rgba[(y*bw+x)*4:(y*bw+x)*4+4]
+            if pixel is None:
+                if p[3] >= 128:
+                    return False
+            elif p[3] < 128 or p[:3] != colours[pixel]:
+                return False
+    return True
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('ledger',type=Path)
@@ -134,25 +194,25 @@ def main():
         record=dict(part)
         if 'display_bounds' in done:record['display_bounds']=done['display_bounds']
         bounds=display_bounds(record)
-        rows=quantize(bake,bounds['width'],bounds['height'],palette,native_rle='display_bounds' not in record)
-        if unchanged_source(rows,bounds,part):
+        rows=quantize(bake,bounds['width'],bounds['height'],palette,native_rle=False)
+        if unchanged_source(rows,bounds,part) and palette_expansion(bake,rows,palette):
             raise SystemExit(f"{part['id']}: unchanged original pixels are not a remaster")
         # Native draw logs identify a shared RLE pointer, not an alias's table
         # slot. Conflicting replacements for the same source would be ambiguous.
         key=part['bank'],part['source_offset'],part['width'],part['height']
-        replacement=(bounds,rows)
+        replacement=(bounds,rows,bake)
         if key in aliases and aliases[key]!=replacement:
             raise SystemExit(f"{part['id']}: conflicting artwork for aliased source data")
         aliases[key]=replacement
-        records.append((record,rows))
-    payload=encode(records)
+        records.append((record,rows,bake))
+    payload=encode_rgba(records)
     a.out.mkdir(parents=True,exist_ok=True)
     # Publish the completion receipt last, after the new payload is in place.
     fd,name=tempfile.mkstemp(prefix='world-',suffix='.tmp',dir=a.out)
     with os.fdopen(fd,'wb') as f:
         f.write(payload);f.flush();os.fsync(f.fileno())
     os.replace(name,a.out/'world.art')
-    receipt=dict(schema=1,complete=True,art_mode='reimagined',parts=len(records),
+    receipt=dict(schema=1,complete=True,art_mode='reimagined',parts=len(records),world_format='TPRART03',
                  world_sha256=hashlib.sha256(payload).hexdigest(),
                  ledger_sha256=hashlib.sha256(a.ledger.read_bytes()).hexdigest(),
                  completion_sha256=hashlib.sha256(a.completion.read_bytes()).hexdigest())
