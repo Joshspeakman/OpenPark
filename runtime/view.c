@@ -1701,7 +1701,8 @@ void tp_view_mouse(double fx, double fy, uint32_t buttons) {
 /* A 3x5 font for the debug overlays: digits, a few letters and signs. */
 static const char *font_chars = "0123456789ACDEFGKMNPRSTWXY/:,.- ";
 static const uint16_t font_bits[] = {0x7b6f, 0x2c97, 0x73e7, 0x73cf, 0x5bc9, 0x79cf, 0x79ef, 0x7292, 0x7bef, 0x7bcf, 0x2bed, 0x7927, 0x6b6e, 0x79a7, 0x79a4, 0x796f, 0x5bad, 0x5fed, 0x7b6d, 0x7be4, 0x6bad, 0x79cf, 0x7492, 0x5bfd, 0x5aad, 0x5a92, 0x12a4, 0x0410, 0x0014, 0x0002, 0x01c0, 0x0000};
-int tp_view_out_bgra;                                   /* compose BGRA (an IOSurface for the screen) rather than RGBA */
+int tp_view_out_bgra;
+int tp_view_park_only;                                  /* compose the park alone (no interface, panel or cursor) */                                   /* compose BGRA (an IOSurface for the screen) rather than RGBA */
 static size_t dbg_stride;                               /* the output's row stride for the overlays and cursor */
 static uint32_t dbg_col(uint32_t c) { return tp_view_out_bgra ? (c & 0xff00ff00u) | ((c & 0xff) << 16) | ((c >> 16) & 0xff) : c; }
 static void put_text(uint32_t *out, int ow, int oh, int x, int y, int k, const char *t, uint32_t col) {
@@ -1747,6 +1748,7 @@ static void compose_band(void *ctx, size_t band) {
         for (int x = 0; x < ow; x++) {
             double lx = (x + 0.5) * lpx; int ix = (int)floor(lx - col);
             double bsx, bsy;
+            if (tp_view_park_only) goto park;
             if (band_map(lx, ly, j->lw, g.sw, g.sh, j->k, &bsx, &bsy)) {   /* the enlarged panel and advisor */
                 int bx = (int)bsx, by = (int)bsy;
                 if (bx >= 0 && bx < g.sw && by >= 0 && by < g.sh) {
@@ -1832,7 +1834,7 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
     double plx = ptr_fx * lw, ply = ptr_fy * g.sh;
     int over_panel = ply >= g.wh && plx - col >= 0 && plx - col < g.sw;
     (void)over_panel;
-    if (pub_cur_ok && ptr_fy >= 0 && !tp_view_hw_cursor) {
+    if (pub_cur_ok && ptr_fy >= 0 && !tp_view_hw_cursor && !tp_view_park_only) {
         double kx = 1 / lpx, ky = 1 / lpy;
         int hx = (int)(ptr_fx * ow), hy = (int)(ptr_fy * oh);
         for (int y = 0; y < CUR; y++) for (int x = 0; x < CUR; x++) {

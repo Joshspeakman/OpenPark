@@ -44,7 +44,7 @@ static void extras_setf(const char *k, double v) {
     }
 }
 uint8_t *tp_host_memory(void);
-extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out_bgra;
+extern int tp_view_hw_cursor, tp_view_debug_fps, tp_view_debug_grid, tp_view_out_bgra, tp_view_park_only;
 void tp_view_compose_stride(size_t px);
 void tp_view_debug_hud(uint32_t *out, int ow, int oh);
 void tp_view_count_game_frames(int on);
@@ -136,7 +136,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     uint32_t *_walkPx; int _walkW, _walkH;
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
-    uint32_t *_clean; int _cleanW, _cleanH; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
+    uint32_t *_clean; int _cleanW, _cleanH, _menuCW; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
     TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
     BOOL _cornerGuard, _held; NSPoint _virt; NSTimeInterval _letGoAt, _warpAt; CGFloat _warpDX, _warpDY;   /* full screen: the pointer kept out of the corners (pointOf:) */
     double _lastFx, _lastFy; uint8_t _keyDown[128]; BOOL _fastForward;   /* what the game was last told: releaseInput */
@@ -300,9 +300,19 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
          * park (as it was before the window came); the window above at its full size. */
         int pr = [self panelRows:fh], ys = video || pk == 1 ? _bigH : (int)lround((double)_bigH * (fh - pr) / fh);
         int pw = (int)lround(cw * pk), ph = (int)lround((double)_bigH * pr / fh * pk), px0 = (_bigW - pw) / 2, py0 = _bigH - ph;
+        /* Entering with no park picture of this size (the window was resized with a game window up: the last picture
+         * was the old size's, with the window in it, and it stayed beside the new one as a second copy; or the window
+         * resized while one is up, the column narrower than the old copy beside it): the park is composed afresh. */
+        BOOL composed = NO, resized = _menuWide && cw != _menuCW;   /* (the column's width changed: the window resized) */
+        if (!video && ((!_menuWide && !clean) || resized)) {
+            tp_view_out_bgra = 1; tp_view_park_only = 1; tp_view_compose_stride(dp / 4);   /* (the park alone: its interface layer holds the window) */
+            tp_view_compose((uint32_t *)dst, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
+            tp_view_out_bgra = 0; tp_view_park_only = 0; tp_view_compose_stride(0); composed = YES;
+        }
         for (int y = 0; y < _bigH; y++) {
             uint32_t *d = (uint32_t *)(dst + (size_t)y * dp);
             if (video) for (int x = 0; x < _bigW; x++) d[x] = 0xff000000u;   /* (a video: black beside it) */
+            else if (composed) {}
             else if (!_menuWide && clean) memcpy(d, _clean + (size_t)y * _bigW, (size_t)_bigW * 4);   /* (entering: the park picture around it, */
             else if (!_menuWide || y >= ys) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* as it was before the window came) */
             else { memcpy(d, src + (size_t)y * sp, (size_t)cx0 * 4); memcpy(d + cx0 + cw, src + (size_t)y * sp + (size_t)(cx0 + cw) * 4, (size_t)(_bigW - cx0 - cw) * 4); }
@@ -317,7 +327,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
                 d[cx0 + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
         }
         IOSurfaceUnlock(nx, 0, NULL); IOSurfaceUnlock(cur, kIOSurfaceLockReadOnly, NULL);
-        _surfIdx ^= 1;
+        _surfIdx ^= 1; _menuCW = cw;
         if (!_menuWide || _live) { _menuWide = YES; _live = NO; [self setNeedsLayout:YES]; [self layout]; }
         [self updateGameCursor];
         [self updateScanlines:fh];
