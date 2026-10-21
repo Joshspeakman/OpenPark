@@ -31,6 +31,51 @@ void tp_view_enable(int main_game);
 
 #include "../runtime/view.c"
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"RGBA view line %d: %s\n",__LINE__,#x);return 1;}}while(0)
+static int model_passes(void){
+    const uint32_t things=0x500000,frames=0x510000,elements=0x520000,sprites=0x530000,data=0x540000;
+    uint32_t map=r32(0x1d3b08);
+    memcpy(mem+0x1d3b10,&things,4);memcpy(mem+0x1d3b80,&frames,4);
+    memcpy(mem+0x1d3b7c,&elements,4);memcpy(mem+0x1d3bb8,&sprites,4);
+    w16(map+(32*64+32)*4,1);mem[things+204]=2;mem[things+212]=2;
+    mem[things+206]=mem[things+208]=128;mem[things+207]=mem[things+209]=32;
+    w16(things+210,3);w16(frames+24,1);w16(elements+10,6);
+    w16(elements+12,-4);w16(elements+14,-8);memcpy(mem+sprites+6,&data,4);
+    mem[sprites+10]=8;mem[sprites+11]=8;
+    for(int y=0;y<8;y++){mem[data+y*10]=8;memset(mem+data+y*10+1,40,8);}
+    RMRig**slot=rm_cache_slot(2,0);CHECK(slot);*slot=calloc(1,sizeof **slot);CHECK(*slot);
+    FILE*f=tmpfile();CHECK(f);
+    fputs("TPRIG1 3 1 1 1 0\n-.35 0 0 0\n.35 0 0 0\n0 0 1 0\n0 1 2 12abef\n"
+          "3\n1 0 0 0 0 1 0 0 0 0 1 0\n",f);rewind(f);
+    CHECK(rm_read(f,*slot));fclose(f);(*slot)->cls=2;
+    static uint8_t original[640*720];
+    for(int mode=1;mode<=2;mode++){
+        G=geo(mode);w16(SCREEN_MODE,mode==1?1:8);w16(0x1d663a,mode==1?48:24);w16(TILE_H,mode==1?32:16);
+        clipinfo.ok=1;clipinfo.mode=mode;clipinfo.base=0;clipinfo.pitch=SW;
+        clipinfo.clip_w=SW;clipinfo.clip_h=PH;clipinfo.clip_r=SW-1;
+        int cx=27,cy=25,bx=cam_ox(cx,cy),by=cam_oy(cy);
+        CHECK(tp_remaster_surface_prepare(&hd_work,bx,by,SW,PH,CW,CH));tp_host_palette_rgba(hd_palette);
+        size_t count=(size_t)hd_work.w*hd_work.h*hd_work.density*hd_work.density;
+        for(size_t i=0;i<count;i++)hd_work.pixels[i]=0xffabcdefu;
+        CHECK(!setenv("TP_ART_MODE","original",1));hd_rendering=1;hd_failed=0;
+        CHECK(native_pass(cx,cy,16)==0&&!hd_failed);memcpy(original,np_out,(size_t)SW*PH);
+        CHECK(!setenv("TP_ART_MODE","reimagined",1));
+        CHECK(native_pass(cx,cy,16)==0&&!hd_failed);
+        CHECK(np_world.models==1&&!np_world.source_objects);
+        CHECK(!memcmp(original,np_out,(size_t)SW*PH));
+        CHECK(!memcmp(np_world.indexed,np_out,(size_t)SW*PH));
+        unsigned drawn=0;for(size_t i=0;i<count;i++)drawn+=hd_work.pixels[i]==0xffefab12u;
+        CHECK(drawn>100);
+        TPRemasterPaint paint=hd_pass_paint(cx,cy);
+        for(int y=0;y<paint.target.height;y++)for(int x=0;x<paint.target.width;x++)
+            if(x<paint.target.x0 || x>=paint.target.x1 || y<paint.target.y0 || y>=paint.target.y1)
+                CHECK(paint.target.pixels[(size_t)y*paint.target.stride+x]==0xffabcdefu);
+        CHECK(!setenv("TP_ART_MODE","faithful",1));CHECK(native_pass(cx,cy,16)==0&&!hd_failed);
+        for(size_t i=0;i<count;i++)CHECK(hd_work.pixels[i]!=0xffefab12u);
+        hd_rendering=0;
+    }
+    CHECK(!setenv("TP_ART_MODE","original",1));w16(map+(32*64+32)*4,0);
+    rm_world_release(&np_world);rm_reset();return 0;
+}
 int main(void) {
     mem=calloc(64u<<20,1);CHECK(mem);M=mem;
     uint32_t map=0x300000,table=0x210000,source=0x220000,cache=0x400000;
@@ -56,6 +101,7 @@ int main(void) {
         }
         uint32_t untouched;CHECK(tp_remaster_surface_sample(&hd_work,bx+TX0-1,by+PT,&untouched));CHECK(untouched==0xffabcdefu);
     }
+    CHECK(!model_passes());
     /* Presentation reads fine colour and respects padded strides, UI and
      * weather priority. A pan outside the published region uses the canvas. */
     hd_pub=hd_work;memset(&hd_work,0,sizeof hd_work);

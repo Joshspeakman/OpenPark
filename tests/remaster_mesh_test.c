@@ -48,6 +48,20 @@ int main(void) {
     wm_quad(&r,(WMVertex){-1,-1,90,0,0},(WMVertex){1,-1,90,0,0},
                (WMVertex){1,1,90,0,0},(WMVertex){-1,1,90,0,0});
     CHECK(pixels[32*64+24]==0xff563412);CHECK(pixels[32*64+40]==solid);
+    /* A normal-pass scissor must protect both the colour padding and depth
+     * outside the pass, including with the larger world depth bias. */
+    uint32_t padded[70*64];for(int i=0;i<70*64;i++)padded[i]=0xdeadbeefu;
+    clear();r.pixels=padded;r.stride=70;r.clipped=1;
+    r.clip_x0=20;r.clip_x1=36;r.clip_y0=22;r.clip_y1=40;
+    r.orthographic_bias=512;
+    CHECK(wm_camera(&r,0,0,0,0,0).z==520);
+    wm_quad(&r,(WMVertex){-2,-2,10,0,0},(WMVertex){2,-2,10,0,0},
+               (WMVertex){2,2,10,0,0},(WMVertex){-2,2,10,0,0});
+    for(int y=0;y<64;y++)for(int x=0;x<70;x++){
+        int inside=x>=20&&x<36&&y>=22&&y<40;
+        CHECK(padded[y*70+x]==(inside?solid:0xdeadbeefu));
+        if(x<64)CHECK(depth[y*64+x]==(inside?10:FLT_MAX));
+    }
     release(&rig);
     CHECK(!load("TPRIG2 3 1 1 1 0 9000 1",&rig));
     CHECK(!load("TPRIG2 3 1 1 1 0 1 1 ffffffff 0 0 0 0 nan 0",&rig));

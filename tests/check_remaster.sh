@@ -14,6 +14,10 @@ done
   runtime/native_draw.c -lm -lpthread -o build/remaster_snapshot_test
 build/remaster_snapshot_test
 "$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation \
+  -fsanitize=address,undefined tests/remaster_world_test.c runtime/native_draw.c \
+  -lm -o build/remaster_world_test
+build/remaster_world_test
+"$CC" -std=gnu11 -O1 -g -Wall -Wno-unused-function -Wno-misleading-indentation \
   -fsanitize=address,undefined tests/remaster_tracks_test.c runtime/native_land.c \
   runtime/native_draw.c -lm -lpthread -o build/remaster_tracks_test
 build/remaster_tracks_test

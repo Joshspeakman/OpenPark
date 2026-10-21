@@ -44,6 +44,7 @@
 #include "remaster_art.h"
 #include "remaster_surface.h"
 #include "remaster_preview.h"
+#include "remaster_world.h"
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -521,9 +522,10 @@ static TPRemasterPaint hd_pass_paint(int cx,int cy) {
 /* Native passes (stage 3b): the landscape (native_land.c), copied to the screen, the things
  * drawn over it (native_land.c's call list through native_draw.c), in the clip window the
  * game's pass would use. Anything not native yet makes the pass the game's again. */
-typedef struct { NDTarget t; int colour, fail; } NPState;
+typedef struct { NDTarget t; int colour, fail; RMWorld *world; } NPState;
 static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx) {
     NPState *st = ctx;
+    if(st->world)rm_world_event(st->world,kind,a,b,c,d,e,tp_native_text);
     if (kind == 5) { st->colour = c; return; }
     if (kind == 2) {
         tp_native_draw_world_sprite(&st->t,M,d,c&255,c>>8,a,b,e,st->colour,NULL);
@@ -533,6 +535,7 @@ static void np_draw(int kind, int a, int b, int c, uint32_t d, int e, void *ctx)
     if (kind == 3 && a) st->fail = 1;
 }
 static uint8_t np_cache[640 * 720], np_out[640 * 720];
+static RMWorld np_world; /* game-thread cache/buffers, never shared with Visitor rendering */
 static int native_pass(int cx, int cy, int rows) {
     static long why[4]; static int dbg = -1; if (dbg < 0) dbg = getenv("TP_VIEW_DEBUG") != NULL;
     if (dbg) { static double l; if (now() - l > 1) { l = now(); fprintf(stderr, "native pass bails: clip %ld frame_mode %ld sel %ld (sel %d kind %#x)\n", why[0], why[1], why[2],
@@ -564,7 +567,15 @@ static int native_pass(int cx, int cy, int rows) {
     NPState st = {{np_out, nt, clipinfo.base, clipinfo.pitch, clipinfo.clip_w, PH, clipinfo.clip_r,
                    M[0x1de5f6] & 1, M + r32(0x1ba2f8), 0}, 0, 0};
     st.t.paint=paint_ptr;
-    tp_native_things(M, cx, cy, rows, np_draw, &st);
+    if(paint_ptr && tp_art_mode()==TP_ART_REIMAGINED){
+        if(rm_world_begin(&np_world,M,64u<<20,tp_map_ext,cx,cy,&st.t,paint_ptr)){
+            st.world=&np_world;st.t.paint=NULL;
+        }else paint.failed=1;
+    }
+    if(st.world){
+        tp_native_things_metadata(M,cx,cy,rows,np_draw,&st);
+        if(!rm_world_end(st.world))paint.failed=1;
+    }else tp_native_things(M,cx,cy,rows,np_draw,&st);
     if(paint.failed)hd_failed=1;
     if (getenv("TP_VIEW_PROF")) { static double tl, tt, last; static long np; double tq2 = now(); tl += tq1 - tq0; tt += tq2 - tq1; np++;
         if (tq2 - last > 2) { last = tq2; fprintf(stderr, "view prof: %ld passes, landscape %.3f ms, things %.3f ms a pass\n", np, tl / np * 1e3, tt / np * 1e3); tl = tt = 0; np = 0; } }

@@ -5,6 +5,26 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, normal complete-model drawing (Codex, isolated remaster branch):
+the normal gameplay colour pass now consumes the shared scene descriptors and
+draws complete models with their exact occupied poses and modular tracks.
+Clipped world depth includes flat-ground occlusion; native indexed drawing
+continues separately for picking/UI extraction. Nested native source events
+replay in order through private storage. A distinct game-thread model cache
+keeps Visitor rendering ownership separate.
+
+Twelve native sanitizer checks, 21 Python tests, both walk modes and 17,808
+view checks pass. Forty-eight occupied-spinner captures run through the actual
+normal native pass; six adjacent-pass comparisons match all 11,114,496 shared
+pixels. The isolated app compiles/signs without installation. All 112 source
+and 114 candidate-model hashes are unchanged. These are offline renderer
+checks, not headed play or artwork acceptance. Unresolved artwork still uses
+the existing source presentation; its interaction with geometry lacks physical
+depth and is not acceptable as a completed remaster. The complete-pack gate
+is unchanged. Next: remaining art/animation coverage, complete terrain/effects,
+other ride cameras, populated-park performance and final headed acceptance.
+See `docs/reports/2026-10-20-remaster-normal-models.md`.
+
 2026-10-20, shared scene placement (Codex, isolated remaster branch): canonical
 model eligibility, placement, occupied poses, car state and track components
 now resolve through a pixel-independent descriptor shared by coordinate systems.

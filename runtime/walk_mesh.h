@@ -9,6 +9,7 @@
 #ifndef TP_WALK_MESH_H
 #define TP_WALK_MESH_H
 #include <float.h>
+#include <stddef.h>
 
 typedef struct { float x, y, z, u, v; } WMVertex;
 typedef struct {
@@ -24,12 +25,17 @@ typedef struct {
     int orthographic;
     float offset_x,offset_y;
     uint32_t texture_tint; /* ABGR, zero means white; authored material lighting */
+    /* Normal passes can target a clipped, padded colour surface. Depth is
+     * always tightly packed. Zero defaults retain the Visitor/baker contract. */
+    size_t stride;
+    int clipped,clip_x0,clip_y0,clip_x1,clip_y1;
+    float orthographic_bias;
 } WMRender;
 
 static WMVertex wm_camera(const WMRender *r, float x, float y, float z, float u, float v) {
     x -= r->cx; y -= r->cy; z -= r->cz;
     return (WMVertex){x*r->rx+y*r->ry, x*r->ux+y*r->uy+z*r->uz,
-                      x*r->fx+y*r->fy+z*r->fz+(r->orthographic?64:0), u, v};
+                      x*r->fx+y*r->fy+z*r->fz+(r->orthographic?(r->orthographic_bias?r->orthographic_bias:64):0), u, v};
 }
 static WMVertex wm_lerp(WMVertex a, WMVertex b, float t) {
     return (WMVertex){a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t,
@@ -50,6 +56,11 @@ static void wm_triangle_inner(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
     if (xmax<0 || ymax<0 || xmin>=r->w || ymin>=r->h) return;
     int x0=(int)fmaxf(0,ceilf(xmin-.5f)),x1=(int)fminf(r->w-1,floorf(xmax-.5f));
     int y0=(int)fmaxf(0,ceilf(ymin-.5f)),y1=(int)fminf(r->h-1,floorf(ymax-.5f));
+    if(r->clipped){
+        if(x0<r->clip_x0)x0=r->clip_x0;if(y0<r->clip_y0)y0=r->clip_y0;
+        if(x1>=r->clip_x1)x1=r->clip_x1-1;if(y1>=r->clip_y1)y1=r->clip_y1-1;
+        if(x0>x1 || y0>y1)return;
+    }
     float inv=1/area;
     a.u*=ia; a.v*=ia; b.u*=ib; b.v*=ib; c.u*=ic; c.v*=ic;
     r->triangles++;
@@ -86,7 +97,8 @@ static void wm_triangle_inner(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
             if (colour>=256) { if (!r->side_fill) continue; colour=r->side_colour; }
             output=r->palette[colour];
         }
-        r->pixels[at]=output; r->depth[at]=z; r->fragments++;
+        r->pixels[(size_t)y*(r->stride?r->stride:(size_t)r->w)+x]=output;
+        r->depth[at]=z;r->fragments++;
     }
 }
 static void wm_triangle(WMRender *r, WMVertex a, WMVertex b, WMVertex c) {
