@@ -5,6 +5,20 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, walking contact correction (Codex, isolated remaster branch):
+audited 272 walking keys across all 17 guest/staff identities. Hidden groups
+had masked shoe heights in the eight guests and two workers. Corrected 160
+keys using actual shoe contact, preserving geometry, materials, limb motion,
+carried tools and all 765 nonwalking poses in the affected files. Corrected
+authoring reproduces these keys and the unchanged Tree House additions.
+
+640 captures pass across both native normal modes and Visitor projections;
+160 inspection borders are clear. All 109 other models and 112 owned files
+retain their hashes. Inventory remains 119 candidates. No runtime/app or
+install change. Temporal foot locking, slopes, live lifecycle/timing, final
+artwork and full headed acceptance remain unfinished. See
+`docs/reports/2026-10-20-remaster-walking-contact.md`.
+
 2026-10-20, Tree House candidate (Codex, isolated remaster branch): added all
 36 native keys with the wooden lift, layered tree/lookout, articulated
 elephant and canopy peek sequences. Actual linked guests follow source
