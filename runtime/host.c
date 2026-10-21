@@ -800,6 +800,9 @@ static void vbe_call(uint32_t *ax, uint32_t *bx, uint32_t *dx, uint32_t buf) {
     else *ax = fail;
 }
 
+static double mouse_extent(int r1, int x) {   /* the screen's size in the driver's units, for a range ending at r1 (2 px in) */
+    return r1 >= 2048 ? r1 + 16 : x ? 640.0 : video_mode == 0x101 ? 480.0 : 400.0;
+}
 static void interrupt(uint32_t number) {
     int_calls++;
     static int trace_ints = -1; if (trace_ints < 0) trace_ints = getenv("TP_TRACE_INTS") ? atoi(getenv("TP_TRACE_INTS")) : 0;
@@ -974,8 +977,12 @@ static void interrupt(uint32_t number) {
         if (ax == 1 || ax == 2) { mouse.visible = ax == 1; return; }
         if (ax == 3) { S(EBX, mouse.buttons); S(ECX, mouse.x); S(EDX, mouse.y); return; }
         if (ax == 4) { mouse.x = c & 65535; mouse.y = d & 65535; return; }
-        if (ax == 7) { mouse.rx0 = c & 65535; mouse.rx1 = d & 65535; return; }
-        if (ax == 8) { mouse.ry0 = c & 65535; mouse.ry1 = d & 65535; return; }
+        /* (a range in another scale, 8 times the screen's or back (the park in 640x480, its windows): the position
+         * kept in proportion, or a pointer standing still read as an eighth of itself and the park scrolled up) */
+        if (ax == 7) { int n = d & 65535; if ((n >= 2048) != (mouse.rx1 >= 2048)) mouse.x = (int)(mouse.x * mouse_extent(n, 1) / mouse_extent(mouse.rx1, 1));
+                       mouse.rx0 = c & 65535; mouse.rx1 = n; return; }
+        if (ax == 8) { int n = d & 65535; if ((n >= 2048) != (mouse.ry1 >= 2048)) mouse.y = (int)(mouse.y * mouse_extent(n, 0) / mouse_extent(mouse.ry1, 0));
+                       mouse.ry0 = c & 65535; mouse.ry1 = n; return; }
         if (ax == 0xc) { mouse.has_cb = 1; mouse.cb_mask = c & 65535; mouse.cb_sel = G(ES); mouse.cb_pc = d; return; }
     }
     if (number == 0x10) {
@@ -1422,10 +1429,10 @@ static void push_mouse(int x, int y, uint32_t buttons) {
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 void tp_host_mouse(double fx, double fy, uint32_t buttons) {
     int x0 = mouse.rx0, x1 = mouse.rx1, y0 = mouse.ry0, y1 = mouse.ry1;
+    double w = mouse_extent(x1, 1), h = mouse_extent(y1, 0);
     /* The game's range is in the driver's 640x400 space for mode 13h, 640x480 in VESA 101h. In 640x480 the park
      * sets its ranges 8 times the screen (0..5104 x 0..3824: its handler shifts the position right 3, 0x17d831), so
      * the position is put in the range's scale: before, the game took a pointer at x as x / 8. */
-    double w = x1 >= 2048 ? x1 + 16 : 640.0, h = y1 >= 2048 ? y1 + 16 : video_mode == 0x101 ? 480.0 : 400.0;   /* (its edge: 2 px in) */
     int x = clampi((int)(fx * w), x0, x1), y = clampi((int)(fy * h), y0, y1);
     push_mouse(x, y, buttons);
 }
