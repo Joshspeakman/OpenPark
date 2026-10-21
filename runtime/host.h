@@ -66,6 +66,9 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
 int  tp_host_frame_size(int *w, int *h);
 int  tp_host_frame_rgba_any(uint32_t *out, int max_pixels);
 
+/* The game's cursor as the view publishes it (tp_view_cursor_rgba): a TP_VIEW_CUR x TP_VIEW_CUR picture. 640x480 draws
+ * its cursors at twice the 320x200 size: the largest tool cursors pass 64 there. */
+#define TP_VIEW_CUR 128
 void tp_view_request_poster(void);            /* "Save Park Picture": render the whole park once */
 int  tp_view_take_poster(uint32_t **rgba, int *w, int *h);   /* 1 when ready; the pixels are the caller's to free */
 void tp_view_request_hires(int on);           /* press the game's R once its park is up (start in 640x480) */

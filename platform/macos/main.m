@@ -500,13 +500,13 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     BOOL want = _live && !_walkDrop && !_held && ![NSUserDefaults.standardUserDefaults boolForKey:@"ShowMacCursor"];   /* (held: drawn by the view) */
     tp_view_hw_cursor = want;
     if (!want) { if (_gameCursor) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; } return; }
-    static uint32_t px[64 * 64]; int w = 0, h = 0, ox = 0, oy = 0;
+    static uint32_t px[TP_VIEW_CUR * TP_VIEW_CUR]; int w = 0, h = 0, ox = 0, oy = 0;
     int serial = tp_view_cursor_rgba(px, &w, &h, &ox, &oy);
     NSRect vr = [self viewRect];
     double kx = vr.size.width / [self layoutW], ky = vr.size.height / _sh;   /* points per game pixel */
     /* (its colours too: the serial follows its shape, but a new game fades the palette in from black, and a pointer
      * made then stayed black until its shape changed) */
-    uint32_t hash = 2166136261u; for (int y = 0; y < h && y < 64; y++) for (int x = 0; x < w && x < 64; x++) hash = (hash ^ px[y * 64 + x]) * 16777619u;
+    uint32_t hash = 2166136261u; for (int y = 0; y < h && y < TP_VIEW_CUR; y++) for (int x = 0; x < w && x < TP_VIEW_CUR; x++) hash = (hash ^ px[y * TP_VIEW_CUR + x]) * 16777619u;
     if (serial == _curSerial && hash == _curHash && fabs(kx - _curKx) < 0.01 && fabs(ky - _curKy) < 0.01 && (_gameCursor || !serial)) return;
     _curSerial = serial; _curHash = hash; _curKx = kx; _curKy = ky;
     if (!serial || w <= 0 || h <= 0) { _gameCursor = nil; [self.window invalidateCursorRectsForView:self]; return; }
@@ -518,7 +518,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
                                                                      hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:pw * 4 bitsPerPixel:32];
     uint8_t *d = rep.bitmapData;
     for (int y = 0; y < ph; y++) for (int x = 0; x < pw; x++) {
-        uint32_t c = px[(y * h / ph) * 64 + x * w / pw];
+        uint32_t c = px[(y * h / ph) * TP_VIEW_CUR + x * w / pw];
         uint8_t *o = d + (size_t)y * pw * 4 + x * 4;
         if (!c) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
         o[0] = c & 255; o[1] = (c >> 8) & 255; o[2] = (c >> 16) & 255; o[3] = 255;
@@ -621,7 +621,9 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
 }
 - (void)edgePan {                                    /* the pointer at the window's edge scrolls, as in the game */
     if (!_mouseIn || !self.window.isKeyWindow || !_live) return;
-    NSRect r = [self viewRect]; NSPoint p = _mouse; double m = 6, v = 9;
+    /* (the pace in the park's pixels, the same in both modes: a layout point is twice the park in 640x480, and the same
+     * points a tick scrolled it twice as fast there) */
+    NSRect r = [self viewRect]; NSPoint p = _mouse; double m = 6, v = 9.0 * 320 / (_sw > 0 ? _sw : 320);
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
     double lw = [self layoutW], col = (lw - _sw) / 2 / lw;
     BOOL panel = fy > (double)_wh / _sh && fx >= col && fx < 1 - col;   /* over the panel: only its outer edge scrolls */
@@ -702,7 +704,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     if (_walkDrop && kc == 0x35) { [self endDrop]; return; }   /* Escape: no Visitor View after all */
     if (tp_walk_active()) { [self walkKey:kc down:YES]; return; }
     if (_viewOn && kc >= 0x7b && kc <= 0x7e) {          /* the park view: the arrows move it */
-        double step = 40;
+        double step = 40.0 * 320 / (_sw > 0 ? _sw : 320);   /* (the same park pixels in both modes) */
         [self panBy:(kc == 0x7b ? -step : kc == 0x7c ? step : 0) :(kc == 0x7e ? -step : kc == 0x7d ? step : 0)];
         return;
     }
