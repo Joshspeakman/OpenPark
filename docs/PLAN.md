@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Flight Simulator candidate (Codex, isolated remaster branch): added
+the silver/yellow closed cabin, windows, fins, interior seats, red base and a
+connected three-turn spring across all six native keys. Shared scene
+resolution retains the actual five passengers despite the source cabin having
+no rider markers, using an explicit authored enclosed pose. Eight new keys
+preserve all prior guest geometry, materials and poses.
+
+648 scene identity/pose cases, 168 native probes and 360 final captures pass.
+All 324 occupied/empty exterior comparisons match exactly; every guest/seat
+combination fits inside the cabin. Spring radius, connected endpoints, turn
+separation, ground clearance and inspection borders pass. 648 old/new native
+passes match 1,944 events/pixels with unchanged memory. Twelve remaster checks,
+21 Python tests, both walk modes, 17,808 view checks and app compile/signature
+pass. No launch/install or acceptance; the complete-pack gate remains enabled.
+Inventory is 118 candidates. Live lifecycle/timing, high-speed overlays,
+remaining art and headed acceptance are unfinished. See
+`docs/reports/2026-10-20-remaster-flight-simulator.md`.
+
 2026-10-20, Plane Flyer candidate (Codex, isolated remaster branch): added four
 shaped red aircraft with open cockpits, cowling eyes, roundels, propellers,
 telescoping supports and a double-sided sculpted sun. All four native keys and

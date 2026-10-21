@@ -175,7 +175,60 @@ int main(void){
     capture.ncomponents=TP_RM_ASSEMBLY_MAX+1;
     CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,-1,&capture,&projection,&placed));capture.ncomponents=0;
     CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,0,&capture,&projection,&placed));
+    /* Opaque Flight Simulator frames have no source passenger markers. Both
+     * projections must keep real identities inside the moving cabin, using
+     * an explicit authored sitter rather than dropping occupied rides. */
+    const unsigned enclosed_frames[]={1350,1351,175,1353,176,177};
+    unsigned rec=0x1cced0,base=0x400000;int enclosed_cases=0;
+    memset(memory+base+200,0,8*200);memory[base+204]=4;memory[base+212]=2;
+    put16(rec+0xa6,5);memory[rec+0xb3]=5;memory[rec+0xa8]=80;
+    put32(0x1d3b78,base+8*200);
+    for(int mode=0;mode<2;mode++)for(int fi=0;fi<6;fi++)
+      for(int count=0;count<=5;count++)for(int appearance=0;appearance<9;appearance++){
+        tp_remaster_capture_begin(&capture,4);capture.frame_count=1;
+        capture.drawn_frame=enclosed_frames[fi];capture.frame_x=228;capture.frame_y=328;
+        put16(base+210,enclosed_frames[fi]);put16(base+200+0x47,count?2:0);
+        for(int i=0;i<5;i++){
+            unsigned person=base+(i+2)*200;memory[person+4]=2;
+            memory[person+0x59]=appearance==8?i:appearance;
+            put16(person+0x47,i+1<count?i+3:0);
+        }
+        projection.lo=mode;projection.aspect=mode?1.2:1;
+        memcpy(before,memory,64u<<20);
+        CHECK(tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+        CHECK(placed.frame==enclosed_frames[fi]&&placed.type==0&&placed.rig_ok);
+        for(int slot=0;slot<40;slot++){
+            CHECK(!capture.rig_riders[slot].present); /* source metadata unchanged */
+            if(slot<count){
+                CHECK(placed.rider_ids[slot]==count+1-slot);
+                CHECK(placed.seats[slot]==(appearance==8?count-1-slot:appearance));
+                CHECK(placed.riders[slot].present&&!placed.riders[slot].visible);
+                CHECK(placed.riders[slot].pose==65452);
+            }else CHECK(placed.seats[slot]==255&&!placed.riders[slot].present);
+        }
+        CHECK(tp_remaster_riders_valid(5,placed.seats,placed.riders));
+        CHECK(!memcmp(memory,before,64u<<20));enclosed_cases++;
+    }
+    CHECK(enclosed_cases==648);
+    CHECK(!tp_remaster_enclosed_ride_key(1,1350));
+    CHECK(!tp_remaster_enclosed_ride_key(0,1352));
+    CHECK(!tp_remaster_car_pose_valid(65452,0));
+    placed.riders[0].visible=1;CHECK(!tp_remaster_riders_valid(5,placed.seats,placed.riders));
+    placed.riders[0].visible=0;CHECK(!tp_remaster_riders_valid(4,placed.seats,placed.riders));
+    capture.rig_riders[0]=(TPRMRider){65024,0,1,1};
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    memset(capture.rig_riders,0,sizeof capture.rig_riders);put16(rec+0xa6,4);
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    put16(rec+0xa6,5);put16(base+200+0x16,1);
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    put16(base+200+0x16,0);memory[rec+0xb3]=7;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    memory[rec+0xb3]=5;memory[base+400+0x59]=8;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    memory[base+400+0x59]=0;put16(base+1200+0x47,7);memory[base+1404]=2;
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
     free(memory);free(before);free(a);free(b);free(pa);free(pb);
+    printf("remaster scene: %d enclosed-cabin identity/pose cases and malformed cabin states passed\n",enclosed_cases);
     printf("remaster scene: %d unchanged native passes, %d nested entrance passes, shared world placement, malformed descriptors, sign bounds, scopes and read-only memory passed\n",cases,nested);
     return 0;
 }

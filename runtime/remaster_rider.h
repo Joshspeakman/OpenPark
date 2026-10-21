@@ -12,6 +12,9 @@
  * a real passenger even when its variant has no substitution-table entry.
  * 65448..65451 similarly retain ride sprite-31 occupants (Big Wheel); they
  * use ride-specific seated poses independently of the car's sprite-31 keys.
+ * 65452 is the authored enclosed Flight Simulator sitter. Its opaque source
+ * cabin has no passenger markers; scene resolution retains actual occupants
+ * only for its verified six frame keys. This is not a source sprite pose.
  * A rig authors the posture in its seat's local space. The ride's seat matrix
  * supplies position/orientation. Mirrored states have explicit pose keys.
  */
@@ -55,6 +58,11 @@ static inline uint16_t tp_remaster_ride_omitted_key(unsigned offset,unsigned fla
 static inline int tp_remaster_car_pose_valid(unsigned key,unsigned visible){
     return tp_remaster_rider_key_valid(key) || (key>=65440 && key<65444 && !visible);
 }
+static inline uint16_t tp_remaster_enclosed_ride_key(unsigned type,unsigned frame){
+    if(type)return 0;
+    return frame==1350 || frame==1351 || frame==175 || frame==1353 ||
+           frame==176 || frame==177 ? 65452:0;
+}
 static inline int tp_remaster_riders_valid(int seats,const uint8_t expected[40],
                                           const TPRMRider actual[40]){
     if(seats<0 || seats>40)return 0;
@@ -65,7 +73,7 @@ static inline int tp_remaster_riders_valid(int seats,const uint8_t expected[40],
            r->variant!=expected[i] || r->visible>1 ||
            (!tp_remaster_rider_key_valid(r->pose) &&
             !tp_remaster_shop_key_valid(r->pose) &&
-            !(r->pose>=65440 && r->pose<65452 && !r->visible)))return 0;
+            !(r->pose>=65440 && r->pose<=65452 && !r->visible)))return 0;
     }
     return 1;
 }
