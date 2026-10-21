@@ -257,7 +257,7 @@ int main(void){
     }
     CHECK(tp_remaster_car_omitted_key(31*6,0x80)==65440); /* separate pose domains */
     CHECK(!tp_remaster_car_pose_valid(65448,0));
-    c.rig_riders[0].visible=0;c.rig_riders[0].pose=65453;
+    c.rig_riders[0].visible=0;c.rig_riders[0].pose=65454;
     CHECK(!tp_remaster_riders_valid(2,c.seats,c.rig_riders));
     CHECK(!tp_remaster_ride_omitted_key(56*6,0x80));CHECK(!tp_remaster_ride_omitted_key(57*6,4));
     put16(0x510000+20,6);put16(0x510000+20+6,0x80);memory[thing+400+0x59]=3;

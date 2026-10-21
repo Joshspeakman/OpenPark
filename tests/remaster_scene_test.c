@@ -227,7 +227,38 @@ int main(void){
     CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
     memory[base+400+0x59]=0;put16(base+1200+0x47,7);memory[base+1404]=2;
     CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    /* Tree House: only its 23 unmarked interior keys synthesize the hidden
+     * occupant attachment. Its lift/walking/lookout markers remain native. */
+    int tree_cases=0;unsigned tree_rec=rec+200;
+    put16(base+200+0x16,200);put16(tree_rec+0xa6,1);
+    memory[tree_rec+0xb3]=5;memory[tree_rec+0xa8]=80;put16(base+400+0x47,0);
+    for(int mode=0;mode<2;mode++)for(int frame=5618;frame<=5645;frame++){
+        if(frame>5618 && frame<5624)continue;
+        for(int occupied=0;occupied<2;occupied++)for(int variant=0;variant<8;variant++){
+            tp_remaster_capture_begin(&capture,4);capture.frame_count=1;
+            capture.drawn_frame=frame;capture.frame_x=228;capture.frame_y=328;
+            put16(base+210,frame);put16(base+200+0x47,occupied?2:0);
+            memory[base+400+0x59]=variant;projection.lo=mode;
+            CHECK(tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+            CHECK(placed.type==1&&placed.frame==frame);
+            CHECK(placed.riders[0].present==occupied&&!placed.riders[0].visible);
+            if(occupied)CHECK(placed.riders[0].pose==65453&&placed.seats[0]==variant&&placed.rider_ids[0]==2);
+            else CHECK(placed.seats[0]==255&&!placed.rider_ids[0]);
+            CHECK(tp_remaster_riders_valid(1,placed.seats,placed.riders));tree_cases++;
+        }
+    }
+    CHECK(tree_cases==736&&!tp_remaster_car_pose_valid(65453,0));
+    CHECK(!tp_remaster_tree_hidden_key(5619)&&!tp_remaster_tree_hidden_key(5623));
+    CHECK(!tp_remaster_tree_hidden_key(294)&&!tp_remaster_tree_hidden_key(5646));
+    put16(base+210,5619);capture.drawn_frame=5619;
+    CHECK(tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    CHECK(!placed.riders[0].present&&!tp_remaster_riders_valid(1,placed.seats,placed.riders));
+    put16(base+210,5618);capture.drawn_frame=5618;put16(tree_rec+0xa6,2);
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
+    put16(tree_rec+0xa6,1);put16(base+200+0x16,201);
+    CHECK(!tp_remaster_scene_resolve(memory,64u<<20,64,1,&capture,&projection,&placed));
     free(memory);free(before);free(a);free(b);free(pa);free(pb);
+    printf("remaster scene: %d hidden Tree House identity cases and visible-frame guards passed\n",tree_cases);
     printf("remaster scene: %d enclosed-cabin identity/pose cases and malformed cabin states passed\n",enclosed_cases);
     printf("remaster scene: %d unchanged native passes, %d nested entrance passes, shared world placement, malformed descriptors, sign bounds, scopes and read-only memory passed\n",cases,nested);
     return 0;

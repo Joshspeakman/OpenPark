@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Tree House candidate (Codex, isolated remaster branch): added all
+36 native keys with the wooden lift, layered tree/lookout, articulated
+elephant and canopy peek sequences. Actual linked guests follow source
+markers; the 23 unmarked keys retain an explicit authored interior crouch.
+Forty new guest poses preserve all prior geometry, materials and pose lines.
+Corrected lift/rope contact, elephant soles, roots, lookout support and UV
+bounds. General walking sole origins need a separate audit after hidden
+transform groups were found to affect their grounding calculation.
+
+736 new scene cases, 648 native probes, 328 final captures, 288 guest/frame
+support checks and 36 inspection borders pass. 648 old/new native passes
+match 5,752 events/pixels with unchanged memory. Twelve native remaster
+checks, 21 Python tests, both walk modes, 17,808 view checks and app
+compile/signature pass. Inventory is 119 unaccepted candidates. No app
+launch/install; complete-pack gate remains enabled. Interior traversal,
+occlusion fidelity, live lifecycle/timing, remaining assets and headed
+acceptance are unfinished. See `docs/reports/2026-10-20-remaster-tree-house.md`.
+
 2026-10-20, Flight Simulator candidate (Codex, isolated remaster branch): added
 the silver/yellow closed cabin, windows, fins, interior seats, red base and a
 connected three-turn spring across all six native keys. Shared scene

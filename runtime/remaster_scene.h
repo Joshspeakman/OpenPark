@@ -86,13 +86,14 @@ static inline int tp_remaster_scene_resolve(const uint8_t*m,size_t size,unsigned
                  * same-looking guests must remain distinct occupants. */
                 c->seats[i]=guests[order[i]];c->rider_ids[i]=ids[order[i]];
             }
-            /* The Flight Simulator's six opaque cabin frames contain no
-             * sprite seat markers. Retain the actual linked passengers for
-             * its authored interior; never infer this for another ride or
-             * overwrite native rider metadata. The cabin supplies occlusion. */
-            uint16_t enclosed=tp_remaster_enclosed_ride_key((unsigned)type,c->frame);
+            /* Selected opaque-cabin/interior frames have no sprite seat
+             * markers. Retain actual linked passengers for their authored
+             * interiors; never infer this for another ride or frame or
+             * overwrite native rider metadata. The structure supplies occlusion. */
+            uint16_t enclosed=type==1?tp_remaster_tree_hidden_key(c->frame):
+                tp_remaster_enclosed_ride_key((unsigned)type,c->frame);
             if(c->rig_ok && enclosed){
-                if(tp_rm_scene_u16(t,0x16)!=0 || kind!=5 || cap!=5 || n>cap)c->rig_ok=0;
+                if(tp_rm_scene_u16(t,0x16)!=type*200 || kind!=5 || cap!=(type==1?1:5) || n>cap)c->rig_ok=0;
                 for(int i=0;i<40;i++)if(c->riders[i].present)c->rig_ok=0;
                 if(c->rig_ok)for(int i=0;i<cap;i++)if(c->seats[i]!=255){
                     if(c->seats[i]>=8){c->rig_ok=0;break;}

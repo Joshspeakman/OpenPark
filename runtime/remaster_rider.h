@@ -15,6 +15,7 @@
  * 65452 is the authored enclosed Flight Simulator sitter. Its opaque source
  * cabin has no passenger markers; scene resolution retains actual occupants
  * only for its verified six frame keys. This is not a source sprite pose.
+ * 65453 retains the Tree House visitor during its unmarked interior states.
  * A rig authors the posture in its seat's local space. The ride's seat matrix
  * supplies position/orientation. Mirrored states have explicit pose keys.
  */
@@ -63,6 +64,9 @@ static inline uint16_t tp_remaster_enclosed_ride_key(unsigned type,unsigned fram
     return frame==1350 || frame==1351 || frame==175 || frame==1353 ||
            frame==176 || frame==177 ? 65452:0;
 }
+static inline uint16_t tp_remaster_tree_hidden_key(unsigned frame){
+    return frame==5618 || (frame>=5624 && frame<=5645) ? 65453:0;
+}
 static inline int tp_remaster_riders_valid(int seats,const uint8_t expected[40],
                                           const TPRMRider actual[40]){
     if(seats<0 || seats>40)return 0;
@@ -73,7 +77,7 @@ static inline int tp_remaster_riders_valid(int seats,const uint8_t expected[40],
            r->variant!=expected[i] || r->visible>1 ||
            (!tp_remaster_rider_key_valid(r->pose) &&
             !tp_remaster_shop_key_valid(r->pose) &&
-            !(r->pose>=65440 && r->pose<=65452 && !r->visible)))return 0;
+            !(r->pose>=65440 && r->pose<=65453 && !r->visible)))return 0;
     }
     return 1;
 }
