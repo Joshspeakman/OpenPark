@@ -5,6 +5,28 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Pirate Boat candidate (Codex, isolated remaster branch): added a
+closed planked hull, curved red/ivory sail, water-painted grounded base and
+eight individual seats across all 50 native keys from three source chains.
+All motion uses one rigid hull and fixed dimensions. New generated bitmap
+materials are packed into the model; inner wood UVs avoid repeated panels.
+Forty-eight new exact keys extend the eight canonical guests without changing
+their geometry/materials or any existing pose.
+
+The native sprite-57 marker consumes a passenger while omitting its source
+body. Capture now retains that actual occupant for geometry occlusion, with
+900 old/new native passes matching all 10,778 source events/pixels and unchanged
+memory. All 458 occupancy probes resolve exact authored guest poses; 216
+captures cover both normal modes and Visitor projections. Every authored hull
+pose stays supported by the base and fits the fixed inspection camera.
+Twelve remaster native checks, 21 Python tests, both walk modes, 17,808 view
+checks and compile/signature pass. No app launch/install or art acceptance.
+The rocker angles/contact path are authored candidates; live timing/lifecycle
+and final fidelity still need validation. Current inventory is 115 candidates,
+with all 112 owned resources unchanged. Remaining rides, other art/animations,
+terrain/effects, ride cameras and final headed acceptance remain unfinished.
+See `docs/reports/2026-10-20-remaster-pirate-boat.md`.
+
 2026-10-20, normal complete-model drawing (Codex, isolated remaster branch):
 the normal gameplay colour pass now consumes the shared scene descriptors and
 draws complete models with their exact occupied poses and modular tracks.

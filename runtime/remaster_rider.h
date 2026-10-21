@@ -8,6 +8,8 @@
  * 65440..65443 identify the native vehicle's deliberately omitted sprite-31
  * marker (one key per flip); these require native visible=0. They still
  * identify an occupied 3D seat, whose authored pose must exist.
+ * 65444..65447 identify the ride's omitted sprite-57 marker. This consumes
+ * a real passenger even when its variant has no substitution-table entry.
  * A rig authors the posture in its seat's local space. The ride's seat matrix
  * supplies position/orientation. Mirrored states have explicit pose keys.
  */
@@ -43,6 +45,9 @@ static inline int tp_remaster_shop_key_valid(unsigned key){
 static inline uint16_t tp_remaster_car_omitted_key(unsigned offset,unsigned flags){
     return offset==31*6 && !(flags & ~0x83u) ? (uint16_t)(65440+(flags&3)):0;
 }
+static inline uint16_t tp_remaster_ride_omitted_key(unsigned offset,unsigned flags){
+    return offset==57*6 && !(flags & ~0x83u) ? (uint16_t)(65444+(flags&3)):0;
+}
 static inline int tp_remaster_car_pose_valid(unsigned key,unsigned visible){
     return tp_remaster_rider_key_valid(key) || (key>=65440 && key<65444 && !visible);
 }
@@ -56,7 +61,7 @@ static inline int tp_remaster_riders_valid(int seats,const uint8_t expected[40],
            r->variant!=expected[i] || r->visible>1 ||
            (!tp_remaster_rider_key_valid(r->pose) &&
             !tp_remaster_shop_key_valid(r->pose) &&
-            !(r->pose>=65440 && r->pose<65444 && !r->visible)))return 0;
+            !(r->pose>=65440 && r->pose<65448 && !r->visible)))return 0;
     }
     return 1;
 }

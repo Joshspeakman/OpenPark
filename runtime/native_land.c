@@ -696,8 +696,13 @@ static int rem_7be8;                                    /* 0x1d7be8: the last by
 static void rider_blit(uint32_t entry,int x,int y,int flags,int seat,uint32_t person,int pose,int alternate) {
     uint32_t sprites=r32(SPRITES);
     int visible=entry>sprites && M[entry+4] && M[entry+5];
+    uint16_t key=tp_remaster_rider_key(pose,alternate,(unsigned)flags);
+    if(pose<0 && !alternate){
+        key=tp_remaster_ride_omitted_key(entry-sprites,(unsigned)flags);
+        if(key)visible=0;
+    }
     if(marks && dlog)dlog(7,seat,M[person+0x59],
-        tp_remaster_rider_key(pose,alternate,(unsigned)flags),(uint32_t)visible,flags,dctx);
+        key,(uint32_t)visible,flags,dctx);
     if(entry>sprites)log_blit(entry,x,y,flags);
     if(marks && dlog)dlog(7,-1,0,0,0,0,dctx);
 }
@@ -776,7 +781,16 @@ static int ride_draw(uint32_t t, int x, int y) {
                         ns = sprites + (uint16_t)r16(0x1b9a78 + (uint32_t)M[p + 0x59] * 0x5e + (uint32_t)i * 2);
                         break;
                     }
-                    if (!ns) continue;
+                    if (!ns) {
+                        /* Native source skips this consumed passenger. Keep
+                         * its identity for the 3-D hull's own occlusion. */
+                        uint16_t key=tp_remaster_ride_omitted_key((uint16_t)r16(e),(unsigned)fl);
+                        if(key && marks && dlog){
+                            dlog(7,seat,M[p+0x59],key,0,fl,dctx);
+                            dlog(7,-1,0,0,0,0,dctx);
+                        }
+                        continue;
+                    }
                 } else {
                     for(int i=0;i<0x2f;i++)if(r16(0x1b9a78+(uint32_t)i*2)==r16(e)){rider_pose=i;break;}
                     rider_blit(os, (int16_t)(x + r16(e + 2)), (int16_t)(y + r16(e + 4)), fl,seat,p,rider_pose,0);

@@ -237,6 +237,24 @@ int main(void){
     put16(0x1b9a78 + 7*0x5e + 2*2,0);CHECK(capture(s,1));c=s->cards[0];
     CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
     CHECK(c.rig_riders[1].present && !c.rig_riders[1].visible && c.rig_riders[1].pose==65090);
+    /* Pirate Boat marker 57 consumes a seat but is absent from the normal
+     * substitution table. Preserve the actual occupant for every appearance,
+     * including variant zero's tiny source blit and the skipped variants. */
+    put32(0x520000+57*6,0x530400);memory[0x520000+57*6+4]=6;memory[0x520000+57*6+5]=2;
+    for(int row=0;row<2;row++){memory[0x530400+row*8]=6;memset(memory+0x530401+row*8,0,7);}
+    put16(0x510000+20,57*6);
+    for(int mode=0;mode<2;mode++)for(int variant=0;variant<8;variant++)for(int flip=0;flip<2;flip++){
+        put16(SCREEN_MODE,mode?8:1);CHECK(geom(&s->g));
+        memory[thing+400+0x59]=(uint8_t)variant;put16(0x510000+20+6,0x80|flip);
+        CHECK(capture(s,1));c=s->cards[0];
+        CHECK(c.rig_ok && c.rider_ids[0]==3 && c.seats[0]==variant);
+        CHECK(c.rig_riders[0].present && !c.rig_riders[0].visible && c.rig_riders[0].pose==65444+flip);
+        CHECK(tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+        c.rig_riders[0].visible=1;CHECK(!tp_remaster_riders_valid(2,c.seats,c.rig_riders));
+    }
+    CHECK(!tp_remaster_ride_omitted_key(56*6,0x80));CHECK(!tp_remaster_ride_omitted_key(57*6,4));
+    put16(0x510000+20,6);put16(0x510000+20+6,0x80);memory[thing+400+0x59]=3;
+    put16(SCREEN_MODE,1);CHECK(geom(&s->g));
     put16(thing+0x92,65535);
     put16(0x1b9a58+3*4+2,6);put16(0x1b9a58+7*4+2,12);
     CHECK(capture(s,1));c=s->cards[0];
