@@ -1316,6 +1316,18 @@ static uint32_t key_of_char(unichar c) {
             if ([p[1] isEqual:@"money"]) { uint32_t pl; memcpy(&pl, m + 0x1d3b00, 4); a = pl + 0x0a; }   /* (the player's money: *COMPUTER block +0x0a) */
             memcpy(m + a, &v, 4);
         }
+        else if ([op isEqual:@"mousestate"]) { void tp_host_mouse_debug(char *, int); char st[256]; tp_host_mouse_debug(st, sizeof st); fprintf(stderr, "mousestate: %s\n", st); }
+        else if ([op isEqual:@"camto"]) {                /* camto X Y: the game's camera to map point X,Y; where it is on its screen */
+            int tp_view_camera_to(double, double, double *, double *), tp_view_world_to_canvas(double, double, double *, double *);
+            void tp_view_canvas_to_frac(double, double, double *, double *); double sx = 0, sy = 0, px, py;
+            if (tp_view_live() && tp_view_world_to_canvas(a1, a2, &px, &py)) {   /* the park view: centred there; its vshot pixels */
+                [_view centerOn:px :py]; tp_view_canvas_to_frac(px, py, &sx, &sy);
+                fprintf(stderr, "camto %g %g: view at %.1f %.1f\n", a1, a2, sx * ow, sy * oh);
+            } else {
+                int ok = tp_view_camera_to(a1, a2, &sx, &sy);
+                fprintf(stderr, "camto %g %g: %d at %.1f %.1f\n", a1, a2, ok, sx, sy);
+            }
+        }
         else if ([op isEqual:@"panel"]) tp_view_set_ui_scale(a1);
         else if ([op isEqual:@"grid"]) [self toggleGrid:nil];
         else if ([op isEqual:@"walk"]) {                 /* walk X Y: the Visitor View at map point X,Y (X < 0: the middle of the game's view) */

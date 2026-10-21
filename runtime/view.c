@@ -321,11 +321,16 @@ void tp_view_screen_pass(void) {
     if (getenv("TP_PACE_DEBUG")) { static double l; static int n; n++; if (t - l > 1) { fprintf(stderr, "pace: %d screen passes\n", n); n = 0; l = t; } }
 }
 static int st_game, st_pub, st_comp; static long st_game_total; static double st_pass, st_t0;      /* counts this second */
+static double st_pub_at, st_pub_gap, st_comp_at, st_comp_gap;           /* (the longest gaps this second) */
 static double sh_game, sh_pub, sh_comp, sh_pass;                        /* last second's */
 static void stats_tick(void) {
     double t = now(); if (!st_t0) st_t0 = t;
+    if (st_comp_at) { double d = t - st_comp_at; if (d > st_comp_gap) st_comp_gap = d; } st_comp_at = t;
     if (t - st_t0 >= 1) { double k = 1 / (t - st_t0); sh_game = st_game * k; sh_pub = st_pub * k; sh_comp = st_comp * k; sh_pass = st_pass * 1e3 * k;
-        st_game = st_pub = st_comp = 0; st_pass = 0; st_t0 = t; }
+        static int log = -1; if (log < 0) log = getenv("TP_STATS_LOG") != NULL;   /* (soak tests: a line a second) */
+        if (log) fprintf(stderr, "stats: game %.1f, park published %.1f, shown %.1f a second; longest gaps: published %.0f ms, shown %.0f ms; passes %.1f ms\n",
+                         sh_game, sh_pub, sh_comp, st_pub_gap * 1e3, st_comp_gap * 1e3, sh_pass);
+        st_game = st_pub = st_comp = 0; st_pass = 0; st_t0 = t; st_pub_gap = st_comp_gap = 0; }
 }                     /* the camera as the frame began */
 static long skipped_moved;                        /* frames left out: the camera moved while drawn */
 static int active, have_world, in_frame, coherent;
@@ -957,7 +962,7 @@ static void long_frame(uint64_t insns) {
     extern double tp_dbg_run, tp_dbg_gov, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
     static double run0, pass0, gov0, lock0, file0; static uint64_t ins0; static int logged; static long screen0;
     double t = now(), took = t - park_paced_at; if (!tp_view_t0) tp_view_t0 = t;
-    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && took > 0.05 && took < 30 && logged < 500) {
+    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && took > 0.05 && took < 30 && (logged < 500 || getenv("TP_STATS_LOG"))) {
         logged++;
         fprintf(stderr, "long frame at %.1f s: %.0f ms (game code %.0f ms for %.1fM instructions, of which the view's passes %.0f; "
                 "governor %.0f, view lock %.0f; files %.0f ms, %ld KB%s%s), weather %#x\n", t - tp_view_t0, took * 1e3,
@@ -1381,7 +1386,7 @@ void tp_view_hook(void) {
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
-        pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1; st_pub++;
+        pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1; st_pub++; if (st_pub_at && pub_time - st_pub_at > st_pub_gap) st_pub_gap = pub_time - st_pub_at; st_pub_at = pub_time;
         {   int bt = SH - BAND_H - (SH == 480 ? 44 : 22), n = 0;
             for (int x = 0; x < SW; x++) n += pub_overlay[(bt - 1) * SW + x] != 0xffff;
             pub_straddle = n > SW / 8; }                  /* (a few stray pixels are not a window) */
@@ -1601,6 +1606,37 @@ int tp_view_point_to_world(double fx, double fy, double *wx, double *wy) {
     *wy = (py - g.oy) / g.uy;
     *wx = (px - g.ox - c0 - g.uyx * *wy) / g.ux;
     return *wx >= 0 && *wy >= 0 && *wx < (int)tp_map_ext && *wy < (int)tp_map_ext;
+}
+/* Tests (the control file's camto): the game's camera so that map point (wx, wy) is near the middle of its own
+ * screen, and where that point then is in the game's frame (its pixels). 0 outside the park. */
+int tp_view_camera_to(double wx, double wy, double *sx, double *sy) {
+    M = tp_host_memory();
+    int s = mode_scale(); if (!s) return 0;
+    Geo g = geo(s);
+    int cy = (int)lround(wy - g.wh / 2.0 / g.uy), cx;
+    cy = cy < GAME_CY0 ? GAME_CY0 : cy > GAME_CY1 ? GAME_CY1 : cy;
+    cx = (int)lround(wx - (g.sw / 2.0 - g.uyx * (wy - cy)) / g.ux);
+    cx = cx < GAME_CX0 ? GAME_CX0 : cx > GAME_CX1 ? GAME_CX1 : cx;
+    w16(CAM_X, (int16_t)cx); w16(CAM_Y, (int16_t)cy); w16(LAND_DIRTY, 1);
+    int tw = (uint16_t)r16(0x1d663au), lo = M[SCREEN_MODE] & 1, off = r16(VIEW_OFF);
+    if (tw < 6) return 0;
+    double c0 = (0x280 - tw * ((0x280 - off) / tw)) >> lo;
+    *sx = g.ux * (wx - cx) + c0 + g.uyx * (wy - cy); *sy = g.uy * (wy - cy);
+    return 1;
+}
+int tp_view_world_to_canvas(double wx, double wy, double *px, double *py) {   /* (tests: the inverse of the above) */
+    M = tp_host_memory();
+    int tw = (uint16_t)r16(0x1d663au), lo = M[SCREEN_MODE] & 1, off = r16(VIEW_OFF);
+    if (tw < 6) return 0;
+    Geo g = geo(vis_s); double c0 = (0x280 - tw * ((0x280 - off) / tw)) >> lo;
+    *py = g.oy + g.uy * wy; *px = g.ox + c0 + g.uyx * wy + g.ux * wx;
+    return 1;
+}
+void tp_view_canvas_to_frac(double px, double py, double *fx, double *fy) {    /* (tests: where a canvas point is shown) */
+    pthread_mutex_lock(&lock);
+    Geo g = geo(vis_s); double lw = vis_lw > g.sw ? vis_lw : g.sw;
+    *fx = (px - vis_x) * vis_z / lw; *fy = (py - vis_y) * vis_z / g.sh;
+    pthread_mutex_unlock(&lock);
 }
 void tp_view_canvas_size(double *w, double *h) { Geo g = geo(vis_s); *w = g.cw; *h = g.ch; }
 /* The game's cursor as RGBA (CUR x CUR, w x h used), its corner's offset from the pointer in screen

@@ -1422,11 +1422,19 @@ static void push_mouse(int x, int y, uint32_t buttons) {
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 void tp_host_mouse(double fx, double fy, uint32_t buttons) {
     int x0 = mouse.rx0, x1 = mouse.rx1, y0 = mouse.ry0, y1 = mouse.ry1;
-    /* The game's range is in the driver's 640x400 space for mode 13h, 640x480 in VESA 101h. */
-    int x = clampi((int)(fx * 640.0), x0, x1), y = clampi((int)(fy * (video_mode == 0x101 ? 480.0 : 400.0)), y0, y1);
+    /* The game's range is in the driver's 640x400 space for mode 13h, 640x480 in VESA 101h. In 640x480 the park
+     * sets its ranges 8 times the screen (0..5104 x 0..3824: its handler shifts the position right 3, 0x17d831), so
+     * the position is put in the range's scale: before, the game took a pointer at x as x / 8. */
+    double w = 640.0, h = video_mode == 0x101 ? 480.0 : 400.0;
+    int kx = x1 >= 4 * w ? (int)lround((x1 + 16) / w) : 1, ky = y1 >= 4 * h ? (int)lround((y1 + 16) / h) : 1;
+    int x = clampi((int)(fx * w * kx), x0, x1), y = clampi((int)(fy * h * ky), y0, y1);
     push_mouse(x, y, buttons);
 }
-void tp_host_mouse_pos(int *x, int *y) { *x = mouse.x; *y = mouse.y; }   /* the driver's 640x400 space */
+void tp_host_mouse_debug(char *out, int n) {   /* (tests: the driver's state) */
+    snprintf(out, n, "mouse %d,%d buttons %d range %d..%d %d..%d handler %d at %#x mask %#x pending %d in_callback %d queue %d..%d",
+             mouse.x, mouse.y, mouse.buttons, mouse.rx0, mouse.rx1, mouse.ry0, mouse.ry1, mouse.has_cb, mouse.cb_pc, mouse.cb_mask, pending_mouse, in_callback, mq_head, mq_tail);
+}
+void tp_host_mouse_pos(int *x, int *y) { *x = mouse.x; *y = mouse.y; }   /* the driver's space (eighths of a pixel in 640x480) */
 void tp_host_quit(void) { quit_requested = 1; }
 void tp_host_set_realtime(void) { deterministic = 0; rt_start = now_s(); timer_next = emu_now(); gov_t0 = 0; port_val[0x21] = 0xb8; }   /* (the PIC as a real-time start sets it) */
 
