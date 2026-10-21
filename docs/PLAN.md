@@ -15,6 +15,35 @@ Builds need only this repository, the owned package and a Python venv (the share
 
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
+2026-10-21, 640x480 report (the user: side scrolling, the cursor gone, broken graphics and glitches at the top menu,
+the staff and visitor icons at the top right clipped or missing). Reviewed by reading, in a cloud session without
+the game or a Mac: nothing below has been seen running; the user's play is the check. Five 320x200 sizes were still
+in the view's 640x480 path (the game draws its interface at twice the size there: the panel is 44 rows, 22 in 320x200):
+- The furniture rectangles (view.c hud_rect: the date 64x12, the icons at the top right 72x16) now scale with the
+  mode (128x24, 144x32). At the small size the icons' outer parts stayed in the park capture and were taken for park
+  (the marker): clipped off, and gone while a top menu was open (the diff path). The "drawn with the park" rule the
+  date had (its rectangle is what differs from the passes' park when nothing of it was drawn as interface) now covers
+  the icons' rectangle too.
+- The Panel Size band (60 advisor rows over the panel) is 120 + 44 rows in 640x480 (band_rows, panel_rows). One size
+  for both modes drew the advisor's top at the game's size and the rest at the panel's (the default 0.75): split,
+  and pub_straddle and the pointer's band mapping used the wrong rows.
+- The game's cursor: the view takes a picture of up to 128x128 (was 64: the larger tool cursors pass 64 at twice
+  the size, so the view had none to show; full screen, where the Mac's pointer is hidden and the view draws it,
+  there was no cursor at all). A cursor the view cannot take is logged once a size ("view: the game's cursor ...").
+- The pointer over the panel and the interface is kept two 320x200 pixels off the screen's edges in either mode
+  (was two 640x480 pixels: inside the game's edge zone at the sides, so the game and the app both scrolled).
+- The edge pan and the arrow keys move the view by the same park pixels in both modes (a layout point is twice the
+  park in 640x480: twice the speed there).
+- The game's camera limits (x 4..51, y 0..51) were measured in 320x200; its 640x480 screen shows twice the park and
+  its limits there are not known. If the game puts a camera the view set back to a nearer value twice running (the
+  other axis as set, no drag), the view takes that as its limit in this mode (logged: "the game keeps its camera
+  within"), instead of recentring on it as on a camera move (the park jumping back near the far edges). Nothing is
+  learned where the game agrees.
+Not changed, not known: the game's own scroll zones in 640x480 (the band keeping the pointer central, 96 x 64 px,
+stays); whether the cursor variables hold the 640x480 image. To check: the icons and date whole while playing and with
+a top menu open; the advisor at Panel Size 0.75; the cursor in full screen with every tool; scrolling to the park's
+right and bottom edges; `view:` lines in the log.
+
 2026-10-21, 640x480 leftovers (the user chose option 1: the display at 120 while the view moves, park frames at the
 game's 60). Checked in 640x480 at the user's settings: a ride's window opens in the column with the park either side;
 its video plays 4:3 at the full height with black beside, a click returns to the park view; the Visitor View starts,

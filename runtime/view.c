@@ -41,6 +41,7 @@
 #include <string.h>
 #include <time.h>
 #include "platform.h"                               /* (timing, real-time thread, parallel bands: platform/<os>/) */
+#include "host.h"                                   /* (TP_VIEW_CUR) */
 
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *args, int nargs, uint32_t max_blocks);
 uint8_t *tp_host_memory(void);
@@ -115,9 +116,16 @@ static Geo G;                       /* the emulation thread's (tp_view_hook) */
 #define CYMIN (-2)
 #define CYMAX ((int)tp_map_ext - 11)
 #define GAME_CX0 4
-#define GAME_CX1 ((int)tp_map_ext - 13)  /* (51 for the 64x64 park) */
+#define GAME_CX1 (lim_cx >= 0 ? lim_cx : (int)tp_map_ext - 13)  /* (51 for the 64x64 park, measured in 320x200) */
 #define GAME_CY0 0
-#define GAME_CY1 ((int)tp_map_ext - 13)
+#define GAME_CY1 (lim_cy >= 0 ? lim_cy : (int)tp_map_ext - 13)
+/* The game's own camera limits, learned: the range above was measured in 320x200, and the game's 640x480 screen shows
+ * twice the park, so its limits there may be nearer (not measured). The view moving the camera past the game's limit
+ * had the game put it back every frame: a camera the view did not expect, the app recentring on it, the park jumping
+ * back as the pointer scrolled towards the far edges. A camera the game puts back to the same nearer value twice
+ * running is its limit from then on (tp_view_hook, FRAME_RENDER); the mode's own again at a switch of screen mode. */
+static int lim_cx = -1, lim_cy = -1, refused_cx = -1, refused_cy = -1;
+static int16_t set_cx = -999, set_cy = -999;      /* the camera the view last set (tp_view_poll), until the game's next frame */
 #define MAX_SCREEN (640 * 480)
 #define MAX_CANVAS (4400 * 2400)              /* (a 128x128 park in 640x480: 4352 x 2340) */
 /* The art is the same size in both modes (measured: a camera step moves the
@@ -158,9 +166,14 @@ static Geo geo(int s) {
 static int menu_open(void);
 static volatile int topbar;                       /* the pointer is on the top bar */
 static int16_t topbar_cx, topbar_cy;              /* the camera to hold meanwhile */
-static int hud_rect(int k, int *r) {               /* the furniture's rectangles in this mode */
-    if (k == 0) { r[0] = 0; r[1] = 0; r[2] = 64; r[3] = 12; return 1; }
-    if (k == 1) { r[0] = SW - 72; r[1] = 0; r[2] = SW; r[3] = 16; return 1; }
+/* The furniture's rectangles in this mode: the date (top left) and the staff and visitor icons (top right), measured in
+ * 320x200; the game draws its interface at twice the size in 640x480 (the panel is 44 rows there, 22 in 320x200), so
+ * they scale with the mode. (At their 320x200 size in 640x480 the icons' outer parts stayed in the park capture and
+ * were taken for park: clipped off, or gone while a top menu was open.) */
+static int hud_rect(int k, int *r) {
+    int s = G.s == 2 ? 2 : 1;
+    if (k == 0) { r[0] = 0; r[1] = 0; r[2] = 64 * s; r[3] = 12 * s; return 1; }
+    if (k == 1) { r[0] = SW - 72 * s; r[1] = 0; r[2] = SW; r[3] = 16 * s; return 1; }
     return 0;
 }
 
@@ -199,10 +212,15 @@ static uint16_t pub_overlay[MAX_SCREEN], prev_overlay[MAX_SCREEN];         /* 0x
 static volatile double ui_scale = 1;
 static int pub_straddle;                                /* interface crosses the band's top (a game window): panel at its own size */
 __attribute__((constructor)) static void ui_scale_env(void) { const char *e = getenv("TP_UI_SCALE"); if (e) ui_scale = atof(e); }
-#define BAND_H 60
+/* The band the Panel Size setting scales: the panel's rows and the advisor's above them, in the screen's rows (the
+ * interface is drawn at twice the size in 640x480: 44 + 120 rows there, 22 + 60 in 320x200; one size for both split
+ * the advisor at his middle, the top at the game's size and the rest at the panel's). */
+static int panel_rows(int sh) { return sh == 480 ? 44 : 22; }
+static int band_rows(int sh) { return sh == 480 ? 120 : 60; }
+#define BAND_H band_rows(SH)
 static uint32_t pub_pal[256];
 static double pub_time;
-#define CUR 64                                    /* the game's cursor, cut out of its last frame */
+#define CUR TP_VIEW_CUR                           /* the game's cursor, read from the game (host.h) */
 static uint16_t pub_cursor[CUR * CUR]; static int pub_cur_x, pub_cur_y, pub_cur_ok, pub_cur_w, pub_cur_h, pub_cur_serial;
 static uint8_t pub_panel[MAX_SCREEN];             /* the panel rows as published (without the game's cursor) */
 int tp_view_hw_cursor;                            /* the app shows the cursor itself (a Mac cursor): compose leaves it out */   /* offset from the hotspot */
@@ -991,6 +1009,7 @@ void tp_view_hook(void) {
     if (sc != G.s || geo_ext != tp_map_ext) {             /* the game changed its screen mode ([R]) or the park size: start again */
         G = geo(sc); geo_ext = tp_map_ext; ngrid = 0; memset(canvas, 0, (size_t)CW * CH);
         have_world = have_pre_extras = pre_ok = 0; in_frame = 0;
+        lim_cx = lim_cy = refused_cx = refused_cy = -1; set_cx = set_cy = -999;   /* (the game's camera limits: this mode's) */
         pthread_mutex_lock(&lock); pub_time = 0; pub_cur_ok = 0; pthread_mutex_unlock(&lock);
         if (active) { active = 0; hooks(0); }
         return;
@@ -1038,9 +1057,18 @@ void tp_view_hook(void) {
         if (active || w) {                                /* the game moved its camera (a jump to an event, its keys) */
             int16_t cx = r16(CAM_X), cy = r16(CAM_Y);
             if (cx != seen_cx || cy != seen_cy) {
-                if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view: the game moved its camera %d,%d -> %d,%d%s\n", seen_cx, seen_cy, cx, cy, drag_held ? " (drag)" : "");
-                seen_cx = cx; seen_cy = cy; if (!drag_held) camera_moves++;   /* (a drag's own scrolling: the view stays) */
+                /* The camera the view set, put back nearer by the game on an axis (the other as set or nearer too, no
+                 * drag: not its own scrolling, which needs the pointer at its edge): its limit, once seen twice (above). */
+                int learned = 0;
+                if (!drag_held && set_cx != -999) {
+                    if (cx < set_cx && cy <= set_cy && cx > GAME_CX0) { if (cx == refused_cx && cx < GAME_CX1) { lim_cx = cx; learned = 1; } refused_cx = cx; }
+                    if (cy < set_cy && cx <= set_cx && cy > GAME_CY0) { if (cy == refused_cy && cy < GAME_CY1) { lim_cy = cy; learned = 1; } refused_cy = cy; }
+                }
+                if (learned) fprintf(stderr, "view: the game keeps its camera within x %d, y %d (its limits in this mode, learned)\n", GAME_CX1, GAME_CY1);
+                if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view: the game moved its camera %d,%d -> %d,%d%s\n", seen_cx, seen_cy, cx, cy, drag_held ? " (drag)" : learned ? " (its limit)" : "");
+                seen_cx = cx; seen_cy = cy; if (!drag_held && !learned) camera_moves++;   /* (a drag's own scrolling: the view stays) */
             }
+            set_cx = set_cy = -999;
         }
         coherent = 0; weather_n = 0; fr_cx = r16(CAM_X); fr_cy = r16(CAM_Y);
         if (getenv("TP_VIEW_OLD")) coherent = 1;          /* development: the behaviour before (every frame captured) */
@@ -1204,7 +1232,11 @@ void tp_view_hook(void) {
              * [0x1becb4] shown, [0x1de58c]/[0x1de58e] width and height, [0x1de590] the image (rows
              * [0x1de594] apart, colour 0xfe transparent), drawn with its corner at the mouse position. */
             int cw = (uint16_t)r16(0x1de58c), chh = (uint16_t)r16(0x1de58e); uint32_t data = r32(0x1de590), stride = r32(0x1de594);
-            if (r32(0x1becb4) && cw > 0 && chh > 0 && cw <= CUR && chh <= CUR && stride >= (uint32_t)cw && stride <= 640 && data > 0x10000 && data + stride * chh < (64u << 20)) {
+            int shown = r32(0x1becb4) != 0, fits = cw > 0 && chh > 0 && cw <= CUR && chh <= CUR && stride >= (uint32_t)cw && stride <= 1280 && data > 0x10000 && data + stride * chh < (64u << 20);
+            if (shown && !fits) {                      /* (a cursor the view cannot take: say so once a size, the log tells which) */
+                static int lw, lh; static uint32_t ls; if (cw != lw || chh != lh || stride != ls) { lw = cw; lh = chh; ls = stride;
+                    fprintf(stderr, "view: the game's cursor %dx%d (rows %u apart, at %#x) is not shown by the view\n", cw, chh, stride, data); } }
+            if (shown && fits) {
                 static uint16_t nc[CUR * CUR];
                 for (int i = 0; i < CUR * CUR; i++) nc[i] = 0xffff;
                 for (int y = 0; y < chh; y++) for (int x = 0; x < cw; x++) { uint8_t v = M[data + (uint32_t)y * stride + x]; if (v != 0xfe) nc[y * CUR + x] = v; }
@@ -1371,16 +1403,17 @@ void tp_view_hook(void) {
                 if (pub_overlay[i] == 0xffff && X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X] && !(key && bb[i] == 0xff)) pub_overlay[i] = bb[i];
             }
         }
-        {   /* The date is usually drawn by the extras (so world_only lacks it: interface), but at times with the
-             * park: then nothing differs there. Only in that case, the date's rectangle is what differs from
-             * the passes' park (not the whole time: the game's frame lacks rides anchored above its top). */
-            int hr[4], n = 0; hud_rect(0, hr);
+        for (int r = 0; r < 2; r++) {   /* The date (and the icons at the top right) are usually drawn by the extras (so world_only
+             * lacks them: interface), but at times with the park: then nothing differs there. Only in that case, the
+             * rectangle is what differs from the passes' park (not the whole time: the game's frame lacks rides
+             * anchored above its top). */
+            int hr[4], n = 0, key = ff_is_key(); hud_rect(r, hr);
             for (int y = hr[1]; y < hr[3]; y++) for (int x = hr[0]; x < hr[2]; x++) n += pub_overlay[y * SW + x] != 0xffff;
-            if (n < 30) {
+            if (n < 30 * G.s * G.s) {                  /* (nothing of it drawn as interface: the threshold with the area) */
                 int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
                 for (int y = hr[1]; y < hr[3]; y++) for (int x = hr[0]; x < hr[2]; x++) {
                     int X = bx + x, Y = by + y, i = y * SW + x;
-                    if (X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X]) pub_overlay[i] = bb[i];
+                    if (X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X] && !(key && bb[i] == 0xff)) pub_overlay[i] = bb[i];
                 }
             }
         }
@@ -1409,7 +1442,7 @@ void tp_view_hook(void) {
         weather_n = 0;                                    /* (a frame without weather clears it) */
         tp_host_palette_rgba(pub_pal);
         pub_cx = real_cx; pub_cy = real_cy; pub_time = now(); pub_park = 1; st_pub++; if (st_pub_at && pub_time - st_pub_at > st_pub_gap) st_pub_gap = pub_time - st_pub_at; st_pub_at = pub_time;
-        {   int bt = SH - BAND_H - (SH == 480 ? 44 : 22), n = 0;
+        {   int bt = SH - BAND_H - panel_rows(SH), n = 0;
             for (int x = 0; x < SW; x++) n += pub_overlay[(bt - 1) * SW + x] != 0xffff;
             pub_straddle = n > SW / 8; }                  /* (a few stray pixels are not a window) */
         pub_frame_t = pacing ? tp_frame_paced_at : pub_time; pub_serial++;
@@ -1429,7 +1462,7 @@ double tp_view_ui_scale(void) { return ui_scale; }
 static int band_map(double lx, double ly, double lw, int sw, int sh, double k, double *sx, double *sy) {
     if (fabs(k - 1) <= 0.001) return 0;                  /* (smaller as well as larger: the rest of its place shows park) */
     if (pub_straddle) return 0;                           /* (a game window over the band: the panel at its own size) */
-    double bh = BAND_H + (sh == 480 ? 44 : 22);           /* (the advisor's rows and the panel's) */
+    double bh = band_rows(sh) + panel_rows(sh);           /* (the advisor's rows and the panel's) */
     double x0 = lw / 2 - sw * k / 2, y0 = sh - bh * k;
     if (lx < x0 || lx >= x0 + sw * k || ly < y0 || ly >= sh) return 0;
     *sx = (lx - x0) / k; *sy = (sh - bh) + (ly - y0) / k;
@@ -1461,7 +1494,7 @@ void tp_view_poll(void) {
         int in_band = on && band_map(lx, ly, lw, SW, SH, kk, &bsx, &bsy);
         if (in_band) { cxs = bsx; ly_ui = bsy; }          /* (the enlarged panel: its point on the screen) */
         int incol = cxs >= 0 && cxs < SW, ui = incol && ly_ui >= WORLD_H;   /* the panel, or the game's interface: through */
-        if (on && !in_band && fabs(kk - 1) > 0.001 && !pub_straddle && incol && ly >= SH - (BAND_H + (SH == 480 ? 44 : 22))) incol = 0;   /* (its original place shows park) */
+        if (on && !in_band && fabs(kk - 1) > 0.001 && !pub_straddle && incol && ly >= SH - (BAND_H + panel_rows(SH))) incol = 0;   /* (its original place shows park) */
         int menus = menu_open();
         if (on && incol && (ly < TOPBAR_OPEN || (topbar && ly < TOPBAR_H) || (menus && ly < WORLD_H))) {   /* the top bar and its menus: straight to the game, camera held */
             if (!topbar) { topbar = 1; topbar_cx = r16(CAM_X); topbar_cy = r16(CAM_Y); }
@@ -1479,8 +1512,10 @@ void tp_view_poll(void) {
         if (!on || ui) {
             double fx = incol ? cxs / SW : (cxs < 0 ? 0 : 0.9999), fy = in_band ? ly_ui / SH : q[i].fy;
             /* The game scrolls itself while the pointer is on the screen's edge (the panel's bottom row,
-             * say): with the view on, the app pans instead, so the game's pointer stays off the edges. */
-            if (on) { fx = fmin(fmax(fx, 2.0 / SW), (SW - 2.0) / SW); fy = fmin(fy, (SH - 2.0) / SH); }
+             * say): with the view on, the app pans instead, so the game's pointer stays off the edges: two 320x200
+             * pixels in from them in either mode (the game's edge zone is in its interface's units, twice as wide in
+             * 640x480; two 640x480 pixels left it in the zone at the sides, and the game and the app both scrolled). */
+            if (on) { double e = 2.0 * G.s; fx = fmin(fmax(fx, e / SW), (SW - e) / SW); fy = fmin(fy, (SH - e) / SH); }
             if (on && topbar) fy = fmax(fy, (SW == 640 ? 3.0 : 1.5) / SH);   /* (the bar's rows: the edge's above them scroll the park) */
             tp_host_mouse(fx, fy, q[i].buttons);
             continue;
@@ -1505,7 +1540,7 @@ void tp_view_poll(void) {
                 ny = ny < GAME_CY0 ? GAME_CY0 : ny > GAME_CY1 ? GAME_CY1 : ny;
                 int nx = (int)lround((px - OX - SW / 2.0 - UYX * ny) / UX);
                 nx = nx < GAME_CX0 ? GAME_CX0 : nx > GAME_CX1 ? GAME_CX1 : nx;
-                if (nx != cx || ny != cy) { w16(CAM_X, (int16_t)nx); w16(CAM_Y, (int16_t)ny); w16(LAND_DIRTY, 1); seen_cx = (int16_t)nx; seen_cy = (int16_t)ny; moved = 1;
+                if (nx != cx || ny != cy) { w16(CAM_X, (int16_t)nx); w16(CAM_Y, (int16_t)ny); w16(LAND_DIRTY, 1); seen_cx = set_cx = (int16_t)nx; seen_cy = set_cy = (int16_t)ny; moved = 1;
                     if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view poll: camera %d,%d -> %d,%d (in_frame %d)\n", cx, cy, nx, ny, in_frame); }
                 sx = px - cam_ox(nx, ny); sy = py - cam_oy(ny);
             }
@@ -1574,6 +1609,7 @@ void tp_view_enable(int main_game) {
     sentinel_on = 0; world_ok = 0; coherent = 0; ngrid = 0; rr = rr_done = 0; seen_cx = seen_cy = -999;
     memset(date_box, 0, sizeof date_box); date_fixed = 0; memset(prev_overlay, 0, sizeof prev_overlay);
     topbar = 0; drag_held = 0; restore = 0; G.s = 0;     /* (the top bar, a drag, a camera to put back; the geometry made again) */
+    lim_cx = lim_cy = refused_cx = refused_cy = -1; set_cx = set_cy = -999;
     pthread_mutex_lock(&lock); pub_cur_ok = 0; pub_straddle = 0; pthread_mutex_unlock(&lock);
 }
 void tp_view_geometry(int *sw, int *sh, int *wh);
@@ -1759,13 +1795,13 @@ static void compose_band(void *ctx, size_t band) {
                 if (iy >= g.wh && j->k > 1) { o[x] = 0xff000000u; continue; }   /* (the panel's own rows beside it; a smaller one: park) */
                 goto park;
             }
-            if (j->k < 0.999 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - BAND_H - (g.sh == 480 ? 44 : 22)) goto park;   /* (a smaller panel: the rest of its place) */
+            if (j->k < 0.999 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - band_rows(g.sh) - panel_rows(g.sh)) goto park;   /* (a smaller panel: the rest of its place) */
             if (ix >= 0 && ix < g.sw) {                                /* the screen column: panel and interface */
                 if (panel_row) { o[x] = pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
                 uint16_t u = pub_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pal[u]; continue; }
             }
-            if (fabs(j->k - 1) > 0.001 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - BAND_H - (g.sh == 480 ? 44 : 22)) goto park;   /* (its original place: park) */
+            if (fabs(j->k - 1) > 0.001 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - band_rows(g.sh) - panel_rows(g.sh)) goto park;   /* (its original place: park) */
           park:
             /* The weather the game drew (screen space): over the whole view, repeated beside the 4:3 column. */
             if (pub_weather_n) {                                       /* (the panel and interface came first) */
