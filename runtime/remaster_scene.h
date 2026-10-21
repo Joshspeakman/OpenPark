@@ -12,11 +12,18 @@ typedef struct {
     int cell_y;          /* this thing's cell origin, before the low-res shift */
 } TPRMProjection;
 typedef struct {
+    TPRMFigure draw;
+    uint16_t person;
+    uint8_t variant,valid;
+    int occupants;
+} TPRMSelectedFigure;
+typedef struct {
     int idx,cls,type,rig_ok;
     uint16_t frame;
     float x,y,z;
     uint8_t seats[40];TPRMRider riders[40];uint16_t rider_ids[40];
     TPRMVehicle vehicle;
+    TPRMSelectedFigure figure;int figure_count;
     unsigned ncomponents;TPRMPlacedComponent components[TP_RM_ASSEMBLY_MAX];
 } TPRMSceneObject;
 static inline uint16_t tp_rm_scene_u16(const uint8_t*m,size_t at){
@@ -45,8 +52,10 @@ static inline int tp_remaster_scene_resolve(const uint8_t*m,size_t size,unsigned
        !isfinite(g->tws) || !isfinite(g->ths) || !isfinite(g->shear) || !isfinite(g->aspect) ||
        !isfinite(g->world_x) || !isfinite(g->world_y) || g->tws<=0 || g->ths<=0 || g->aspect<=0 ||
        b->frame_count<0 || (b->frame_count==1 && (b->drawn_frame<0 || b->drawn_frame>65535)) ||
-       b->ncomponents<0 || b->ncomponents>TP_RM_ASSEMBLY_MAX)return 0;
+       b->ncomponents<0 || b->ncomponents>TP_RM_ASSEMBLY_MAX ||
+       b->figure_count<0 || b->figure_count>1)return 0;
     c->cls=idx<0?255:b->cls;
+    c->figure.draw=b->figure;c->figure_count=b->figure_count;
     memcpy(c->riders,b->rig_riders,sizeof c->riders);
     const uint8_t*t=idx>0?tp_rm_scene_thing(m,size,(unsigned)idx,0):NULL;
     if(idx>0 && (!t || t[4]!=b->cls))return 0;
@@ -74,6 +83,34 @@ static inline int tp_remaster_scene_resolve(const uint8_t*m,size_t size,unsigned
                 indices[n]=(uint8_t)n;ids[n]=(uint16_t)next;guests[n++]=p[0x59];next=tp_rm_scene_u16(p,0x47);
             }
             if(next)valid=0;
+            /* Maze figures are native-selected overlays, not descending
+             * seat substitutions. Preserve their actual identity/decision
+             * for both views. Geometry remains ineligible until its complete
+             * body, figure and occupancy rendering path is implemented. */
+            int maze=type==4 && kind==8 && cap==16 && n<=cap && valid &&
+               tp_rm_scene_u16(t,0x16)==800 && c->frame==1486 &&
+               b->frame_count==1 && b->drawn_frame==c->frame &&
+               (t[12]==2 || t[12]==4 || t[12]==6) &&
+               tp_rm_scene_u16(t,0x2e)<rec[0xa8];
+            for(int i=0;maze && i<n;i++)if(guests[i]>=8)maze=0;
+            if(maze){
+                c->figure.occupants=n;
+                /* Kind 8 has no seat rotation. Keep every linked person in
+                 * chain order, including those omitted by the source image. */
+                for(int i=0;i<n;i++){c->seats[i]=guests[i];c->rider_ids[i]=ids[i];}
+            }
+            if(maze && b->figure_count==1 && !b->figure_error && !b->rig_rider_error &&
+               tp_remaster_figure_valid(&b->figure)){
+                int selector=b->figure.selector,person=selector<0?-selector:selector;
+                int remembered=(int16_t)tp_rm_scene_u16(t,0x4d),clean=1;
+                for(int i=0;i<40;i++)if(c->riders[i].present)clean=0;
+                if(clean && (!remembered || remembered==selector))for(int i=0;i<n;i++){
+                    if(ids[i]==person && guests[i]<8){
+                        c->figure.person=(uint16_t)person;c->figure.variant=guests[i];
+                        c->figure.valid=1;break;
+                    }
+                }
+            }
             /* Castle loading/unloading has no attached bodies until this
              * native flag enables the substituted-passenger dispatch. */
             int seated_n=(kind==9 && !tp_rm_scene_u16(t,0x32))?0:n;
@@ -172,6 +209,8 @@ static inline int tp_remaster_scene_resolve(const uint8_t*m,size_t size,unsigned
         tp_rm_scene_position(g,b->frame_x,ground_y,&c->x,&c->y);
         c->frame=(uint16_t)b->drawn_frame;c->rig_ok=1;
     }
+    /* Never silently omit an unsupported or malformed animated figure. */
+    if(b->figure_count || b->figure_error){c->rig_ok=0;c->ncomponents=0;}
     return c->rig_ok || c->ncomponents;
 }
 #endif

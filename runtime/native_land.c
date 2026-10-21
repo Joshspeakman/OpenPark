@@ -812,6 +812,10 @@ static int ride_draw(uint32_t t, int x, int y) {
     /* mode 4 */
     uint32_t e0 = elems + (uint32_t)(uint16_t)r16(fr) * 10, s0 = sprites + (uint16_t)r16(e0);
     if (s0 > sprites) log_blit(s0, (int16_t)(x + r16(e0 + 2)), (int16_t)(y + r16(e0 + 4)), (uint16_t)r16(e0 + 6));
+    /* Stable per-thing capture must also isolate the remembered alternate
+     * offset from preceding rides. Sequential/oracle mode retains the native
+     * shared draw-order behavior. Both start from the simulation's value. */
+    if (tp_native_stable_rng) rem_7be8 = (uint16_t)r16(0x1d7be8);
     int ox = 0, oy = 0, cur = r16(t + 0x4d), f;
     uint32_t r;
     if (!cur) {
@@ -837,10 +841,16 @@ static int ride_draw(uint32_t t, int x, int y) {
         r = things + (uint32_t)(int16_t)cur * 0xc8;
         f = (uint16_t)r16(r + 0xa);
     }
+    int figure_end = 0;
     if (tick_is(3)) {                                                 /* advanced, then drawn (the end of a pose stops it) */
         f = next_frame(f);
-        if (M[frames + (uint32_t)f * 8 + 5] & 1) return 0;
+        figure_end = (M[frames + (uint32_t)f * 8 + 5] & 1) != 0;
     }
+    /* Observe the decision already made above. Do not reroll, advance again,
+     * change its source blits or persist anything into simulation memory. */
+    if (marks && dlog) dlog(13,(int16_t)cur,f,ox,(uint32_t)(int32_t)oy,
+        ((int16_t)cur<0?rem_7be8+1:0)|(figure_end?0x10:0),dctx);
+    if (figure_end) return 0;
     for (uint32_t e = elems + (uint32_t)(uint16_t)r16(frames + (uint32_t)f * 8) * 10, guard = 0; e > elems && guard < 256;
          e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10, guard++) {
         uint32_t s = sprites + (uint16_t)r16(e);

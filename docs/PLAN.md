@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Maze figure metadata (Codex, isolated remaster branch): shared
+capture now retains the native selected person/frame/offset/end decision
+and all 16 linked identities. Normal and Visitor views consume the same
+descriptor. Found and corrected an existing cross-Maze alternate-offset leak
+in stable per-thing rendering; sequential/oracle behavior remains unchanged.
+The owned-data two-Maze reproduction improved from 42/64 mismatches to zero;
+34 stable-mode source images intentionally change to the corrected offset.
+
+2,560 remembered and 256 random source-free cases, 1,152 multi-Maze cases and
+2,576 owned-data old/new passes succeed. The single-Maze comparison matches
+10,344 events/pixels with unchanged memory; 64 multi-Maze sequential passes
+also match the prior renderer. Thirteen native checks, 21 Python tests, both
+walk modes, 17,808 view checks and app build/signature pass. All 119 candidate
+models and 112 owned files are unchanged; no install/launch. Maze geometry,
+all 156 overlay keys, full occupant rendering, live lifecycle and final
+headed acceptance remain unfinished. Body-only replacement stays rejected.
+See `docs/reports/2026-10-20-remaster-maze-figure-capture.md`.
+
 2026-10-20, Maze source survey (Codex, isolated remaster branch): its one
 static hedge key omits 121 guest overlay keys and 35 additional peek keys
 selected through nine placements. Native kind 8 uses an actual linked-person

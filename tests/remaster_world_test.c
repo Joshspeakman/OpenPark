@@ -27,6 +27,7 @@ static void atomic_assemblies(void){
     clear(&r);CHECK(!rm_world_model(&r,&c));CHECK(!r.fragments);
     for(int i=0;i<64*64;i++)CHECK(!pixels[i]&&depth[i]==FLT_MAX);
     fixture(2,1,0,65024);CHECK(rm_world_model(&r,&c));CHECK(r.fragments>100);
+    clear(&r);c.figure_count=1;CHECK(!rm_world_model(&r,&c));CHECK(!r.fragments);c.figure_count=0;
     clear(&r);c.riders[1].pose=65025;CHECK(!rm_world_model(&r,&c));CHECK(!r.fragments);
     c.riders[1].pose=65024;c.riders[1].variant=7;CHECK(!rm_world_model(&r,&c));CHECK(!r.fragments);
     rm_reset();fixture(255,0,0,10);

@@ -38,7 +38,8 @@ static int placement_matches(Capture*s,int level){
     if(ok!=tp_remaster_scene_resolve(memory,64u<<20,tp_map_ext,s->stack[level],&local,&shifted,&b) ||
        a.cls!=b.cls || a.type!=b.type || a.frame!=b.frame || a.rig_ok!=b.rig_ok || a.ncomponents!=b.ncomponents ||
        memcmp(a.seats,b.seats,sizeof a.seats) || memcmp(a.riders,b.riders,sizeof a.riders) ||
-       memcmp(a.rider_ids,b.rider_ids,sizeof a.rider_ids) || memcmp(&a.vehicle,&b.vehicle,sizeof a.vehicle))return 0;
+       memcmp(a.rider_ids,b.rider_ids,sizeof a.rider_ids) || memcmp(&a.vehicle,&b.vehicle,sizeof a.vehicle) ||
+       a.figure_count!=b.figure_count || memcmp(&a.figure,&b.figure,sizeof a.figure))return 0;
     if(a.rig_ok && (fabsf(a.x-b.x)>3e-5f || fabsf(a.y-b.y)>3e-5f || fabsf(a.z-b.z)>3e-5f))return 0;
     for(unsigned i=0;i<a.ncomponents;i++){
         const TPRMPlacedComponent*p=&a.components[i],*q=&b.components[i];

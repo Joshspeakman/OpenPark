@@ -15,6 +15,10 @@ typedef void (*TPNativeDrawLog)(int kind,int a,int b,int c,uint32_t d,int e,void
  *  10: car origin, same fields as 9
  *  11: car track (a=thing index, b=native bounce)
  *  12: end thing (a=index, b=class).
+ *  13: kind-8 ride figure (a=signed person selector, b=selected frame,
+ *      c=source x offset, d=signed source y offset, e=figure flags).
+ *      Flags 0..9 select guest (0) or alternate table entry (1..9);
+ *      bit 0x10 means the native end-frame rule suppresses the figure.
  * Entrance redraws can nest things: begin/end delimit a stack, not a flat
  * sequence. Static scenery has a negative index and class -1. Text pointers
  * referenced by event 4 are valid only during that callback; copy if deferred.
@@ -23,7 +27,7 @@ void tp_native_things(const uint8_t *,int cx,int cy,int rows,TPNativeDrawLog,voi
 void tp_native_things_metadata(const uint8_t *,int cx,int cy,int rows,TPNativeDrawLog,void *);
 
 /* Visitor-only cell capture suppresses entrance neighbor redraws and keeps
- * sign text beyond normal pass bounds. It emits metadata 6..11 with the
+ * sign text beyond normal pass bounds. It emits metadata 6..11 and 13 with the
  * historic zero cell origin in event 6 and no end event. */
 int tp_native_cell_things(const uint8_t *,int cx,int cy,int gx,int gy,TPNativeDrawLog,void *);
 #endif

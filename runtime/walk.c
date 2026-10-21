@@ -115,7 +115,8 @@ static int geom(Geom *g) {
 #define SHR 8                       /* shadow samples per cell */
 typedef struct { float x, y, r, rig_x, rig_y, rig_z; uint16_t w, h, ax, ay, frame; uint32_t off; int16_t idx, type;
     uint8_t cls, big, shape, rig_ok, seats[40], layer_ok, nriders; LPRider riders[40];
-    TPRMRider rig_riders[40]; uint16_t rider_ids[40]; uint32_t component_first; uint16_t ncomponents; TPRMVehicle vehicle; } Card;
+    TPRMRider rig_riders[40]; uint16_t rider_ids[40]; uint32_t component_first; uint16_t ncomponents; TPRMVehicle vehicle;
+    TPRMSelectedFigure figure;int figure_count; } Card;
 typedef struct { int16_t idx, rider; uint8_t cls; float x, y; } Cont;
 typedef struct {
     int valid; uint32_t serial; Geom g; uint32_t pal[256]; int fi, T; uint8_t weather;
@@ -267,6 +268,7 @@ static void finish(Build *B) {
         memcpy(c->rig_riders,object.riders,sizeof c->rig_riders);
         memcpy(c->rider_ids,object.rider_ids,sizeof c->rider_ids);
         c->vehicle=object.vehicle;
+        c->figure=object.figure;c->figure_count=object.figure_count;
         if(c->rig_ok){c->rig_x=object.x;c->rig_y=object.y;c->rig_z=object.z;}
         if(object.ncomponents && s->ncomponents<=TP_RM_COMPONENT_POOL &&
            object.ncomponents<=TP_RM_COMPONENT_POOL-s->ncomponents){
@@ -917,10 +919,10 @@ int tp_walk_render(uint32_t *out, int ow, int oh) {
                 lp_draw(&mr,layer,layer_pose,c->x,c->y,(float)W.hscale,c->riders,c->nriders,s->pix,kx,ky);
                 layers_drawn++;rendered++;continue;
             }
-            if(reimagined && draw_track_assembly(s,c,&mr,(float)W.hscale)){
+            if(reimagined && !c->figure_count && draw_track_assembly(s,c,&mr,(float)W.hscale)){
                 rigs_drawn++;rendered++;continue;
             }
-            const RMRig *rig=reimagined && c->rig_ok ?
+            const RMRig *rig=reimagined && c->rig_ok && !c->figure_count ?
                 ((c->cls==0x18 || c->cls==0xe)?rm_find_frame(c->cls,c->frame):rm_find(c->cls,c->type)):NULL;
             const RMPose *pose=rig?rm_pose(rig,c->frame):NULL;
             if(pose) {

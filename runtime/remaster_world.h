@@ -13,6 +13,7 @@
 #include "walk_rig.h"
 
 static int rm_world_model(WMRender*r,const TPRMSceneObject*c){
+    if(c->figure_count)return 0; /* complete figure assemblies are not authored yet */
     if(c->ncomponents){
         if(c->cls!=18 || c->ncomponents>TP_RM_ASSEMBLY_MAX)return 0;
         const RMRig*rigs[TP_RM_ASSEMBLY_MAX];const RMPose*poses[TP_RM_ASSEMBLY_MAX];

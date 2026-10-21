@@ -9,10 +9,21 @@
 #include "remaster_assembly.h"
 #include "remaster_rider.h"
 typedef struct {
+    /* visible is the native end-frame decision, not a pixel-occlusion test. */
+    int selector,frame,x,y,alternative,visible;
+} TPRMFigure;
+static inline int tp_remaster_figure_valid(const TPRMFigure*f){
+    return f && f->selector && f->selector>-16384 && f->selector<16384 &&
+        f->frame>=0 && f->frame<=65535 && f->x>=INT16_MIN && f->x<=INT16_MAX &&
+        f->y>=INT16_MIN && f->y<=INT16_MAX && (f->visible==0 || f->visible==1) &&
+        (f->selector>0?f->alternative==-1:(f->alternative>=0 && f->alternative<9));
+}
+typedef struct {
     int cls,drawn_frame,frame_x,frame_y,frame_count;
     int rig_rider_error;TPRMRider rig_riders[40];
     TPRMComponent components[TP_RM_ASSEMBLY_MAX];int ncomponents,component_error;
     TPRMComponent car_origin;int car_origins,car_error,car_track,car_tracks,car_bounce;
+    TPRMFigure figure;int figure_count,figure_error;
 } TPRMCapture;
 static inline void tp_remaster_capture_begin(TPRMCapture*s,int cls){
     memset(s,0,sizeof *s);s->cls=cls;
@@ -25,6 +36,15 @@ static inline uint32_t tp_remaster_capture_u32(const uint8_t*m,size_t at){
 static inline int tp_remaster_capture_event(TPRMCapture*s,const uint8_t*m,size_t size,
                                             int kind,int a,int b,int c,uint32_t d,int e){
     if(kind==8){s->drawn_frame=a;s->frame_x=b;s->frame_y=c;s->frame_count++;return 1;}
+    if(kind==13){
+        int alternative=e&15,oy=(int32_t)d;
+        if(s->cls!=4 || s->figure_count || a==0 || a<=-16384 || a>=16384 ||
+           b<0 || b>65535 || c<INT16_MIN || c>INT16_MAX ||
+           oy<INT16_MIN || oy>INT16_MAX || e<0 || (e&~31) || alternative>9 ||
+           (a>0?alternative!=0:alternative==0))s->figure_error=1;
+        else s->figure=(TPRMFigure){a,b,c,oy,alternative-1,!(e&16)};
+        s->figure_count++;return 1;
+    }
     if(kind==11){
         uint64_t at=0,last=0;
         if(m && size>=0x1d3b7cu){
