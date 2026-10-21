@@ -1231,7 +1231,7 @@ void tp_view_hook(void) {
         {   /* The game's cursor, read where the game keeps it (0x17d2dd draws it in the copy to the screen):
              * [0x1becb4] shown, [0x1de58c]/[0x1de58e] width and height, [0x1de590] the image (rows
              * [0x1de594] apart, colour 0xfe transparent), drawn with its corner at the mouse position. */
-            int cw = (uint16_t)r16(0x1de58c), chh = (uint16_t)r16(0x1de58e); uint32_t data = r32(0x1de590), stride = r32(0x1de594);
+            int cw = (uint16_t)r16(0x1de58c), chh = (uint16_t)r16(0x1de58e); uint32_t data = r32(0x1de590), stride = (uint16_t)r16(0x1de594);   /* (a word: in 640x480 the next one is 4, and as a dword the stride read 262208, every cursor refused) */
             int shown = r32(0x1becb4) != 0, fits = cw > 0 && chh > 0 && cw <= CUR && chh <= CUR && stride >= (uint32_t)cw && stride <= 1280 && data > 0x10000 && data + stride * chh < (64u << 20);
             if (shown && !fits) {                      /* (a cursor the view cannot take: say so once a size, the log tells which) */
                 static int lw, lh; static uint32_t ls; if (cw != lw || chh != lh || stride != ls) { lw = cw; lh = chh; ls = stride;
