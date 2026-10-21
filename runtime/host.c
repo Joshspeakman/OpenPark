@@ -186,6 +186,7 @@ static uint32_t pit_divisor = 65536; static int pit_low = -1;
 static struct { int x, y; uint32_t buttons; int visible; int has_cb; uint32_t cb_mask, cb_sel, cb_pc;
                 int rx0, rx1, ry0, ry1; } mouse;
 static int pending_mouse; static uint32_t pm_event; static int pm_dx, pm_dy;
+static int mickey_rx = 8, mickey_ry = 16;           /* mickeys per 8 units (INT 33h 0Fh; the driver's defaults) */
 static int in_callback;
 
 /* input queues (real time) */
@@ -194,7 +195,7 @@ static uint32_t keys[64]; static int nkeys;
 static uint8_t raw_keys[64]; static int nraw;      /* make/break scancodes for an INT 9 handler */
 static uint8_t port60;
 static uint32_t shift_flags;
-typedef struct { int x, y; uint32_t buttons; } MouseEv;
+typedef struct { double fx, fy; uint32_t buttons, moved; } MouseEv;   /* (the screen's 0..1; moved: a move though the place is the same) */
 static MouseEv mouse_q[256]; static int mq_head, mq_tail;
 static volatile int quit_requested;
 static double rt_start, timer_next;
@@ -407,12 +408,20 @@ static int sb_irq(void) {
     return 1;
 }
 
+static int mouse_scale(void);
+static int clampi(int v, int lo, int hi);
+static int force_moved;                          /* (the next queued event is a move: queue_mouse_moved) */
 static void queue_mouse(int x, int y, uint32_t buttons) {
-    uint32_t event = (x != mouse.x || y != mouse.y) ? 1 : 0;
+    uint32_t event = (x != mouse.x || y != mouse.y || force_moved) ? 1 : 0; force_moved = 0;
     static const uint32_t bits[3][3] = {{1, 2, 4}, {2, 8, 16}, {4, 32, 64}};
     for (int i = 0; i < 3; i++)
         if ((mouse.buttons ^ buttons) & bits[i][0]) event |= (buttons & bits[i][0]) ? bits[i][1] : bits[i][2];
-    int dx = x - mouse.x, dy = y - mouse.y;
+    /* SI/DI: the motion in mickeys, at the ratio the game set (INT 33h 0Fh: mickeys per 8 of the driver's units;
+     * the game asks 1:1, so in 640x480 a mickey is a pixel). The position's change was passed before: 8 times too
+     * many, and the game's path tool, which follows them, put a path twice as far from where it began as the click. */
+    static int rem_x, rem_y;
+    int ux = (x - mouse.x) * mickey_rx + rem_x, uy = (y - mouse.y) * mickey_ry + rem_y;
+    int dx = ux / 8, dy = uy / 8; rem_x = ux - dx * 8; rem_y = uy - dy * 8;
     mouse.x = x; mouse.y = y; mouse.buttons = buttons;
     pending_mouse = 1; pm_event = event; pm_dx = dx; pm_dy = dy;
 }
@@ -515,9 +524,12 @@ static void realtime_events(void) {
             MouseEv e = mouse_q[mq_head]; mq_head = (mq_head + 1) % 256;
             /* coalesce pure movement */
             while (mq_head != mq_tail && mouse_q[mq_head].buttons == e.buttons && e.buttons == mouse.buttons) {
-                e = mouse_q[mq_head]; mq_head = (mq_head + 1) % 256;
+                uint32_t m = e.moved; e = mouse_q[mq_head]; e.moved |= m; mq_head = (mq_head + 1) % 256;
             }
-            queue_mouse(e.x, e.y, e.buttons);
+            /* (into the driver's units here, on the game thread: the scale is its screen mode's at this moment) */
+            int sc = mouse_scale(); double w = 640.0 * sc, h = (video_mode == 0x101 ? 480.0 : 400.0) * sc;
+            int x = clampi((int)(e.fx * w), mouse.rx0, mouse.rx1), y = clampi((int)(e.fy * h), mouse.ry0, mouse.ry1);
+            force_moved = e.moved; queue_mouse(x, y, e.buttons);
         }
         pthread_mutex_unlock(&input_lock);
         if (pending_mouse && (G(EFLAGS) & 0x200)) mouse_callback();
@@ -800,8 +812,16 @@ static void vbe_call(uint32_t *ax, uint32_t *bx, uint32_t *dx, uint32_t buf) {
     else *ax = fail;
 }
 
-static double mouse_extent(int r1, int x) {   /* the screen's size in the driver's units, for a range ending at r1 (2 px in) */
-    return r1 >= 2048 ? r1 + 16 : x ? 640.0 : video_mode == 0x101 ? 480.0 : 400.0;
+/* The driver's units: 640x480 is eighths of a pixel. The game's handler shifts the position right 3 whenever its screen
+ * mode has bit 8 (0x17d831): the scale is that flag's, not the ranges' (the ranges are clips: drawing a path the park
+ * sets them to the park area, and a scale taken from them shrank every position, the clicks rows off). The position is
+ * kept in the current scale (a window over the park clears the flag and sets it again as it closes). */
+static int mouse_scale_now = 1;
+static int mouse_scale_flag(void) { return mem && (mem[0x1de5f6] & 8) ? 8 : 1; }
+static int mouse_scale(void) {                       /* (the game thread's: it keeps the position in the scale) */
+    int sc = mouse_scale_flag();
+    if (sc != mouse_scale_now) { mouse.x = mouse.x * sc / mouse_scale_now; mouse.y = mouse.y * sc / mouse_scale_now; mouse_scale_now = sc; }
+    return sc;
 }
 static void interrupt(uint32_t number) {
     int_calls++;
@@ -968,21 +988,18 @@ static void interrupt(uint32_t number) {
     if (number == 0x2f && ax == 0x1600) { S(EAX, a & ~255u); return; }   /* Windows enhanced mode: not present */
     if (number == 0x33) {
         if (ax == 0x2f) return;
-        if (ax == 0x0f || ax == 0x1a || ax == 0x1d) return;   /* mickey ratio, sensitivity, display page: no effect here */
+        if (ax == 0x0f) { mickey_rx = (c & 65535) ? (int)(c & 65535) : 8; mickey_ry = (d & 65535) ? (int)(d & 65535) : 16; return; }   /* the mickey ratio */
+        if (ax == 0x1a || ax == 0x1d) return;           /* sensitivity, display page: no effect here */
         if (ax == 0) {                                    /* reset: no handler, hidden, the whole screen (as DOSBox's driver) */
-            mouse.has_cb = 0; mouse.cb_mask = 0; mouse.cb_sel = 0; mouse.cb_pc = 0; mouse.visible = 0;
+            mouse.has_cb = 0; mouse.cb_mask = 0; mouse.cb_sel = 0; mouse.cb_pc = 0; mouse.visible = 0; mickey_rx = 8; mickey_ry = 16;
             mouse.rx0 = 0; mouse.rx1 = 639; mouse.ry0 = 0; mouse.ry1 = 479;   /* (the ranges the host starts with) */
             S(EAX, 0xffff); S(EBX, 3); return;
         }
         if (ax == 1 || ax == 2) { mouse.visible = ax == 1; return; }
         if (ax == 3) { S(EBX, mouse.buttons); S(ECX, mouse.x); S(EDX, mouse.y); return; }
         if (ax == 4) { mouse.x = c & 65535; mouse.y = d & 65535; return; }
-        /* (a range in another scale, 8 times the screen's or back (the park in 640x480, its windows): the position
-         * kept in proportion, or a pointer standing still read as an eighth of itself and the park scrolled up) */
-        if (ax == 7) { int n = d & 65535; if ((n >= 2048) != (mouse.rx1 >= 2048)) mouse.x = (int)(mouse.x * mouse_extent(n, 1) / mouse_extent(mouse.rx1, 1));
-                       mouse.rx0 = c & 65535; mouse.rx1 = n; return; }
-        if (ax == 8) { int n = d & 65535; if ((n >= 2048) != (mouse.ry1 >= 2048)) mouse.y = (int)(mouse.y * mouse_extent(n, 0) / mouse_extent(mouse.ry1, 0));
-                       mouse.ry0 = c & 65535; mouse.ry1 = n; return; }
+        if (ax == 7) { mouse_scale(); mouse.rx0 = c & 65535; mouse.rx1 = d & 65535; return; }
+        if (ax == 8) { mouse_scale(); mouse.ry0 = c & 65535; mouse.ry1 = d & 65535; return; }
         if (ax == 0xc) { mouse.has_cb = 1; mouse.cb_mask = c & 65535; mouse.cb_sel = G(ES); mouse.cb_pc = d; return; }
     }
     if (number == 0x10) {
@@ -1413,29 +1430,30 @@ void tp_host_key_raw(uint8_t scan, int down) {
     if (nraw < 64) raw_keys[nraw++] = down ? scan : (scan | 0x80);
     pthread_mutex_unlock(&input_lock);
 }
-static void push_mouse(int x, int y, uint32_t buttons) {
+static void push_mouse(double x, double y, uint32_t buttons, uint32_t moved) {
     pthread_mutex_lock(&input_lock);
     /* A move after a move with the same buttons replaces it (the place is what matters): the queue keeps the button
      * changes when the game is not taking events, where a full queue used to drop the newest, a release among them. */
     int last = (mq_tail + 255) % 256;
     if (mq_tail != mq_head && mouse_q[last].buttons == buttons) {
         int prev = (last + 255) % 256;
-        if (last != mq_head && mouse_q[prev].buttons == buttons) {   /* (the last a move, not a button change) */ mouse_q[last].x = x; mouse_q[last].y = y; pthread_mutex_unlock(&input_lock); return; }
+        if (last != mq_head && mouse_q[prev].buttons == buttons) {   /* (the last a move, not a button change) */ mouse_q[last].fx = x; mouse_q[last].fy = y; mouse_q[last].moved |= moved; pthread_mutex_unlock(&input_lock); return; }
     }
     int next = (mq_tail + 1) % 256;
-    if (next != mq_head) { mouse_q[mq_tail] = (MouseEv){x, y, buttons}; mq_tail = next; }
+    if (next != mq_head) { mouse_q[mq_tail] = (MouseEv){x, y, buttons, moved}; mq_tail = next; }
     pthread_mutex_unlock(&input_lock);
 }
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
-void tp_host_mouse(double fx, double fy, uint32_t buttons) {
-    int x0 = mouse.rx0, x1 = mouse.rx1, y0 = mouse.ry0, y1 = mouse.ry1;
-    double w = mouse_extent(x1, 1), h = mouse_extent(y1, 0);
-    /* The game's range is in the driver's 640x400 space for mode 13h, 640x480 in VESA 101h. In 640x480 the park
-     * sets its ranges 8 times the screen (0..5104 x 0..3824: its handler shifts the position right 3, 0x17d831), so
-     * the position is put in the range's scale: before, the game took a pointer at x as x / 8. */
-    int x = clampi((int)(fx * w), x0, x1), y = clampi((int)(fy * h), y0, y1);
-    push_mouse(x, y, buttons);
+static void host_mouse(double fx, double fy, uint32_t buttons, uint32_t moved) {
+    /* The driver's space (640x400 for mode 13h, 640x480 in VESA 101h, in eighths of a pixel when the game's handler
+     * divides by 8: mouse_scale) and the game's clip ranges are applied as the event is delivered. */
+    push_mouse(fx < 0 ? 0 : fx, fy < 0 ? 0 : fy, buttons, moved);
 }
+void tp_host_mouse(double fx, double fy, uint32_t buttons) { host_mouse(fx, fy, buttons, 0); }
+/* A move even where the place is the same: the park view moved the game's camera under a pointer it keeps at the same
+ * place on the game's screen, and the game finds the cell under its pointer only on a move (its handler's event mask):
+ * without one, a click went to the cell under the pointer before the camera moved. */
+void tp_host_mouse_moved(double fx, double fy, uint32_t buttons) { host_mouse(fx, fy, buttons, 1); }
 void tp_host_mouse_debug(char *out, int n) {   /* (tests: the driver's state) */
     snprintf(out, n, "mouse %d,%d buttons %d range %d..%d %d..%d handler %d at %#x mask %#x pending %d in_callback %d queue %d..%d",
              mouse.x, mouse.y, mouse.buttons, mouse.rx0, mouse.rx1, mouse.ry0, mouse.ry1, mouse.has_cb, mouse.cb_pc, mouse.cb_mask, pending_mouse, in_callback, mq_head, mq_tail);

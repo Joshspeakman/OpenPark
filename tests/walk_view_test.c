@@ -13,6 +13,7 @@ uint8_t *tp_host_memory(void) { return mem; }
 void tp_host_palette_rgba(uint32_t pal[256]) { for (int i = 0; i < 256; i++) pal[i] = 0xff000000u | (uint32_t)i; }
 int tp_host_png_rgba(const char *p, const uint32_t *px, int w, int h) { (void)p; (void)px; (void)w; (void)h; return 0; }
 void tp_host_mouse(double fx, double fy, uint32_t b) { (void)fx; (void)fy; (void)b; }
+void tp_host_mouse_moved(double fx, double fy, uint32_t b) { (void)fx; (void)fy; (void)b; }
 void tp_host_mouse_pos(int *x, int *y) { *x = *y = 0; }
 int64_t tp_host_guest_call(uint32_t fn, const uint32_t *a, int n, uint32_t m) { (void)fn; (void)a; (void)n; (void)m; return -1; }
 void tp_host_key(uint32_t k) { (void)k; }

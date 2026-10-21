@@ -1318,6 +1318,7 @@ static uint32_t key_of_char(unichar c) {
         }
         else if ([op isEqual:@"mousestate"]) { void tp_host_mouse_debug(char *, int); char st[256]; tp_host_mouse_debug(st, sizeof st); fprintf(stderr, "mousestate: %s\n", st); }
         else if ([op isEqual:@"setenv"] && p.count > 2) setenv([p[1] UTF8String], [p[2] UTF8String], 1);   /* (tests: a development switch) */
+        else if ([op isEqual:@"unsetenv"] && p.count > 1) unsetenv([p[1] UTF8String]);
         else if ([op isEqual:@"world"]) {               /* world X Y: the map point under vshot pixel X,Y */
             double wx = -1, wy = -1; int ok = tp_view_point_to_world(a1 / ow, a2 / oh, &wx, &wy);
             fprintf(stderr, "world %g %g: %d %.2f %.2f\n", a1, a2, ok, wx, wy);

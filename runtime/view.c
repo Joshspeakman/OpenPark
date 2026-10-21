@@ -1464,28 +1464,33 @@ void tp_view_poll(void) {
         }
         {
             double px = vx + lx / z, py = vy + ly / z;                    /* canvas point */
-            int cx = r16(CAM_X), cy = r16(CAM_Y);
+            int cx = r16(CAM_X), cy = r16(CAM_Y), moved = 0;
             double sx = px - cam_ox(cx, cy), sy = py - cam_oy(cy);
             /* A tool preview (a ride's ghost) is drawn upwards from the pointer and only inside the
              * game's own view: then the pointer is kept low and central in it, else anywhere inside. */
-            int tool = tool_shown, mx = tool ? SW / 4 : 32, my0 = tool ? WORLD_H * 3 / 5 : 24;
+            int tool = tool_shown, mx = tool ? SW / 4 : 32, my0 = tool ? WORLD_H * 3 / 5 : 24, my1 = WORLD_H - 20;
             double ty = tool ? WORLD_H * 0.75 : WORLD_H / 2.0;
+            /* 640x480: the game scrolls by itself with the pointer well inside its screen (with the path tool from
+             * about a 320x200 area's edges, which move with the camera: measured), so the pointer is kept near
+             * the middle: a band 96 px either side, 64 above and below (the camera's steps are 24 and 16). */
+            if (SW == 640) { mx = SW / 2 - 96; my0 = WORLD_H / 2 - 64; my1 = WORLD_H / 2 + 64; ty = WORLD_H / 2.0; }
             /* Not while a button is held or as it goes down or up: the game follows a drag (a path, say)
              * in screen terms, and a camera move under it bends the drag. Past the view's edge the game
              * scrolls itself, as at 1x. */
-            if (!dragging && !change && (sx < mx || sx > SW - mx || sy < my0 || sy > WORLD_H - 20)) {
+            if (!dragging && !change && (sx < mx || sx > SW - mx || sy < my0 || sy > my1)) {
                 int ny = (int)lround((py - OY - ty) / UY);
                 ny = ny < GAME_CY0 ? GAME_CY0 : ny > GAME_CY1 ? GAME_CY1 : ny;
                 int nx = (int)lround((px - OX - SW / 2.0 - UYX * ny) / UX);
                 nx = nx < GAME_CX0 ? GAME_CX0 : nx > GAME_CX1 ? GAME_CX1 : nx;
-                if (nx != cx || ny != cy) { w16(CAM_X, (int16_t)nx); w16(CAM_Y, (int16_t)ny); w16(LAND_DIRTY, 1); seen_cx = (int16_t)nx; seen_cy = (int16_t)ny;
+                if (nx != cx || ny != cy) { w16(CAM_X, (int16_t)nx); w16(CAM_Y, (int16_t)ny); w16(LAND_DIRTY, 1); seen_cx = (int16_t)nx; seen_cy = (int16_t)ny; moved = 1;
                     if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view poll: camera %d,%d -> %d,%d (in_frame %d)\n", cx, cy, nx, ny, in_frame); }
                 sx = px - cam_ox(nx, ny); sy = py - cam_oy(ny);
             }
             if (sx < 0) sx = 0; if (sx > SW - 1) sx = SW - 1;
             if (sy < 0) sy = 0; if (sy > WORLD_H - 1) sy = WORLD_H - 1;
             if (getenv("TP_VIEW_DEBUG")) fprintf(stderr, "view poll: canvas %.0f,%.0f camera %d,%d -> screen %.0f,%.0f\n", px, py, r16(CAM_X), r16(CAM_Y), sx, sy);
-            tp_host_mouse(sx / SW, sy / SH, q[i].buttons);
+            if (moved) { void tp_host_mouse_moved(double, double, uint32_t); tp_host_mouse_moved(sx / SW, sy / SH, q[i].buttons); }
+            else tp_host_mouse(sx / SW, sy / SH, q[i].buttons);
         }
     }
 }

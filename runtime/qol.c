@@ -62,8 +62,8 @@ extern int tp_hook_which;
 void tp_hooks_changed(void);
 
 #define QOL0 12
-enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, H_OPTIONS, H_START_SAMPLE, H_RIDE_VIDEO, NHOOK };
-static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc, 0x150ccd, 0x18943f, 0x15c04f};   /* (H_OPTIONS: the menus' options function, called with its item's word) */   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
+enum { H_SFX, H_SFX_PARK, H_SFX3, H_SFX4, H_SFX5, H_PLAY_TUNE, H_STOP_MUSIC, H_MUSIC_END, H_BUS_ARRIVES, H_NEW_PARK, H_TICK, H_BUS_COUNT, H_OPTIONS, H_START_SAMPLE, H_RIDE_VIDEO, H_MOUSE_ABS, NHOOK };
+static const uint32_t hook_pc[NHOOK] = {0x180fe0, 0x180c80, 0x180dc0, 0x1805a4, 0x181ad0, 0x180a20, 0x180990, 0x11c198, 0x167cd4, 0x119eee, 0x1139ad, 0x1283dc, 0x150ccd, 0x18943f, 0x15c04f, 0x17d831};   /* (H_OPTIONS: the menus' options function, called with its item's word) */   /* (H_TICK: in the park's tick, the return from its call at 0x1139a8) */
 #define BIG_VISITORS 10000                /* a 128x128 park's most (its 12,000 things, bigmap.c) */
 extern uint32_t tp_things_n;              /* the things pool (bigmap.c): 1200, more in a 128x128 park */
 extern uint32_t tp_tune_max_people;       /* (dispatch.c, generated: the game's 800) */
@@ -140,6 +140,7 @@ void tp_qol_init(void) {
         e = *p == ',' ? p + 1 : p; if (*p != ',') break;
     }
     for (int i = 0; i < NHOOK; i++) tp_hook_pcs[QOL0 + i] = hook_pc[i];
+    if (getenv("TP_PROBE")) { const char *e = getenv("TP_PROBE"); for (int i = 0; i < 3 && *e; i++) { char *q; tp_hook_pcs[QOL0 + NHOOK + 1 + i] = (uint32_t)strtoul(e, &q, 16); e = *q == ',' ? q + 1 : q; } }
     { void tp_view_pacing_init(void); tp_view_pacing_init(); }   /* steady pacing of park frames (view.c) */
     tp_hooks_changed();
     if (ew_gap || !ride_music || park_tune || getenv("TP_RIDE_TUNES") || free_visitors || free_bus)
@@ -294,7 +295,26 @@ void tp_qol_hook(int nested) {
     uint32_t pc = tp_get(9), sp = tp_get(4);
     int k = tp_hook_which - QOL0;
     if (k == NHOOK) { if (pc == video_ret) { tp_game_video = 0; tp_hook_pcs[QOL0 + NHOOK] = 0xffffffffu; tp_hooks_changed(); } return; }
+    if (k > NHOOK) {                                  /* development (TP_PROBE=pc,pc,..: up to 3): which code ran, and its caller */
+        static int n; if (n++ < 400) fprintf(stderr, "probe %06x hit (caller %06x), camera %d,%d mouse %d,%d buttons %d\n", pc, r32(m, sp + 0x14),
+            *(int16_t *)(m + 0x1d667a), *(int16_t *)(m + 0x1d6666), *(int16_t *)(m + 0x1becac), *(int16_t *)(m + 0x1becae), m[0x1becb2]);
+        return;
+    }
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
+    if (k == H_MOUSE_ABS) {
+        /* The mouse handler in 640x480 (0x17d831): it shifts the driver's position to pixels and writes it as the
+         * pointer, then the path tools' branch (0x17db6a) adds the motion since the last event on top: the pointer
+         * ran ahead of the mouse by its last move (a click 4 tiles left landed 8 left). In 320x200 that branch alone
+         * moves the pointer. While the pointer is live ([0x1becb4]) the write is left out here, as at 320x200: the
+         * other tools' branch (0x17dc03) writes the position itself in 640x480. */
+        int32_t live; memcpy(&live, m + 0x1becb4, 4);
+        if (live != 0) {
+            uint32_t bp = tp_get(5); int32_t x, y; memcpy(&x, m + bp - 0x10, 4); memcpy(&y, m + bp - 0xc, 4);
+            x >>= 3; y >>= 3; memcpy(m + bp - 0x10, &x, 4); memcpy(m + bp - 0xc, &y, 4);
+            tp_set(9, 0x17d84bu);
+        }
+        return;
+    }
     if (!nested && k != H_NEW_PARK) { void tp_bigmap_poll(void); tp_bigmap_poll(); }   /* (a park being set up: its size) */
     if (k == H_START_SAMPLE) {                        /* (the HMI driver starts a sample: cdecl (driver, record, selector), volume at +0x10) */
         /* Each effect's volume by its kind (the button clicks: system sounds; the rest: game sounds), with headroom:
