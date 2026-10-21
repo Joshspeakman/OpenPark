@@ -13,6 +13,13 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-21, 640x480 leftovers (the user chose option 1: the display at 120 while the view moves, park frames at the
+game's 60). Checked in 640x480 at the user's settings: a ride's window opens in the column with the park either side;
+its video plays 4:3 at the full height with black beside, a click returns to the park view; the Visitor View starts,
+walks, follows and leaves. Fixed: a game window up while the app window is resized (both modes) showed a second,
+wider copy beside it (the old picture's columns kept as the background); the background is now composed afresh from
+the view's park when the column's width changes or there is no park picture of the new size (tp_view_park_only).
+
 2026-10-21, 640x480 audit (the user: overhaul the 640x480 mode; fit, margins, clicks, parity, 120 fps). Paired
 shots of both modes at the user's window and settings (work/playtest/audit.sh, topbar.py, menushot.sh). Fixed:
 - Extra margin: the canvas was the camera's range plus the 640x480 screen, ~13 tiles of nothing past the park's
