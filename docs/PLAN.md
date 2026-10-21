@@ -15,6 +15,13 @@ Builds need only this repository, the owned package and a Python venv (the share
 
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
+2026-10-21, game windows flickering in 640x480 as the pointer moves (the user: every panel menu): the app copies the
+640x480 screen on its own thread (tp_host_frame_rgba_any) from the banked VESA memory while the game switches banks;
+a copy across a switch put a 64 KiB band (~100 rows) of another bank's pixels in the wrong place. The copy is now
+taken again when a bank switch came during it (svga_seq, odd while switching). work/playtest/flick.sh: 40 frames
+over the scenery menu while the pointer moves, frames garbled against both neighbours: 9 before, 0 after (scenery
+and shop menus). 320x200 is linear, never affected. All suites pass.
+
 2026-10-21, no game cursor in full screen in 640x480 (the user): the view reads the cursor's row stride from 0x1de594,
 a word; read as a dword it was 262208 in 640x480 (the next word is 4) and every cursor was refused, so in full
 screen, where the view draws the cursor, there was none (the log: "the game's cursor 16x16 (rows 262208 apart)").

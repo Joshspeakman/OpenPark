@@ -15,9 +15,11 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <sys/stat.h>
 #include <zlib.h>
 #include "sha256.h"
+#include "platform.h"
 
 /* compiled-code runtime (runtime/verify.c) */
 void *tp_memory(void);
@@ -759,10 +761,16 @@ static uint8_t svga_fb[SVGA_BYTES];
 static int svga_bank;
 static uint32_t bank_bytes(int bank) { uint32_t off = (uint32_t)bank * 65536u; return off >= SVGA_BYTES ? 0 : SVGA_BYTES - off < 65536 ? SVGA_BYTES - off : 65536; }
 static void svga_flush(void) { memcpy(svga_fb + svga_bank * 65536u, mem + 0xa0000, bank_bytes(svga_bank)); }
+/* (odd while a bank switch is under way: the app's copy of the screen (tp_host_frame_rgba_any) runs on its own thread
+ * and is taken again when a switch came during it; a copy across a switch put a 64 KiB band of another bank's pixels
+ * in the wrong place, the game's windows flickering in 640x480 as the pointer moved) */
+static _Atomic unsigned svga_seq;
 static void svga_set_bank(int bank) {
     if (bank < 0 || bank > 15) return;
+    atomic_fetch_add_explicit(&svga_seq, 1, memory_order_acq_rel);
     svga_flush(); svga_bank = bank;
     memcpy(mem + 0xa0000, svga_fb + bank * 65536u, bank_bytes(bank));
+    atomic_fetch_add_explicit(&svga_seq, 1, memory_order_acq_rel);
 }
 static void vbe_controller_info(uint32_t at) {          /* 4F00h: VbeInfoBlock (VESA 1.2) */
     /* 256 bytes, as VBE 1.2's block is (512 when the caller asks for VBE 2: "VBE2" in its buffer); the OEM string
@@ -1355,9 +1363,14 @@ int tp_host_frame_rgba_any(uint32_t *out, int max_pixels) {
     if (video_mode == 0x13) return max_pixels >= 64000 ? tp_host_frame_rgba(out) : 0;
     if (video_mode != 0x101 || max_pixels < SVGA_BYTES) return 0;
     uint32_t pal[256]; tp_host_palette_rgba(pal);
-    int bank = svga_bank; uint32_t lo = bank * 65536u, hi = lo + bank_bytes(bank);
-    for (uint32_t i = 0; i < SVGA_BYTES; i++) out[i] = pal[i >= lo && i < hi ? mem[0xa0000 + i - lo] : svga_fb[i]];
-    return 1;
+    for (int tries = 0; tries < 16; tries++) {
+        unsigned s1 = atomic_load_explicit(&svga_seq, memory_order_acquire);
+        if (s1 & 1) { tp_plat_sleep(0.0001); continue; }
+        int bank = svga_bank; uint32_t lo = bank * 65536u, hi = lo + bank_bytes(bank);
+        for (uint32_t i = 0; i < SVGA_BYTES; i++) out[i] = pal[i >= lo && i < hi ? mem[0xa0000 + i - lo] : svga_fb[i]];
+        if (atomic_load_explicit(&svga_seq, memory_order_acquire) == s1) return 1;
+    }
+    return 1;                                          /* (the game switching banks without pause: the last copy) */
 }
 
 static void be32(uint8_t *p, uint32_t v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
