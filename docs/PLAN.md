@@ -15,6 +15,17 @@ Builds need only this repository, the owned package and a Python venv (the share
 
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
+2026-10-21, the user: the in-game ew setting does not change how often the ew plays; the launcher has no update
+option.
+- EXTRAS > EW SOUNDS (and PURCHASE SOUNDS) set only the volume; how often was the launcher's Grossed-Out Sounds
+  (TP_EW_GAP, read at the start). Both submenus now also have EVERY TIME / 5 / 15 / 30 SECONDS, applied at once and
+  saved (GrossOutGap, PurchaseGap). Checked: the choice is ticked, logged ("ew sounds EVERY 5 SECONDS chosen").
+- Updates: tools/build_app.sh gives the app an updater (Contents/Resources/update) and records the branch and commit
+  (TPUpdateBranch, TPBuiltCommit); the launcher's new Updates row asks GitHub for the branch's newest commit (in the
+  background on opening) and, when it moved, runs the updater with a progress window: it fetches the branch into a
+  worktree of the checkout (build/update-BRANCH, work/ shared: the extraction, sound drivers and build cache), builds
+  and installs the app from it, then opens the new app. After freedom-force-macos's launcher.
+
 2026-10-21, game windows flickering in 640x480 as the pointer moves (the user: every panel menu): the app copies the
 640x480 screen on its own thread (tp_host_frame_rgba_any) from the banked VESA memory while the game switches banks;
 a copy across a switch put a 64 KiB band (~100 rows) of another bank's pixels in the wrong place. The copy is now

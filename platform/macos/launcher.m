@@ -144,6 +144,110 @@ void tp_ride_tunes_window(NSWindow *parent) {
     (void)parent;
 }
 
+/* ---- updates ----
+ * tools/build_app.sh gives the app an updater (Contents/Resources/update) when it is built from a checkout with a GitHub
+ * remote: "update --check" prints the newest commit of the branch the app follows (TPUpdateBranch in its Info.plist,
+ * nightly here); "update" fetches it into a worktree of that checkout and builds and installs the app from it, the
+ * game files, saves and settings kept. The launcher asks GitHub in the background each time it opens. (After the
+ * other ports' launchers: freedom-force-macos recomp/host/launcher.m.) */
+enum { UPD_NONE, UPD_CHECKING, UPD_CURRENT, UPD_AVAILABLE, UPD_ERROR };
+static NSString *short_commit(NSString *c) { return c.length > 7 ? [c substringToIndex:7] : (c ?: @""); }
+static NSString *update_label(int st) {
+    return st == UPD_CHECKING ? @"Checking…" : st == UPD_CURRENT ? @"Up to Date" : st == UPD_AVAILABLE ? @"Update Available"
+         : st == UPD_ERROR ? @"Couldn't Check" : @"Not Available";
+}
+static NSString *update_note(int st, NSString *branch, NSString *built, NSString *latest) {
+    switch (st) {
+    case UPD_CHECKING: return [NSString stringWithFormat:@"Asking GitHub for the newest %@", branch];
+    case UPD_CURRENT: return [NSString stringWithFormat:@"%@ %@ · → checks again", branch, short_commit(built)];
+    case UPD_AVAILABLE: return [NSString stringWithFormat:@"%@ → %@ · press to update", short_commit(built), short_commit(latest)];
+    case UPD_ERROR: return @"GitHub couldn't be reached · → tries again";
+    default: return @"This copy wasn't built from the GitHub repository";
+    }
+}
+static NSString *update_check(NSString *updater) {        /* the newest commit of the branch on GitHub; nil if unreachable */
+    NSTask *t = [NSTask new]; t.executableURL = [NSURL fileURLWithPath:@"/bin/bash"]; t.arguments = @[updater, @"--check"];
+    NSPipe *p = [NSPipe pipe]; t.standardOutput = p; t.standardError = [NSFileHandle fileHandleWithNullDevice];
+    if (![t launchAndReturnError:nil]) return nil;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_global_queue(0, 0), ^{ if (t.running) [t terminate]; });
+    NSData *d = [p.fileHandleForReading readDataToEndOfFile]; [t waitUntilExit];
+    NSString *out = [[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return t.terminationStatus == 0 && out.length >= 40 ? [out substringToIndex:40] : nil;
+}
+static NSString *update_phase(NSString *line, NSString *branch) {   /* the updater's output, in words */
+    if ([line hasPrefix:@"== fetching"]) return @"Downloading the update from GitHub";
+    if ([line hasPrefix:[NSString stringWithFormat:@"== %@:", branch]]) return [@"Got " stringByAppendingString:[line substringFromIndex:branch.length + 4]];
+    if ([line hasPrefix:@"== making the sound"]) return @"Making the sound drivers from your game (once)";
+    if ([line hasPrefix:@"== translating"]) return @"Rebuilding from your game: translating its code (1 of 3)";
+    if ([line hasPrefix:@"== compiling"]) return @"Rebuilding from your game: compiling (2 of 3)";
+    if ([line hasPrefix:@"== installing"]) return @"Installing the new app (3 of 3)";
+    return nil;
+}
+@interface TPBlockTarget : NSObject
+@property (copy) void (^fire)(void);
+- (void)clicked:(id)sender;
+@end
+@implementation TPBlockTarget
+- (void)clicked:(id)sender { (void)sender; if (self.fire) self.fire(); }
+@end
+static void on_main(dispatch_block_t b) { CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, b); CFRunLoopWakeUp(CFRunLoopGetMain()); }
+/* The updater with a progress window (modal); YES when the new app is installed. */
+static BOOL update_run(NSWindow *parent, NSString *updater, NSString *branch, NSString *logPath) {
+    NSPanel *pn = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 520, 170) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    pn.title = @"Updating";
+    NSTextField *title = [NSTextField labelWithString:@"Updating to the newest version"]; title.font = [NSFont boldSystemFontOfSize:14]; title.frame = NSMakeRect(20, 128, 480, 22);
+    NSTextField *status = [NSTextField wrappingLabelWithString:@"Starting…"]; status.frame = NSMakeRect(20, 64, 480, 56);
+    NSProgressIndicator *spin = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(20, 44, 480, 12)]; spin.indeterminate = YES; [spin startAnimation:nil];
+    NSTextField *time = [NSTextField labelWithString:@"This takes a few minutes. Your saves and settings are kept."]; time.font = [NSFont systemFontOfSize:11]; time.textColor = NSColor.secondaryLabelColor; time.frame = NSMakeRect(20, 14, 360, 18);
+    NSButton *btn = [NSButton buttonWithTitle:@"Close" target:nil action:nil]; btn.frame = NSMakeRect(400, 8, 100, 30); btn.hidden = YES;
+    for (NSView *x in @[title, status, spin, time, btn]) [pn.contentView addSubview:x];
+    if (parent) [pn setFrameOrigin:NSMakePoint(NSMidX(parent.frame) - 260, NSMidY(parent.frame) - 85)]; else [pn center];
+    [NSFileManager.defaultManager createFileAtPath:logPath contents:nil attributes:nil];
+    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:logPath];
+    NSTask *t = [NSTask new]; t.executableURL = [NSURL fileURLWithPath:@"/bin/bash"]; t.arguments = @[updater];
+    NSPipe *pipe = [NSPipe pipe]; t.standardOutput = pipe; t.standardError = pipe;
+    NSMutableString *pending = [NSMutableString new], *tail = [NSMutableString new];
+    pipe.fileHandleForReading.readabilityHandler = ^(NSFileHandle *h) {
+        NSData *d = h.availableData; if (!d.length) return;
+        [log writeData:d];
+        NSString *chunk = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
+        @synchronized (pending) {
+            [pending appendString:chunk];
+            NSRange nl;
+            while ((nl = [pending rangeOfString:@"\n"]).location != NSNotFound) {
+                NSString *line = [pending substringToIndex:nl.location]; [pending deleteCharactersInRange:NSMakeRange(0, nl.location + 1)];
+                [tail appendFormat:@"%@\n", line]; if (tail.length > 600) [tail deleteCharactersInRange:NSMakeRange(0, tail.length - 600)];
+                NSString *ph = update_phase(line, branch);
+                if (ph) on_main(^{ status.stringValue = ph; });
+            }
+        }
+    };
+    __block BOOL ok = NO;
+    __attribute__((objc_precise_lifetime)) TPBlockTarget *bt = [TPBlockTarget new];   /* (a button's target is weak: kept here) */
+    bt.fire = ^{ [NSApp stopModal]; };
+    btn.target = bt; btn.action = @selector(clicked:);
+    t.terminationHandler = ^(NSTask *task) {
+        int code = task.terminationStatus;
+        on_main(^{
+            pipe.fileHandleForReading.readabilityHandler = nil; [log closeFile];
+            [spin stopAnimation:nil]; spin.hidden = YES; btn.hidden = NO;
+            if (code == 0) { ok = YES; title.stringValue = @"Updated"; status.stringValue = @"The new version is installed. It opens when you press Restart."; btn.title = @"Restart"; }
+            else {
+                NSString *last; @synchronized (pending) { last = [[tail componentsSeparatedByString:@"\n"] componentsJoinedByString:@" "]; }
+                title.stringValue = @"The update didn't finish";
+                status.stringValue = [NSString stringWithFormat:@"The app is unchanged if it stopped before installing. Details: %@  (%@)", logPath,
+                                      last.length > 160 ? [last substringFromIndex:last.length - 160] : last];
+                time.stringValue = @"";
+            }
+        });
+    };
+    if (![t launchAndReturnError:nil]) { [log closeFile]; return NO; }
+    [pn makeKeyAndOrderFront:nil];
+    [NSApp runModalForWindow:pn];
+    [pn orderOut:nil];
+    return ok;
+}
+
 @interface TPLaunchView : NSView
 @property NSInteger focus, hover, open;   /* open: -1 or group index */
 @property NSInteger dragRow;              /* a slider being dragged, or -1 */
@@ -152,12 +256,13 @@ void tp_ride_tunes_window(NSWindow *parent) {
 
 enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 #define WIN_W 780
-#define WIN_H 760
+#define WIN_H 823
 #define BANNER_H 250
 
 @implementation TPLaunchView {
     NSImage *_keyart, *_logo, *_grass;
-    Setting _top[3];
+    Setting _top[4];
+    int _ustate; NSString *_latest, *_updater, *_branch, *_built;   /* the Updates row (below) */
     NSArray<NSString *> *_groups;
     Setting _display[8], _sound[9], _tweaks[7], _free[5];
 }
@@ -181,6 +286,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
         _top[2] = setting(@"Language", @"Language", @[@0, @1, @2, @3, @4], @[@"English", @"Deutsch", @"Italiano", @"Español", @"Français"],
                           @[@"The game's text and advisors", @"Texte und Berater des Spiels", @"Testi e consiglieri del gioco",
                             @"Textos y asesores del juego", @"Textes et conseillers du jeu"]);
+        _top[3] = setting(@"Updates", @"Updates", @[@""], @[@""], @[@""]);   /* (its value and note: the updater's state) */
         _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
                           @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
         _groups = @[@"Display", @"Sound", @"Controls", @"Files", @"Tweaks", @"Free Mode"];
@@ -254,6 +360,10 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
                            @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
                              @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
         self.open = -1; self.hover = HIT_NONE; self.focus = -1; self.dragRow = -1;
+        _updater = [NSBundle.mainBundle pathForResource:@"update" ofType:nil];
+        if (![NSFileManager.defaultManager fileExistsAtPath:_updater ?: @""]) _updater = nil;
+        _branch = NSBundle.mainBundle.infoDictionary[@"TPUpdateBranch"] ?: @"nightly"; _built = NSBundle.mainBundle.infoDictionary[@"TPBuiltCommit"] ?: @"";
+        [self checkUpdates];
         NSDictionary *env = NSProcessInfo.processInfo.environment;
         if (env[@"TP_LAUNCHER_OPEN"]) {
             NSUInteger g = [_groups indexOfObject:[env[@"TP_LAUNCHER_OPEN"] capitalizedString]];
@@ -264,12 +374,45 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     }
     return self;
 }
+- (void)checkUpdates {
+    if (!_updater) { _ustate = UPD_NONE; return; }
+    _ustate = UPD_CHECKING; self.needsDisplay = YES;
+    NSString *u = _updater, *built = _built; __weak TPLaunchView *me = self;
+    if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) {   /* (development: the result in the image) */
+        NSString *l = update_check(u); _latest = l; _ustate = !l ? UPD_ERROR : [l isEqual:built] ? UPD_CURRENT : UPD_AVAILABLE; return;
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSString *l = update_check(u);
+        on_main(^{ TPLaunchView *v = me; if (!v) return;
+            v->_latest = l; v->_ustate = !l ? UPD_ERROR : [l isEqual:built] ? UPD_CURRENT : UPD_AVAILABLE; v.needsDisplay = YES; });
+    });
+}
+- (void)runUpdate {
+    if (_ustate == UPD_CHECKING || _ustate == UPD_NONE) return;
+    if (_ustate != UPD_AVAILABLE) { [self checkUpdates]; return; }
+    NSAlert *a = [NSAlert new];
+    a.messageText = [NSString stringWithFormat:@"Update to the newest %@?", [_branch isEqual:@"nightly"] ? @"Nightly" : @"version"];
+    a.informativeText = @"The app is rebuilt from your copy of the game (a few minutes). Your saves and settings are kept.";
+    [a addButtonWithTitle:@"Update"]; [a addButtonWithTitle:@"Cancel"];
+    if ([a runModal] != NSAlertFirstButtonReturn) return;
+    NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
+    NSString *root = env.length ? env : [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
+    [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+    if (update_run(self.window, _updater, _branch, [root stringByAppendingPathComponent:@"update.log"])) {
+        /* the new app (installed where this one was) opens, this one ends */
+        NSString *app = [[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"] stringByAppendingPathComponent:@"Theme Park Nightly.app"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:app]) app = NSBundle.mainBundle.bundlePath;
+        NSTask *o = [NSTask new]; o.executableURL = [NSURL fileURLWithPath:@"/usr/bin/open"]; o.arguments = @[@"-n", app]; [o launchAndReturnError:nil];
+        exit(0);
+    }
+    [self checkUpdates];
+}
 - (BOOL)isFlipped { return YES; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
-- (NSInteger)rowCount { return self.open == 0 ? 8 : self.open == 1 ? 9 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 3 : 0; }
+- (NSInteger)rowCount { return self.open == 0 ? 8 : self.open == 1 ? 9 : self.open == 4 ? 7 : self.open == 5 ? 5 : self.open < 0 ? 4 : 0; }
 - (Setting *)rowSetting:(NSInteger)k {
     if (self.open == 0) return &_display[k];
     if (self.open == 1) return &_sound[k];
@@ -286,6 +429,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     return i == NSNotFound ? 0 : (NSInteger)i;
 }
 - (NSString *)valueOf:(Setting *)s {
+    if ([s->key isEqual:@"Updates"]) return update_label(_ustate);
     if ([s->key isEqual:@"RideTunes"]) {
         NSUInteger n = [[NSUserDefaults.standardUserDefaults dictionaryForKey:@"RideTunes"] count];
         return n ? [NSString stringWithFormat:@"%lu Changed", (unsigned long)n] : @"The Game's";
@@ -297,6 +441,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     return s->labels[[self valueIndex:s]];
 }
 - (NSString *)noteOf:(Setting *)s {
+    if ([s->key isEqual:@"Updates"]) return update_note(_ustate, _branch, _built, _latest);
     if (([s->key isEqual:@"MusicType"] && [self valueIndex:s]) || ([s->key isEqual:@"RideVideos"] && [self valueIndex:s])) {
         NSString *pack = [s->key isEqual:@"MusicType"] && [self valueIndex:s] == 1 ? @"amiga-cd32" : @"3do-usa";
         NSString *root = NSProcessInfo.processInfo.environment[@"TP_DATA"] ?: [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
@@ -314,6 +459,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 - (void)step:(NSInteger)k by:(NSInteger)d {
     Setting *s = [self rowSetting:k];
+    if ([s->key isEqual:@"Updates"]) { [self runUpdate]; return; }
     if ([s->key isEqual:@"RideTunes"]) {                 /* → the per-ride window, ← back to the game's */
         if (d < 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:@"RideTunes"]; else tp_ride_tunes_window(self.window);
         self.needsDisplay = YES;
@@ -336,7 +482,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 }
 
 /* ---- layout ---- */
-- (NSRect)topFrame { return NSMakeRect(56, BANNER_H + 22, WIN_W - 112, 3 * 63 + 14); }
+- (NSRect)topFrame { return NSMakeRect(56, BANNER_H + 22, WIN_W - 112, 4 * 63 + 14); }
 - (NSRect)panel { return NSMakeRect(42, 132, WIN_W - 84, 512); }
 - (NSRect)rowRect:(NSInteger)k {
     if (self.open < 0) { NSRect f = self.topFrame; return NSMakeRect(f.origin.x + 10, f.origin.y + 7 + 63 * k, f.size.width - 20, 63); }
@@ -362,7 +508,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (NSRect)groupRect:(NSInteger)g {                      /* three across: Display Sound Tweaks / Free Mode Controls Files */
     static const int slot[6] = {0, 1, 4, 5, 2, 3};
     int k = slot[g], w = 212, gap = 16, x0 = (WIN_W - 3 * w - 2 * gap) / 2;
-    return NSMakeRect(x0 + (k % 3) * (w + gap), BANNER_H + 240 + (k / 3) * 84, w, 54);
+    return NSMakeRect(x0 + (k % 3) * (w + gap), BANNER_H + 303 + (k / 3) * 84, w, 54);
 }
 - (NSRect)quitRect { return NSMakeRect(WIN_W / 2 - 14 - 230, WIN_H - 92, 230, 58); }
 - (NSRect)playRect { return NSMakeRect(WIN_W / 2 + 14, WIN_H - 92, 230, 58); }
