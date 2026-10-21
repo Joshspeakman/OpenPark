@@ -1317,6 +1317,10 @@ static uint32_t key_of_char(unichar c) {
             memcpy(m + a, &v, 4);
         }
         else if ([op isEqual:@"mousestate"]) { void tp_host_mouse_debug(char *, int); char st[256]; tp_host_mouse_debug(st, sizeof st); fprintf(stderr, "mousestate: %s\n", st); }
+        else if ([op isEqual:@"world"]) {               /* world X Y: the map point under vshot pixel X,Y */
+            double wx = -1, wy = -1; int ok = tp_view_point_to_world(a1 / ow, a2 / oh, &wx, &wy);
+            fprintf(stderr, "world %g %g: %d %.2f %.2f\n", a1, a2, ok, wx, wy);
+        }
         else if ([op isEqual:@"camto"]) {                /* camto X Y: the game's camera to map point X,Y; where it is on its screen */
             int tp_view_camera_to(double, double, double *, double *), tp_view_world_to_canvas(double, double, double *, double *);
             void tp_view_canvas_to_frac(double, double, double *, double *); double sx = 0, sy = 0, px, py;
