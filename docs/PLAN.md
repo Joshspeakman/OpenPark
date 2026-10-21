@@ -13,6 +13,14 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-20, mouse in 640x480: the park sets the driver's ranges 8 times the screen (INT 33h 7/8: 0..5104 x 0..3824)
+and its handler shifts the position right 3 (0x17d831, with the screen mode's bit 8). The host put an absolute
+pointer in 0..639, so the game took x as x / 8: scripted clicks in the 640x480 park all landed in its top-left
+corner (found starting the 128x128 soak). The position is now put in the range's scale. Verified: a scripted
+click on the panel's shop button opens the shop (before: nothing). check.sh and the walk tests pass. Test
+controls added: mousestate (the driver's state), camto X Y (a map tile's vshot pixel), TP_STATS_LOG=1 (frame
+rates and the longest gaps each second, every long frame logged).
+
 2026-10-20, Beta 1.2 (the user's say): nightly fast-forwarded to main and tagged beta-1.2, a source-only pre-release.
 
 2026-10-20, the pointer jumping back to the middle in full screen (the top left, quick edge scrolling): the guard let
