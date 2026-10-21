@@ -5,6 +5,16 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Maze source survey (Codex, isolated remaster branch): its one
+static hedge key omits 121 guest overlay keys and 35 additional peek keys
+selected through nine placements. Native kind 8 uses an actual linked-person
+selector and separate offset/tick logic; the current remaster resolver
+rejects that kind. Recorded all source strips and selection requirements.
+No Maze model/support or candidate-count increase claimed. Next: preserve
+the native selected-actor decision in shared metadata, author complete hedge
+geometry and all overlays, then verify source equivalence and both views.
+See `docs/reports/2026-10-20-remaster-maze-survey.md`.
+
 2026-10-20, walking contact correction (Codex, isolated remaster branch):
 audited 272 walking keys across all 17 guest/staff identities. Hidden groups
 had masked shoe heights in the eight guests and two workers. Corrected 160
