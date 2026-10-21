@@ -15,6 +15,12 @@ Builds need only this repository, the owned package and a Python venv (the share
 
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
+2026-10-21, no game cursor in full screen in 640x480 (the user): the view reads the cursor's row stride from 0x1de594,
+a word; read as a dword it was 262208 in 640x480 (the next word is 4) and every cursor was refused, so in full
+screen, where the view draws the cursor, there was none (the log: "the game's cursor 16x16 (rows 262208 apart)").
+Read as a word (64). Checked in a 640x480 copy with the view drawing the cursor: the question mark, the path trowel,
+a ride being placed with its hand.
+
 2026-10-21, da7ccb2 (Fable's 640x480 changes, below) checked on this Mac with the game: suites pass; paths 9/9 (moves
 and jumps), the path grid 9/9, trees 12/13 (as before at that spot); a top menu open with no magenta; the date and the
 icons at the top right whole at Panel Size 0.75; panning to the park's far corner, no jump back (nothing learned:
