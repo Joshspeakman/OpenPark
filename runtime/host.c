@@ -1425,9 +1425,8 @@ void tp_host_mouse(double fx, double fy, uint32_t buttons) {
     /* The game's range is in the driver's 640x400 space for mode 13h, 640x480 in VESA 101h. In 640x480 the park
      * sets its ranges 8 times the screen (0..5104 x 0..3824: its handler shifts the position right 3, 0x17d831), so
      * the position is put in the range's scale: before, the game took a pointer at x as x / 8. */
-    double w = 640.0, h = video_mode == 0x101 ? 480.0 : 400.0;
-    int kx = x1 >= 4 * w ? (int)lround((x1 + 16) / w) : 1, ky = y1 >= 4 * h ? (int)lround((y1 + 16) / h) : 1;
-    int x = clampi((int)(fx * w * kx), x0, x1), y = clampi((int)(fy * h * ky), y0, y1);
+    double w = x1 >= 2048 ? x1 + 16 : 640.0, h = y1 >= 2048 ? y1 + 16 : video_mode == 0x101 ? 480.0 : 400.0;   /* (its edge: 2 px in) */
+    int x = clampi((int)(fx * w), x0, x1), y = clampi((int)(fy * h), y0, y1);
     push_mouse(x, y, buttons);
 }
 void tp_host_mouse_debug(char *out, int n) {   /* (tests: the driver's state) */
