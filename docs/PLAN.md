@@ -5,6 +5,24 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Plane Flyer candidate (Codex, isolated remaster branch): added four
+shaped red aircraft with open cockpits, cowling eyes, roundels, propellers,
+telescoping supports and a double-sided sculpted sun. All four native keys and
+four slot phases resolve existing canonical guest poses without changing any
+guest model. Each identity follows a continuous 16-step orbit/heading/lift
+cycle. Corrected first-frame sun orientation, submerged eyes and a sun/wing
+intersection found by geometry checks.
+
+208 native occupancy/phase probes and 68 final captures pass across both
+normal modes and Visitor projections. Rigid groups, support endpoints,
+cockpit/propeller clearance, sun/wing separation and 16 inspection borders
+pass. 288 old/new source passes match 2,120 events/pixels with unchanged memory.
+Current inventory is 117 candidates; the previous 116 models and all 112 owned
+resources are unchanged. No runtime/app changes, launch, install or acceptance.
+Lift and propeller cadence remain authored candidates; live timing/lifecycle,
+remaining art/animations and final headed acceptance are unfinished. See
+`docs/reports/2026-10-20-remaster-plane-flyer.md`.
+
 2026-10-20, Big Wheel candidate (Codex, isolated remaster branch): added the
 source's six-cabin rotor, tapered gold arms, indigo star, rear supports and
 yellow/ivory base. Cabins have closed blue canopies, recessed interiors and
