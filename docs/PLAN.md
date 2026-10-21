@@ -13,6 +13,16 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-20, mouse range changes: the park's windows (the year's bank report, menus) set the 1x ranges and the park
+sets 8x again when they close. The driver kept the position as it was, so a pointer standing still read as an
+eighth of itself (near the top) and the park scrolled up until the mouse moved. The position is now kept in
+proportion when the range's scale changes (mouse_extent). setenv control added for tests.
+Soak test (the user's 128x128 maze grid, one game year): not run yet. Building through the park view by script
+is unreliable: drags fill rectangles (the path tool fills the area between press and release), clicks away from
+the view's centre land on the wrong rows, and the year's report and other windows interrupt. A maze is 4x4 with
+the click tile as its bottom-right corner, its gates on the row below; the park's inside is x 1-126, y 1-118,
+the entrance path at (64, 118); a maze needs research in a sandbox park (unlockall used).
+
 2026-10-20, mouse in 640x480: the park sets the driver's ranges 8 times the screen (INT 33h 7/8: 0..5104 x 0..3824)
 and its handler shifts the position right 3 (0x17d831, with the screen mode's bit 8). The host put an absolute
 pointer in 0..639, so the game took x as x / 8: scripted clicks in the 640x480 park all landed in its top-left
