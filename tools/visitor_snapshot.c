@@ -238,6 +238,12 @@ int main(int argc,char**argv){
         }
         if(ride){
             dist=6;height=2;
+            const char*inspection_distance=getenv("TP_SNAPSHOT_RIDE_DISTANCE");
+            if(inspection_distance){
+                char*end=NULL;double value=strtod(inspection_distance,&end);
+                if(!*inspection_distance || *end || !isfinite(value) || value<2 || value>128)return 2;
+                dist=value;
+            }
             x=c->rig_x+.4-cos(yaw)*dist;y=c->rig_y-1-sin(yaw)*dist;
             fprintf(stderr,"ride %d frame %u: native origin %.6f %.6f eligible %u\n",
                     c->type,c->frame,c->rig_x,c->rig_y,c->rig_ok);

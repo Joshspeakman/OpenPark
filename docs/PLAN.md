@@ -5,6 +5,26 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 
 ## Current state — 2026-10-18
 
+2026-10-20, Big Wheel candidate (Codex, isolated remaster branch): added the
+source's six-cabin rotor, tapered gold arms, indigo star, rear supports and
+yellow/ivory base. Cabins have closed blue canopies, recessed interiors and
+individual seats/rails, staying upright throughout all six frame keys. Six
+native slot phases give each guest a continuous 36-step circuit. Sixteen new
+keys extend the eight canonical guests without changing existing geometry,
+materials or poses. The ride's source-omitted sprite-31 passengers now retain
+their own seated keys, separate from the car's sprite-31 states.
+
+All 540 occupancy/phase probes and 150 final captures pass across both normal
+modes and Visitor projections. Head/rotor/floor/inner-wall clearance is positive
+for all eight guests; fixed camera settings preserve all 36 inspection borders.
+648 old/new source passes match 8,904 draw events and indexed pixels with
+unchanged memory. Twelve remaster native checks, 21 Python tests, both walk
+modes, 17,808 view checks and compile/signature pass. No app launch/install or
+art acceptance. Current inventory is 116 candidates; all 112 owned resources
+are unchanged. Live lifecycle/timing, remaining art/animations, terrain/effects,
+special track states, ride cameras and final headed acceptance are unfinished.
+See `docs/reports/2026-10-20-remaster-big-wheel.md`.
+
 2026-10-20, Pirate Boat candidate (Codex, isolated remaster branch): added a
 closed planked hull, curved red/ivory sail, water-painted grounded base and
 eight individual seats across all 50 native keys from three source chains.
