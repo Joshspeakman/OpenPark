@@ -13,6 +13,8 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
+
 2026-10-21, 640x480 leftovers (the user chose option 1: the display at 120 while the view moves, park frames at the
 game's 60). Checked in 640x480 at the user's settings: a ride's window opens in the column with the park either side;
 its video plays 4:3 at the full height with black beside, a click returns to the park view; the Visitor View starts,

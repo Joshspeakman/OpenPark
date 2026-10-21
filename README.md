@@ -13,7 +13,7 @@ build it from your own copy of the game; this repository contains no game code, 
 | **Visitor View (experimental)** | **The original ride videos** |
 | ![Walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The Super Spinner's ride video](docs/screenshots/ride-video.jpg) |
 
-**Status: beta 1.2.** The intro and the whole game run natively, at the original's pace. The recompiled code is
+**Status: beta 1.3.** The intro and the whole game run natively, at the original's pace. The recompiled code is
 checked against the original x86 code: scripted runs and long random-play runs match it. See [the plan](docs/PLAN.md) for what is verified and what is not, and [the port audit](docs/reports/2026-10-18-port-audit.md)
 for coverage, the original developers' unfinished features, and a modding map.
 
@@ -104,7 +104,7 @@ python3 tools/extras.py --list                                            # what
 | PC demo floppy (1994) | Recognised: a pre-release build ([the editions report](docs/reports/2026-10-19-other-editions.md)) |
 | DOS PC CD | The same data as GOG's release |
 
-## Known limitations (beta 1.2)
+## Known limitations (beta 1.3)
 
 - **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which
   `THEME.BAT` reruns) is fixed by reading the code, but not yet tested (#6).
