@@ -156,6 +156,9 @@ int tp_run(uint32_t budget) {
     if (atomic_exchange_explicit(&hooks_dirty, 0, memory_order_acquire)) hooks_rebuild();
     interrupt_number = 0;
     blocks_run = 0;
+    static int cam_watch = -1; if (cam_watch < 0) cam_watch = getenv("TP_CAM_WATCH") != NULL;   /* development: game code moving the camera */
+    static uint16_t cam_x, cam_y; static int cam_logged;
+    if (cam_watch) { memcpy(&cam_x, G_MEM + 0x1d667a, 2); memcpy(&cam_y, G_MEM + 0x1d6666, 2); }   /* (the host's own writes are not the game's) */
     if (setjmp(trap)) return -1;
     while (budget--) {
         int hooked = 0;
@@ -176,8 +179,15 @@ int tp_run(uint32_t budget) {
         }
         if (tp_trace_buf && tp_trace_n < tp_trace_cap) tp_trace_buf[tp_trace_n++] = state.tc;
         if (tp_cov && state.tc - 0x100000u < 0x100000u) tp_cov[(state.tc - 0x100000u) >> 3] |= (uint8_t)(1u << (state.tc & 7));
+        uint32_t ran_tc = state.tc;
         if (!dispatch_fn(&state)) return -2;
         blocks_run++;
+        if (cam_watch) { uint16_t x, y; memcpy(&x, G_MEM + 0x1d667a, 2); memcpy(&y, G_MEM + 0x1d6666, 2);
+            if ((x != cam_x || y != cam_y) && cam_logged++ < 2000)
+            {   fprintf(stderr, "camera %d,%d -> %d,%d by block %06x, code addresses on the stack:", cam_x, cam_y, x, y, ran_tc);
+                for (int k = 0; k < 64; k++) { uint32_t v = *(uint32_t *)(G_MEM + state.esp + 4 * k); if (v >= 0x100000 && v < 0x1a0000) fprintf(stderr, " %06x", v); }
+                fprintf(stderr, "\n"); }
+            cam_x = x; cam_y = y; }
         if (interrupt_number) return (int)interrupt_number;
     }
     return 0;

@@ -13,6 +13,26 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-21, clicks in 640x480 (the user: "where you click is where you're supposed to click"). Measured with single
+things (trees) and the path tool, on the game's own screen and through the park view at the user's window
+(1728x1085), each landing read from the map. Three causes, all fixed:
+- The game's path tools (the path, queue and related tools) move their pointer by the motion since the last event
+  (0x17db6a), and in 640x480 the handler first writes the position itself (0x17d831): the pointer ran ahead of the
+  mouse by its last move (a click 4 tiles left of the last landed 8 left; through the park view, whose recentring is
+  a whole-tile jump, every path went astray). A hook (qol.c H_MOUSE_ABS) leaves that write out while the pointer is
+  live, as the 320x200 handler does; the other tools write the position in their own branch (0x17dc03).
+- The driver's scale was taken from the game's ranges, but drawing a path the game sets them to the park area as a
+  clip: positions shrank (y by 14%). The scale is now the game's own rule (its handler divides by 8 when the screen
+  mode has bit 8), applied on the game thread as each event is delivered (positions are queued as fractions).
+- With the park view wider than the 640x480 screen, the view moves the game's camera to keep the pointer on it; the
+  game scrolls itself from well inside its screen with the path tool. The pointer is now kept within 96 px across and
+  64 down of the screen's middle in 640x480.
+Also: SI/DI carry mickeys at the game's ratio (INT 33h 0Fh, it asks 1:1); a camera move by the view delivers a move
+to the game though the place on its screen is the same. Results: trees 13 of 13 and paths 9 of 9 on the game's own
+screen and through the park view (jumps and mouse-like moves), row and column drags exact; 320x200 unchanged (paths
+where the view reports). Development: TP_CAM_WATCH=1 (the block that moves the camera), TP_PROBE=pc,.. (hook
+hits), the setenv/unsetenv/mousestate/world controls. check.sh, check_walk, check_portable, check_macos --park pass.
+
 2026-10-21, soak test (the user's spec), 128x128 sandbox park in 320x200: a path grid (rows every 6, columns at
 x 32/64/96, the edges the game's camera reaches; 2,617 tiles), 304 mazes and 303 Mr Whippy beside them (the maze
 needed unlockall in a sandbox park), 30 handymen, 30 mechanics, 30 entertainers and 48 guards (18 extra by a
