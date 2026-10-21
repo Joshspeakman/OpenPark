@@ -15,6 +15,13 @@ Builds need only this repository, the owned package and a Python venv (the share
 
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
+2026-10-21, da7ccb2 (Fable's 640x480 changes, below) checked on this Mac with the game: suites pass; paths 9/9 (moves
+and jumps), the path grid 9/9, trees 12/13 (as before at that spot); a top menu open with no magenta; the date and the
+icons at the top right whole at Panel Size 0.75; panning to the park's far corner, no jump back (nothing learned:
+no limit hit); 640x480 60/60, 0 long frames, passes 109-367 ms a second. Not checkable by script: the edge pan's
+speed (real pointer events only) and the advisor's band (no message came up). The "cursor ... not shown" line is a
+transient cursor with a garbage row stride (262208), refused before as well. Then main moved to it (the user's say).
+
 2026-10-21, 640x480 report (the user: side scrolling, the cursor gone, broken graphics and glitches at the top menu,
 the staff and visitor icons at the top right clipped or missing). Reviewed by reading, in a cloud session without
 the game or a Mac: nothing below has been seen running; the user's play is the check. Five 320x200 sizes were still
