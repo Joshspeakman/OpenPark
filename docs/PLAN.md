@@ -13,6 +13,20 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-21, soak test (the user's spec), 128x128 sandbox park in 320x200: a path grid (rows every 6, columns at
+x 32/64/96, the edges the game's camera reaches; 2,617 tiles), 304 mazes and 303 Mr Whippy beside them (the maze
+needed unlockall in a sandbox park), 30 handymen, 30 mechanics, 30 entertainers and 48 guards (18 extra by a
+misread field), open, ticket price 0 (at 50 no bus brought anyone in a game year: a new park's appeal). The
+user's settings (wide view 1728x1085, panel 0.5, cycles 10000), a camera tour each minute, 13 July to 30 January
+(over a game year), up to 878 visitors. Game frames: 59.75 a second over 2,146 active seconds, 1% low 49.3. The
+one repeating spike: the awards check, every 200 s, loading the award pictures (mawpal, mawar1, mcup, mspr) and
+running ~117M instructions: 210-253 ms frames, 15 times (66M and ~110 ms in the user's 64x64 park). Others: a
+310 ms frame of 0.5M instructions (a stall, near a pause), three 95-107 ms frames at zoom 0.35 (passes 62-70 ms,
+view lock 20-24 ms); gaps of 0.5-2 s were the test's own finance windows. The display ran 57 frames a second when
+the window was on screen; the game pauses while it is not (17 minutes of the run, by design). Builder, hiring and
+soak scripts: work/playtest (build128.py, hire128.py, soak128.py, soakstats.py). Next: the awards check's cost
+(cache the award pictures, or spread the work).
+
 2026-10-20, mouse range changes: the park's windows (the year's bank report, menus) set the 1x ranges and the park
 sets 8x again when they close. The driver kept the position as it was, so a pointer standing still read as an
 eighth of itself (near the top) and the park scrolled up until the mouse moved. The position is now kept in
