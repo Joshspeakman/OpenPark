@@ -469,6 +469,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     }
     NSPoint p = [self pointOf:e];
     _mouse = p; _mouseIn = YES;
+    if (_held && !tp_view_hw_cursor) _viewMoved = YES;   /* (the view draws the cursor: shown at the display's rate, not the park's) */
     if (_walkDrop || tp_walk_active()) { [self setCursorHidden:NO]; return; }   /* (the Visitor View takes the pointer) */
     NSRect r = [self pointerRect];
     double fx = (p.x - r.origin.x) / r.size.width, fy = 1.0 - (p.y - r.origin.y) / r.size.height;
@@ -547,9 +548,10 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
 - (void)updateGeometry {
     int sw, sh, wh; tp_view_geometry(&sw, &sh, &wh);
     if (sw == _sw) return;
-    double k = _sw ? (double)sw / _sw : 1;
     _sw = sw; _sh = sh; _wh = wh;
-    if (_viewOn) { _cx *= k; _cy *= k; [self clampCenter]; _lastLW = [self layoutW]; tp_view_set(1, _cx, _cy, _zoom, _lastLW); }
+    /* (the canvas is the same in both modes, the art the same size: the view stays where it was; it was scaled by the
+     * screens' ratio, and a switch to 640x480 put the view twice as far from the park's corner: its far edge) */
+    if (_viewOn) { [self clampCenter]; _lastLW = [self layoutW]; tp_view_set(1, _cx, _cy, _zoom, _lastLW); }
 }
 - (double)minZoom {
     double w, h; tp_view_canvas_size(&w, &h);

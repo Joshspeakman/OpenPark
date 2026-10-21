@@ -143,14 +143,17 @@ static Geo geo(int s) {
     g.rt = 80; g.rb = g.wh - 72; if (g.rb < g.rt + 16) g.rb = g.rt + 16;
     g.ty1 = g.rb;
     g.ox = -(g.ux * CXMIN + g.uyx * CYMIN); g.oy = -(g.uy * CYMIN);
-    g.cw = g.ux * CXMAX + g.uyx * CYMAX + g.sw + g.ox; g.ch = g.uy * CYMAX + g.wh + g.oy;
+    /* The canvas is the park's own size, the same in both modes (the art is): the camera's range plus a 320x200
+     * screen's park area. (With the 640x480 screen's it had ~13 tiles of nothing past the right and bottom edges, the
+     * view starting and scrolling out there.) */
+    g.cw = g.ux * CXMAX + g.uyx * CYMAX + 320 + g.ox; g.ch = g.uy * CYMAX + 178 + g.oy;
     return g;
 }
 /* The game's top bar: with the pointer at the screen's top edge it draws a bar across the top (with the date,
  * before the extras: so it is interface by its rows) and scrolls its camera up. In the park view the pointer reaches it only through the zone
  * below; the game's scrolling is undone while it is there (tp_view_poll, FRAME_RENDER). */
-#define TOPBAR_H 8                  /* its height (rows, with its dark edge) */
-#define TOPBAR_OPEN 2               /* the pointer this near the layout's top (in the screen column) opens it */
+#define TOPBAR_H (8 * SW / 320)     /* its height (rows, with its dark edge; the game's hotspot: y 2..16 of 640x400/480, rows 2..16 in 640x480) */
+#define TOPBAR_OPEN (2 * SW / 320)  /* the pointer this near the layout's top (in the screen column) opens it */
 #define MENU_OPEN   0x1b14d2u       /* 4 bytes, one per top menu: 0xff closed (a drop-down open otherwise) */
 static int menu_open(void);
 static volatile int topbar;                       /* the pointer is on the top bar */
@@ -918,6 +921,10 @@ static void seam_check(void) {
  * drawn later (tool previews, weather) is drawn over the real park and then marked again. */
 #define SENTINEL 0xcc      /* unused by the interface, and its row of the blend table ([0x1ba2f8], dst * 256 + src) gives
                             * only colours the interface never uses either: a translucent pixel drawn over it is known */
+static int ff_is_key(void) {                             /* colour 0xff is the art's magenta key (never interface) */
+    uint32_t pal[256]; tp_host_palette_rgba(pal); uint32_t c = pal[0xff];
+    return (c & 255) > 200 && ((c >> 8) & 255) < 80 && ((c >> 16) & 255) > 200;
+}
 static int sentinel_on;
 static void sentinel_apply(void) {
     /* (not under a top menu: its edge and shadow darken what is under them through another table, so over
@@ -1333,15 +1340,21 @@ void tp_view_hook(void) {
                 for (int y = date_box[1]; y < date_box[3]; y++) for (int x = date_box[0]; x < date_box[2]; x++) { int i = y * SW + x; if (!date_drawn[i]) continue; uint8_t v = sb[i] == SENTINEL ? world_only[i] : sb[i];   /* (marker: the date as drawn with the park) */
                       pub_overlay[i] = date_cols[v] ? v : date_clean[i]; if (!date_cols[v]) date_fixed++; }   /* (drawn with the park, things can cover it: those pixels from the clean date) */
             }
+            {   /* Colour 0xff (magenta: the art's transparent colour) is never interface. In 640x480, while the camera is
+                 * held under the top bar, the game's own frame has blots of it where it did not redraw the land, and
+                 * they came out as magenta patches over the park. */
+                if (ff_is_key()) for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] == 0xff) pub_overlay[i] = 0xffff;
+            }
             memcpy(prev_overlay, pub_overlay, sizeof prev_overlay);
             sentinel_lift();
             { uint8_t *wb = M + r32(DISP_BUF); for (int i = 0; i < SW * WORLD_H; i++) if (src_of[wb[i]] >= 0 && r32(0x1ba2f8)) wb[i] = (uint8_t)pub_overlay[i]; }   /* (the screen too) */
         }
-        else for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] ? bb[i] : 0xffff;
+        else { int key = ff_is_key();                       /* (the key colour: park) */
+            for (int i = 0; i < SW * WORLD_H; i++) pub_overlay[i] = bb[i] != world_only[i] && !(key && bb[i] == 0xff) ? bb[i] : 0xffff; }
         if (getenv("TP_DATE_DEBUG")) { static int k; if (k++ % 60 == 0) fprintf(stderr, "present: sentinel %d have_world %d box %d..%d\n", sentinel_on, 1, date_box[0], date_box[2]); }
         if (getenv("TP_VIEW_HIST")) { static long h[256]; static int fr; for (int i = 0; i < SW * SH; i++) if (i >= SW * WORLD_H || pub_overlay[i] != 0xffff) h[bb[i]]++;
             if (++fr % 300 == 0) { fprintf(stderr, "view hist: unused:"); for (int c = 0; c < 256; c++) if (!h[c]) fprintf(stderr, " %02x", c); fprintf(stderr, "\n"); } }
-        if (topbar) for (int i = 0; i < SW * TOPBAR_H; i++) pub_overlay[i] = bb[i];   /* the top bar is drawn with the park: all interface */
+        if (topbar) { int key = ff_is_key(); for (int i = 0; i < SW * TOPBAR_H; i++) pub_overlay[i] = key && bb[i] == 0xff ? 0xffff : bb[i]; }   /* the top bar is drawn with the park: all interface */
         if (menu_open()) {                                /* the open drop-down's rectangle (0x1b571a: x0, y0, x1, y1, mouse units) */
             uint32_t dd = 0x1b53c6u + (uint32_t)(int16_t)r16(0x1b14d4) * 0x354u;   /* (the open one: [0x1b14d4]; qol.c's EXTRAS too) */
             if ((int16_t)r16(0x1b14d4) < 0) dd = 0x1b571a;
@@ -1350,10 +1363,12 @@ void tp_view_hook(void) {
             for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) pub_overlay[y * SW + x] = bb[y * SW + x];
         }
         if (menu_open()) {                                /* (and its submenus): what differs from the park as the passes drew it */
-            int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy);
+            /* (not the key colour: in 640x480 the game's frame under an open menu has blots of it where it did not
+             * redraw the land, the camera held: they came out as magenta patches over the park) */
+            int bx = cam_ox(real_cx, real_cy), by = cam_oy(real_cy), key = ff_is_key();
             for (int y = 0; y < WORLD_H; y++) for (int x = 0; x < SW; x++) {
                 int X = bx + x, Y = by + y, i = y * SW + x;
-                if (pub_overlay[i] == 0xffff && X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X]) pub_overlay[i] = bb[i];
+                if (pub_overlay[i] == 0xffff && X >= 0 && Y >= 0 && X < CW && Y < CH && bb[i] != canvas[(size_t)Y * CW + X] && !(key && bb[i] == 0xff)) pub_overlay[i] = bb[i];
             }
         }
         {   /* The date is usually drawn by the extras (so world_only lacks it: interface), but at times with the
@@ -1382,6 +1397,13 @@ void tp_view_hook(void) {
             for (int i = 0; i < SW * WORLD_H; i++) if (pub_overlay[i] != 0xffff) { n++; int x = i % SW, y = i / SW; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             fprintf(stderr, "view overlay: %d px, %d,%d..%d,%d\n", n, x0, y0, x1, y1); } }
         memcpy(pub_canvas, canvas, (size_t)CW * CH); pub_s = G.s;
+        if (getenv("TP_OVL_DEBUG")) {                     /* development: where magenta comes from */
+            uint32_t pal[256]; tp_host_palette_rgba(pal); int mo = 0, mc = 0, mw = 0;
+            #define MAG(c) (((c) & 255) > 200 && (((c) >> 8) & 255) < 80 && (((c) >> 16) & 255) > 200)
+            for (int i = 0; i < SW * WORLD_H; i++) { if (pub_overlay[i] < 256 && MAG(pal[pub_overlay[i]])) mo++; if (weather_n && weather[i] && MAG(pal[weather[i]])) mw++; }
+            for (size_t i = 0; i < (size_t)CW * CH; i += 7) if (MAG(pal[canvas[i]])) mc++;
+            static int k; if ((mo || mc || mw) && k++ < 60) fprintf(stderr, "magenta: overlay %d, canvas ~%d, weather %d; sentinel %d topbar %d menu %d hook %d\n", mo, mc * 7, mw, sentinel_on, topbar, menu_open(), tp_hook_which);
+        }
         memcpy(pub_panel + (size_t)SW * WORLD_H, bb + (size_t)SW * WORLD_H, (size_t)SW * (SH - WORLD_H));
         pub_weather_n = weather_n; if (weather_n) { memcpy(pub_weather, weather, (size_t)SW * WORLD_H); memcpy(pub_weather_rep, weather_rep, (size_t)SW * WORLD_H); }
         weather_n = 0;                                    /* (a frame without weather clears it) */
@@ -1459,6 +1481,7 @@ void tp_view_poll(void) {
             /* The game scrolls itself while the pointer is on the screen's edge (the panel's bottom row,
              * say): with the view on, the app pans instead, so the game's pointer stays off the edges. */
             if (on) { fx = fmin(fmax(fx, 2.0 / SW), (SW - 2.0) / SW); fy = fmin(fy, (SH - 2.0) / SH); }
+            if (on && topbar) fy = fmax(fy, (SW == 640 ? 3.0 : 1.5) / SH);   /* (the bar's rows: the edge's above them scroll the park) */
             tp_host_mouse(fx, fy, q[i].buttons);
             continue;
         }

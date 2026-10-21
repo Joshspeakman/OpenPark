@@ -13,6 +13,25 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-21, 640x480 audit (the user: overhaul the 640x480 mode; fit, margins, clicks, parity, 120 fps). Paired
+shots of both modes at the user's window and settings (work/playtest/audit.sh, topbar.py, menushot.sh). Fixed:
+- Extra margin: the canvas was the camera's range plus the 640x480 screen, ~13 tiles of nothing past the park's
+  right and bottom edges; the view could scroll and zoom out into it. The canvas is now the park's own size in both
+  modes (the art is the same size).
+- Start position: switching to 640x480 scaled the view's centre by the screens' ratio, and the park opened at its far
+  corner (the bus road). The centre is kept (main.m updateGeometry).
+- Top menus: the game's bar is its hotspot y 2..16 in both modes, 16 screen rows in 640x480; the view passed rows 0..1
+  (the scroll strip), so PARK, OPTIONS, DISPLAY and EXTRAS never opened through the park view. The bar's rows scale
+  with the mode and the pointer is kept on them.
+- Magenta patches over the park with a top menu open (640x480): the game's frame has blots of colour 0xff (the art's
+  magenta key) where it did not redraw the land while the camera is held, and "what differs from the passes' park"
+  took them as interface. 0xff is never interface (ff_is_key).
+- The view-drawn cursor (full screen) is shown at the display's rate.
+Measured: the display shows 120 frames a second while the view moves (pan, zoom) in both modes (8.3 ms refresh); park
+frames stay at the game's 60 (one game tick each, Cycles 10000). 640x480: 60/60, 0 long frames, passes 161-326 ms a
+second (zoom 1 to 0.4); 320x200 93-179. Clicks after all this: paths 9/9 (mouse-like moves and jumps), trees 13/13.
+Open: 120 park frames at Original speed need in-between frames (the game's tick is per frame); the user's call.
+
 2026-10-21, clicks in 640x480 (the user: "where you click is where you're supposed to click"). Measured with single
 things (trees) and the path tool, on the game's own screen and through the park view at the user's window
 (1728x1085), each landing read from the map. Three causes, all fixed:
