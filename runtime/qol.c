@@ -205,16 +205,20 @@ static const struct { int menu; const char *text; int line, sub; } x_items[] = {
     {3, "OFF", 0, 0}, {3, "QUARTER", 0, 0}, {3, "HALF", 0, 0}, {3, "THREE QUARTERS", 0, 0}, {3, "FULL", 0, 0},
     {4, "OFF", 0, 0}, {4, "QUARTER", 0, 0}, {4, "HALF", 0, 0}, {4, "THREE QUARTERS", 0, 0}, {4, "FULL", 0, 0},
     {5, "OFF", 0, 0}, {5, "QUARTER", 0, 0}, {5, "HALF", 0, 0}, {5, "THREE QUARTERS", 0, 0}, {5, "FULL", 0, 0},
-    {6, "OFF", 0, 0}, {6, "QUARTER", 0, 0}, {6, "HALF", 0, 0}, {6, "THREE QUARTERS", 0, 0}, {6, "FULL", 0, 0},
-    {7, "OFF", 0, 0}, {7, "QUARTER", 0, 0}, {7, "HALF", 0, 0}, {7, "THREE QUARTERS", 0, 0}, {7, "FULL", 0, 0}};
+    {6, "OFF", 0, 0}, {6, "QUARTER", 0, 0}, {6, "HALF", 0, 0}, {6, "THREE QUARTERS", 0, 0}, {6, "FULL", 1, 0},
+    {7, "OFF", 0, 0}, {7, "QUARTER", 0, 0}, {7, "HALF", 0, 0}, {7, "THREE QUARTERS", 0, 0}, {7, "FULL", 1, 0},
+    {6, "EVERY TIME", 0, 0}, {6, "EVERY 5 SECONDS", 0, 0}, {6, "EVERY 15 SECONDS", 0, 0}, {6, "EVERY 30 SECONDS", 0, 0},
+    {7, "EVERY TIME", 0, 0}, {7, "EVERY 5 SECONDS", 0, 0}, {7, "EVERY 15 SECONDS", 0, 0}, {7, "EVERY 30 SECONDS", 0, 0}};
 #define X_N (int)(sizeof x_items / sizeof x_items[0])
 #define X_SPEED0 13                                  /* (first items of the submenus: the launcher's choices) */
 #define X_PANEL0 18
 #define X_NPANEL 7
 #define X_VOL0   25                                  /* music, game sounds, system sounds, the ew, purchases: 5 each */
 #define X_NVOL   5
+#define X_GAP0   (X_VOL0 + 5 * X_NVOL)               /* how often: the ew's 4, then the purchases' (the launcher's Grossed-Out
+                                                      * and Purchase Sounds; at the volume OFF neither plays) */
 static const double x_speeds[5] = {10000, 12500, 15000, 20000, 40000}, x_panels[X_NPANEL] = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
-static const double x_vols[5] = {0, 0.25, 0.5, 0.75, 1.0};
+static const double x_vols[5] = {0, 0.25, 0.5, 0.75, 1.0}, x_gaps[4] = {0, 5, 15, 30};
 static const char *const x_vol_keys[X_NVOL] = {"MusicVolume", "GameSoundVolume", "SystemSoundVolume", "EwVolume", "PurchaseVolume"};
 double tp_game_sound_volume = 1, tp_system_sound_volume = 1;   /* (H_START_SAMPLE scales each effect by its kind) */
 static uint32_t x_game_tab; static int x_on = -1, x_tick;
@@ -236,6 +240,7 @@ static void x_flags(uint8_t *m) {
     for (int v = 0; v < X_NVOL; v++) { double cur = v == 0 ? x_getf("MusicVolume", 0.8) : v == 1 ? tp_game_sound_volume : v == 2 ? tp_system_sound_volume : v == 3 ? ew_volume : cash_volume;
         int best = 0; for (int i = 1; i < 5; i++) if (fabs(cur - x_vols[i]) < fabs(cur - x_vols[best])) best = i;
         f[X_VOL0 + v * 5 + best] = 1; }
+    for (int i = 0; i < 4; i++) { f[X_GAP0 + i] = fabs(ew_gap - x_gaps[i]) < 0.01; f[X_GAP0 + 4 + i] = fabs(cash_gap - x_gaps[i]) < 0.01; }
     memcpy(m + X_FLAGS, f, X_N);
 }
 static void x_build(uint8_t *m) {                    /* the menus, the bar's list, the texts (once the game's table exists) */
@@ -284,6 +289,8 @@ static void x_choose(uint8_t *m, int k) {
         else if (k >= X_VOL0 && k < X_VOL0 + 5 * X_NVOL) { int v = (k - X_VOL0) / 5; double vol = x_vols[(k - X_VOL0) % 5];
             if (v == 1) tp_game_sound_volume = vol; else if (v == 2) tp_system_sound_volume = vol; else if (v == 3) ew_volume = vol; else if (v == 4) cash_volume = vol;
             if (tp_extras_setf) tp_extras_setf(x_vol_keys[v], vol); }   /* (main.m applies the music's at once) */
+        else if (k >= X_GAP0 && k < X_GAP0 + 8) { double g = x_gaps[(k - X_GAP0) % 4];
+            if (k < X_GAP0 + 4) { ew_gap = g; ew_last = -1e9; x_set("GrossOutGap", (long)g); } else { cash_gap = g; cash_last = -1e9; x_set("PurchaseGap", (long)g); } }
     }
     x_flags(m);
     static const char *const menus[8] = {"", "game speed ", "panel size ", "music volume ", "game sounds ", "system sounds ", "ew sounds ", "purchase sounds "};
