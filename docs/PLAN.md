@@ -15,6 +15,14 @@ Builds need only this repository, the owned package and a Python venv (the share
 
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
+2026-10-21, the launcher reworked (the user: fewer buttons, better nesting, no gold borders on the buttons). The main
+screen: Game Speed and Updates, then three buttons (Game, Display, Sound) and Quit/Play. Game: Intro, Language, Frame
+Pacing, Free Mode ›, Controls ›, Saved Parks (Finder). Display: Screen, Start In, Aspect, Wide Windows, Panel Size,
+Pixels, Mouse Pointer, Zoomed Drawing, Ride Videos. Sound: Sound, Music Volume, Effects Volume, Music Options ›
+(type, instruments, ride music, ride tunes, park music), Effect Options › (game and system sounds, the ew's and the
+till's volume and how often). A › row opens its page; Back returns to the page it came from. The buttons are plain
+red signs (no gold lines or bulbs). Checked: every page rendered (TP_LAUNCHER_OPEN, TP_LAUNCHER_SHOT).
+
 2026-10-21, the user: the in-game ew setting does not change how often the ew plays; the launcher has no update
 option.
 - EXTRAS > EW SOUNDS (and PURCHASE SOUNDS) set only the volume; how often was the launcher's Grossed-Out Sounds
