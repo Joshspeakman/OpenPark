@@ -182,13 +182,14 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
 - (double)menuPanelScale { double k = tp_view_ui_scale(); return tp_game_video || k > 1 ? 1 : k; }
 - (int)panelRows:(int)h { return h == 480 ? 44 : h * 22 / 200; }   /* (the panel's rows: view.c band_map's) */
 /* A point in the column (0..1) to the game's screen: in the smaller panel, its place on the panel; elsewhere in the
- * panel's strip (the park shows there), just above it. */
+ * panel's strip (the park shows there), the panel's nearest point (it was the window's bottom row: going down to the
+ * panel, the game's cursor stayed on that row across the gap above the panel and beside it, then jumped). */
 - (void)menuMapX:(double *)fx y:(double *)fy {
     double k = [self menuPanelScale]; if (k == 1 || _sh <= 0) return;
     double band = (double)[self panelRows:_sh] / _sh, top = 1 - band, py0 = 1 - band * k, px0 = (1 - k) / 2;
     if (*fy < top) return;
-    if (*fy >= py0 && *fx >= px0 && *fx < px0 + k) { *fx = (*fx - px0) / k; *fy = top + (*fy - py0) / k; }
-    else *fy = top - 0.5 / _sh;
+    double x = fmin(fmax(*fx, px0), px0 + k * 0.9999), y = fmax(*fy, py0);
+    *fx = (x - px0) / k; *fy = top + (y - py0) / k;
     *fx = fmin(fmax(*fx, 0), 0.9999); *fy = fmin(fmax(*fy, 0), 0.9999);
 }
 - (NSRect)columnRect {
