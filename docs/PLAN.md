@@ -13,6 +13,14 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-26, the panel hard to reach from a game window in 640x480 (the user: research and the like, the pointer
+offset going back down to the panel). With a game window up in the wide view the panel is drawn at Panel Size (0.5
+here) at the bottom middle, and every pointer point in its strip outside it (the gap above it, both sides) went to the
+window's bottom row: the game's cursor stayed there while the mouse went down, then jumped into the panel (measured:
+row 435 from the window's bottom to the panel's top, and at either side at the bottom). Those points now go to the
+panel's nearest point (main.m menuMapX). Checked with the bank window: the gap gives the panel's top row, the sides its
+edges; the rides button clicked from the bank window opened the rides window and its cross closed it; the same in 320.
+
 2026-10-21, Beta 1.3 (the user's say): main fast-forwarded to nightly, tagged beta-1.3, a source-only pre-release.
 
 2026-10-21, the launcher reworked (the user: fewer buttons, better nesting, no gold borders on the buttons). The main
