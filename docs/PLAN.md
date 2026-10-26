@@ -13,6 +13,8 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-26, Beta 1.4 (the user's say): main and nightly at the same commit, tagged beta-1.4, a source-only pre-release.
+
 2026-10-26, the panel hard to reach from a game window in 640x480 (the user: research and the like, the pointer
 offset going back down to the panel). With a game window up in the wide view the panel is drawn at Panel Size (0.5
 here) at the bottom middle, and every pointer point in its strip outside it (the gap above it, both sides) went to the
