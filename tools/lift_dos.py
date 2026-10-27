@@ -95,6 +95,18 @@ def create_lifter(reference, image, output):
             for byte in i.bytes:
                 if byte not in (0xf0,0xf2,0xf3,0x66,0x67,0x26,0x2e,0x36,0x3e,0x64,0x65): break
                 prefixes.append(byte)
+            # INS/OUTS (port strings, REP or one): the game reads the whole VGA palette back with REP INSB from
+            # 3C9h (0x187ed4, before a screen's fade: the year-end screens); unlifted, it ended the game.
+            if mn.split()[-1] in ('insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd'):
+                base = mn.split()[-1]; k = {'b': 1, 'w': 2, 'd': 4}[base[-1]]
+                if i.addr_size != 4 or any(p in prefixes for p in (0x26, 0x2e, 0x36, 0x64, 0x65)):
+                    raise lift.Unsupported('unimplemented port string address/segment override')
+                if base.startswith('ins'):
+                    one = 'SPILL; { uint32_t v = tp_io(c, 0, edx & 0xffffu, %du, 0); RELOAD; W%d(edi, v); } edi += d;' % (k, k * 8)
+                else:
+                    one = '{ uint32_t v = R%d(esi); SPILL; tp_io(c, 1, edx & 0xffffu, %du, v); RELOAD; } esi += d;' % (k * 8, k)
+                body = 'while (ecx) { %s ecx--; }' % one if any(p in prefixes for p in (0xf2, 0xf3)) else one
+                return '{ uint32_t d = (f.df ? (uint32_t)-%d : %du); %s }' % (k, k, body)
             if mn.split()[-1] in strings:
                 if i.addr_size!=4 or any(p in prefixes for p in (0x26,0x2e,0x36,0x64,0x65)):
                     raise lift.Unsupported('unimplemented string address/segment override')

@@ -13,6 +13,19 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-27, the user: slowdowns after placing buildings quickly, year-end and other management screens stuck or
+skipped. Found: the game-over screen (0x15c7d1, after the year-end "you will go bankrupt" warning when a park stays in
+the red) fades with 0x17f1d0, which first reads the whole VGA palette back with REP INSB from 3C9h (0x187ed4). The
+lifter had no INS/OUTS: the block was an rt_unhandled trap and the game ended ("native -1 at 00187ed4: insb"),
+reproduced with a copy of the user's park in 320x200. tools/lift_dos.py now lifts INS/OUTS (b/w/d, REP or one, DF) through
+tp_io; the same run reached the game-over screen (probes on 0x15c7d1 and 0x187ed4) and went on to the title menu.
+check.sh, check_portable and check_macos --park pass. Not reproduced yet: the slowdown (eight shops bought and placed
+in a row in the user's park and in TESTPARK, 640x480 wide, their settings: no long frames, no audio drops; their
+log has seven seconds of 62 ms game stalls at 98-104 s of a session), and screens skipped (the year-end warning shows
+in both modes and closes with its tick; TESTPARK passed a year end in both modes with no report windows, which the
+320x200 soak park showed). Seen: after the game over the title menu is drawn as a game window in the wide view (its
+bottom rows at the panel's size).
+
 2026-10-26, Beta 1.4 (the user's say): main and nightly at the same commit, tagged beta-1.4, a source-only pre-release.
 
 2026-10-26, the panel hard to reach from a game window in 640x480 (the user: research and the like, the pointer
