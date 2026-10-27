@@ -741,6 +741,8 @@ static void govern(void) {
     if (getenv("TP_GOV_DEBUG")) { static double l; static uint64_t li; static int resets; if (ahead < -0.1) resets++;
         if (t - l >= 1) { if (l) fprintf(stderr, "gov: %.2f M insns/s (target %.2f), ahead %.1f ms, resets %d\n", (tp_insns - li) / (t - l) / 1e6, gov_rate / 1e6, ahead * 1e3, resets); l = t; li = tp_insns; resets = 0; } }
     if (ahead < -0.1) { gov_t0 = t; gov_i0 = tp_insns; return; }   /* never burst to catch up */
+    { static uint64_t gi; uint64_t d = tp_insns - gi; gi = tp_insns;   /* (development: a long sleep, and the run before it) */
+      if (ahead > 0.03 && getenv("TP_GOV_DEBUG")) fprintf(stderr, "gov: a sleep of %.0f ms at %08x (%.2fM instructions since the last call)\n", ahead * 1e3, G(EIP), d / 1e6); }
     if (ahead > 0.001) {
         struct timespec ts = {0, (long)(ahead * 1e9)};
         double g0 = now_s(); nanosleep(&ts, NULL); tp_dbg_gov += now_s() - g0;

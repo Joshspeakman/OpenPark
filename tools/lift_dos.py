@@ -107,6 +107,11 @@ def create_lifter(reference, image, output):
                     one = '{ uint32_t v = R%d(esi); SPILL; tp_io(c, 1, edx & 0xffffu, %du, v); RELOAD; } esi += d;' % (k * 8, k)
                 body = 'while (ecx) { %s ecx--; }' % one if any(p in prefixes for p in (0xf2, 0xf3)) else one
                 return '{ uint32_t d = (f.df ? (uint32_t)-%d : %du); %s }' % (k, k, body)
+            # LSL (the C runtime's heap growth, 0x190138/0x19030b: the limit of DS): every descriptor the host makes is
+            # 4 GiB, page granular (host.c), so the limit is all ones and ZF is set (a selector of 0: ZF clear).
+            if mn == 'lsl' and len(ops) == 2 and ops[0].size == 4:
+                return '{ uint32_t s = %s & 0xfffcu; if (s) { %s } flags_set(&f, s ? 0x40u : 0u, 0x40u); }' % (
+                    self.rd(i, ops[1]), self.wr(i, ops[0], '0xffffffffu'))
             if mn.split()[-1] in strings:
                 if i.addr_size!=4 or any(p in prefixes for p in (0x26,0x2e,0x36,0x64,0x65)):
                     raise lift.Unsupported('unimplemented string address/segment override')

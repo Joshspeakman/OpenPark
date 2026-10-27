@@ -13,6 +13,32 @@ look-ahead limiter, per-kind levels); a port audit (docs/reports/2026-10-18-port
 issues; the coverage corpus (half the game's functions exercised); a rail-ride report not yet reproduced.
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
+2026-10-27, end-to-end test (the user: every part of the game, adversarially, looping until production quality):
+work/playtest/e2e.py drives the built app like a player (muted, scratch data) and checks every step: the title, a new
+FULL park with 4 opponents, every panel window (open, switch, close), building (a shop, a ride with its entrance and exit,
+a path, scenery: checked in the map's cells), hiring the staff kinds, opening the park, research, the four top menus,
+saving to a slot and loading it back (money restored exactly), a year's end (its windows closed), 640x480 and back with
+zooms, the Visitor View, three minutes of seeded random clicks and keys, bankruptcy to the game-over screen and the
+title, and quitting (DOS exit 0); after every step the app is alive and the log has no fatal line. All 15 pass. Found and
+fixed on the way:
+- LSL (the C runtime's heap growth, 0x190138/0x19030b) was an unlifted trap like INS: lifted (the descriptors are
+  4 GiB, so the limit is all ones). A static pass over every rt_unhandled in called code: the rest are in data the
+  survey decoded as code (no callers), or the AWE32 driver's 16-bit ports (not the configured card).
+- Game screens that replace the park (research, the year-end details and charts, the title menu after a game over)
+  were drawn in the wide view with their bottom rows shrunk to Panel Size, as the panel is under the game's windows:
+  their own buttons there (the charts' close, research's tick) were drawn small in the middle of the strip and a
+  click where they belong missed. The panel is now shrunk only when the frame has it (main.m frame_has_panel: its light
+  blue top and bottom rows); a change of size recomposes the strip (research to the bank left a full-size panel
+  beside the small one).
+- DOS services the code holds but the host lacks (01h, 1Ah/2Fh/4Eh/4Fh, 37h, 41h, 4Ah, 4Bh/4Dh, EDh): only in C
+  runtime paths that do not run (tmpfile's delete, spawn/system, other extenders' heap growth). The title's F4 (the
+  intro) asks for intro.exe, which is not copied, and does nothing.
+- Seen once in a long run, not reproduced since: in 640x480 with a game window open, game stalls past the audio
+  lead of 61-89 ms, 5-9 a second (the user's log has the same signature). TP_GOV_DEBUG now logs the governor's long
+  sleeps with the code and the instructions before them; the end-to-end run records them.
+- The awards check (every 200 s): 170-190 ms frames, 82-87M instructions (the award pictures' unpacking): the one
+  repeating hitch.
+
 2026-10-27, the user: slowdowns after placing buildings quickly, year-end and other management screens stuck or
 skipped. Found: the game-over screen (0x15c7d1, after the year-end "you will go bankrupt" warning when a park stays in
 the red) fades with 0x17f1d0, which first reads the whole VGA palette back with REP INSB from 3C9h (0x187ed4). The
