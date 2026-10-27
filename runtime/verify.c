@@ -142,8 +142,17 @@ static uint8_t hook_bits[4096];                   /* a hook may be at addresses 
  * half built (issue #2). Hooks are handled between runs, so a change made there applies at once. */
 static _Atomic int hooks_dirty;
 void tp_hooks_changed(void) { atomic_store_explicit(&hooks_dirty, 1, memory_order_release); }
+/* Blocks only counted, not hooked (the game's copies of its picture to the screen: host.c's pacing tells a screen of
+ * the game's own loop from park frames by them); in the same table, so the common case stays one compare. */
+uint32_t tp_count_pcs[2] = {0xffffffffu, 0xffffffffu};
+volatile unsigned long tp_count_hits;
 static void hooks_rebuild(void) {
     hook_lo = 0x7fffffff; hook_hi = -1; memset(hook_bits, 0, sizeof hook_bits);
+    for (int h = 0; h < 2; h++) if (tp_count_pcs[h] != 0xffffffffu) {
+        hook_bits[tp_count_pcs[h] & 4095] = 1;
+        if ((int)tp_count_pcs[h] < hook_lo) hook_lo = (int)tp_count_pcs[h];
+        if ((int)tp_count_pcs[h] > hook_hi) hook_hi = (int)tp_count_pcs[h];
+    }
     for (int h = 0; h < 32; h++) if (tp_hook_pcs[h] != 0xffffffffu) {
         hook_bits[tp_hook_pcs[h] & 4095] = 1;
         if ((int)tp_hook_pcs[h] < hook_lo) hook_lo = (int)tp_hook_pcs[h];
@@ -162,8 +171,10 @@ int tp_run(uint32_t budget) {
     if (setjmp(trap)) return -1;
     while (budget--) {
         int hooked = 0;
-        if (hook_bits[state.tc & 4095] && (int)state.tc >= hook_lo && (int)state.tc <= hook_hi)
+        if (hook_bits[state.tc & 4095] && (int)state.tc >= hook_lo && (int)state.tc <= hook_hi) {
             for (int h = 0; h < 32; h++) if (state.tc == tp_hook_pcs[h]) { hooked = 1; tp_hook_which = h; }
+            if ((state.tc == tp_count_pcs[0] || state.tc == tp_count_pcs[1]) && tp_hook_armed) tp_count_hits++;   /* (once: not again as a hook resumes) */
+        }
         if (hooked) { if (tp_hook_armed) { tp_hook_armed = 0; return -3; } }
         else tp_hook_armed = 1;
         if (state.tc == tp_watch_pc) tp_watch_hit = 1;
