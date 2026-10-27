@@ -38,6 +38,14 @@ fixed on the way:
 - DOS services the code holds but the host lacks (01h, 1Ah/2Fh/4Eh/4Fh, 37h, 41h, 4Ah, 4Bh/4Dh, EDh): only in C
   runtime paths that do not run (tmpfile's delete, spawn/system, other extenders' heap growth). The title's F4 (the
   intro) asks for intro.exe, which is not copied, and does nothing.
+- Results with the fixes (tests/e2e/run.py, both modes, 2026-10-27): every step passes (title, new FULL park, panel
+  windows, building, staff, opening, research, top menus, save/load, year's end, [R] with zooms, Visitor View, the
+  random monkey, bankruptcy, quit, the title's credits and intro, PARK > RESTART, two watched year ends, and a 128x128
+  sandbox park built on, saved (~2.5 MB) and loaded back with its building); no long frames, no audio drops, no long
+  governor sleeps. The year-end charts now stay ~6 s each year (10 frames polled at 0.6 s) where they went by in 0.2 s.
+  The user's own park (JOSH copy, 640x480 wide): its year-end warning comes ~108 s after loading (their log's drops were
+  at 98-104 s): governed now (10.0M instructions a second in it), no drops; the installed 1c1053b build gave the 158 ms
+  year-end frame and no drops in the same run, so the drops themselves stay unreproduced.
 - Seen once in a long run, not reproduced since: in 640x480 with a game window open, game stalls past the audio
   lead of 61-89 ms, 5-9 a second (the user's log has the same signature). TP_GOV_DEBUG now logs the governor's long
   sleeps with the code and the instructions before them; the end-to-end run records them.
