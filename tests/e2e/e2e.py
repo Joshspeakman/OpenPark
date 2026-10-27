@@ -216,7 +216,7 @@ def open_park():
     mark(); ctl('sleep 1')
 def panel_shown(f):
     """the park's bottom panel: its light blue top row (179) and bottom row (199) across the screen"""
-    blue = lambda c: c[2] > 200 and c[1] > 120 and c[0] < 180
+    blue = lambda c: c[2] > 60 and c[2] > c[0] + 40 and c[2] >= c[1]   # (by hue: a storm dims the palette)
     return all(sum(1 for x in range(0, 320, 4) if blue(f(x, y))) > 50 for y in (179, 199))
 import random, glob
 def wide(on=True): ctl(f'size {"1728 1085" if on else "1280 960"}', 'sleep 2.5')
