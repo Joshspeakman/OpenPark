@@ -14,7 +14,7 @@ issues; the coverage corpus (half the game's functions exercised); a rail-ride r
 Builds need only this repository, the owned package and a Python venv (the shared lifter is vendored).
 
 2026-10-27, end-to-end test (the user: every part of the game, adversarially, looping until production quality):
-work/playtest/e2e.py drives the built app like a player (muted, scratch data) and checks every step: the title, a new
+tests/e2e/run.py (work/playtest/e2e.py while it was written; scratch data in work/e2e, E2E_HI=1 for 640x480) drives the built app like a player (muted, scratch data) and checks every step: the title, a new
 FULL park with 4 opponents, every panel window (open, switch, close), building (a shop, a ride with its entrance and exit,
 a path, scenery: checked in the map's cells), hiring the staff kinds, opening the park, research, the four top menus,
 saving to a slot and loading it back (money restored exactly), a year's end (its windows closed), 640x480 and back with
@@ -41,8 +41,15 @@ fixed on the way:
 - Seen once in a long run, not reproduced since: in 640x480 with a game window open, game stalls past the audio
   lead of 61-89 ms, 5-9 a second (the user's log has the same signature). TP_GOV_DEBUG now logs the governor's long
   sleeps with the code and the instructions before them; the end-to-end run records them.
-- The awards check (every 200 s): 170-190 ms frames, 82-87M instructions (the award pictures' unpacking): the one
-  repeating hitch.
+- The year's end ran unthrottled (the user: year-end screens skipped; the "awards check" hitch every 200 s was the same
+  thing: a game year at Original speed). The charts screen's loop polls no keys and does not wait for the retrace, so
+  host.c paced it as a park frame for two seconds: its ~1000 frames (79M instructions) went by in 0.2 s and it closed
+  itself (a timed display, about 7 s at the governed rate, as under DOSBox). Traced (TP_STALL_PROFILE, TP_STALL_MS;
+  0x15ed21, the sprite drawer, half the blocks; 1004 copies to the screen). The dispatcher now counts the game's copies
+  to the screen (0x180210, 0x155507; count-only entries in the hook table: verify.c tp_count_pcs) and more than two
+  since the last park frame is a screen of the game's own: governed. Park frames make one or two (TP_PRESENT_DEBUG).
+  Checked: the charts stay ~7 s at the year's end and the long frame is gone; check.sh, check_walk, check_portable and
+  check_macos --park pass.
 
 2026-10-27, the user: slowdowns after placing buildings quickly, year-end and other management screens stuck or
 skipped. Found: the game-over screen (0x15c7d1, after the year-end "you will go bankrupt" warning when a park stays in

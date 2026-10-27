@@ -140,6 +140,7 @@ void tp_qol_init(void) {
         e = *p == ',' ? p + 1 : p; if (*p != ',') break;
     }
     for (int i = 0; i < NHOOK; i++) tp_hook_pcs[QOL0 + i] = hook_pc[i];
+    { extern uint32_t tp_count_pcs[2]; tp_count_pcs[0] = 0x180210; tp_count_pcs[1] = 0x155507; }   /* (the copies of the picture to the screen, 320x200 and 640x480: host.c's pacing counts them) */
     if (getenv("TP_PROBE")) { const char *e = getenv("TP_PROBE"); for (int i = 0; i < 3 && *e; i++) { char *q; tp_hook_pcs[QOL0 + NHOOK + 1 + i] = (uint32_t)strtoul(e, &q, 16); e = *q == ',' ? q + 1 : q; } }
     { void tp_view_pacing_init(void); tp_view_pacing_init(); }   /* steady pacing of park frames (view.c) */
     tp_hooks_changed();
@@ -353,11 +354,12 @@ void tp_qol_hook(int nested) {
     if (k == H_TICK) {                                /* (the park ticks: Free Mode rules, freemode.c) */
         if (!nested) x_frame(m);
         if (!nested) { void tp_free_frame(void); tp_free_frame(); }
-        if (!nested && getenv("TP_STALL_PROFILE")) {      /* development: the blocks of the first park tick over 200 ms, 15 s in */
+        if (!nested && getenv("TP_STALL_PROFILE")) {      /* development: the blocks of the first park tick over 200 ms (TP_STALL_MS), 15 s in */
             extern uint32_t *tp_trace_buf; extern uint32_t tp_trace_cap, tp_trace_n; static double l, t0; static int done; double t = now();
             if (!t0) t0 = t;
             if (!tp_trace_buf && !done) { tp_trace_cap = 30000000; tp_trace_buf = malloc(4ul * tp_trace_cap); }
-            if (tp_trace_buf && l && t - l > 0.2 && t - t0 > 15) {
+            static double lim = -1; if (lim < 0) lim = getenv("TP_STALL_MS") ? atof(getenv("TP_STALL_MS")) / 1e3 : 0.2;   /* (the threshold: TP_STALL_MS) */
+            if (tp_trace_buf && l && t - l > lim && t - l < 1 && t - t0 > 15) {   /* (not a gap the park did not run in) */
                 FILE *f = fopen(getenv("TP_STALL_PROFILE"), "wb"); if (f) { fwrite(tp_trace_buf, 4, tp_trace_n, f); fclose(f); }
                 fprintf(stderr, "stall profile: %u blocks in %.1f ms\n", tp_trace_n, (t - l) * 1e3); tp_trace_buf = NULL; done = 1;
             }

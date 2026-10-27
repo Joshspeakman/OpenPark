@@ -298,10 +298,22 @@ static void file_note(const char *name) {
  * (Park frames only: after a screen pass at the title, the menus ran ungoverned and the sound card starved.) */
 volatile int tp_frame_paced_park;                         /* (the last release was a park frame's, not a screen pass's: view.c) */
 static double pace_seen; static int passes_since_pace; static uint64_t poll_insns;
-static void pace_sync(void) { if (tp_frame_paced_at != pace_seen) { pace_seen = tp_frame_paced_at; passes_since_pace = 0; } }
+extern volatile unsigned long tp_count_hits; static unsigned long presents_at_pace;   /* (verify.c: the game's copies to the screen) */
+static void pace_sync(void) {
+    if (tp_frame_paced_at != pace_seen) {
+        if (getenv("TP_PRESENT_DEBUG")) { static int hist[8]; static double l; unsigned long n = tp_count_hits - presents_at_pace; hist[n < 7 ? n : 7]++;
+            if (now_s() - l > 2) { fprintf(stderr, "presents per park frame: %d %d %d %d %d %d %d %d+\n", hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6], hist[7]); memset(hist, 0, sizeof hist); l = now_s(); } }
+        pace_seen = tp_frame_paced_at; passes_since_pace = 0; presents_at_pace = tp_count_hits;
+    }
+}
 static int frame_paced(void) {
     if (!tp_frame_paced_at) return 0;
     double ago = now_s() - tp_frame_paced_at; pace_sync();
+    /* A screen of the game's own between park frames (the year's end: the charts) redraws in a loop that polls no keys
+     * and does not wait for the retrace: counted by its copies to the screen (more than two since the last park frame),
+     * it is governed. (Paced as a park frame for two seconds, it ran unthrottled: the charts' timed display, about a
+     * thousand frames, went by in a fifth of a second, seen as a 0.2 s hitch every game year and the screens skipped.) */
+    if (tp_count_hits - presents_at_pace > 2) return 0;
     return ago < 0.1 || (tp_frame_paced_park && ago < 2 && passes_since_pace < 2);
 }
 static double emu_now(void) {
@@ -1434,18 +1446,22 @@ int tp_host_png_rgba(const char *path, const uint32_t *px, int w, int h) {
     fclose(f); free(z); return 1;
 }
 
+static int input_log(void) { static int on = -1; if (on < 0) on = getenv("TP_INPUT_LOG") != NULL; return on; }   /* (development: what the game is given) */
 void tp_host_key(uint32_t key) {
+    if (input_log()) fprintf(stderr, "input: key %04x\n", key);
     pthread_mutex_lock(&input_lock);
     if (nkeys < 64) keys[nkeys++] = key;
     pthread_mutex_unlock(&input_lock);
 }
 void tp_host_shift(uint32_t flags) { shift_flags = flags; }
 void tp_host_key_raw(uint8_t scan, int down) {
+    if (input_log()) fprintf(stderr, "input: raw %02x %s\n", scan, down ? "down" : "up");
     pthread_mutex_lock(&input_lock);
     if (nraw < 64) raw_keys[nraw++] = down ? scan : (scan | 0x80);
     pthread_mutex_unlock(&input_lock);
 }
 static void push_mouse(double x, double y, uint32_t buttons, uint32_t moved) {
+    { static uint32_t lb; if (input_log() && buttons != lb) fprintf(stderr, "input: mouse %.3f,%.3f buttons %u\n", x, y, buttons); lb = buttons; }
     pthread_mutex_lock(&input_lock);
     /* A move after a move with the same buttons replaces it (the place is what matters): the queue keeps the button
      * changes when the game is not taking events, where a full queue used to drop the newest, a release among them. */
