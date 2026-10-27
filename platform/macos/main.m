@@ -136,7 +136,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     uint32_t *_walkPx; int _walkW, _walkH;
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
-    uint32_t *_clean; int _cleanW, _cleanH, _menuCW; double _menuPK; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
+    int _menuCW; double _menuPK, _coverAt;   /* the column's width and the panel's size last composed (present: menuWide) */
     TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
     BOOL _cornerGuard, _held; NSPoint _virt; NSTimeInterval _letGoAt, _warpAt; CGFloat _warpDX, _warpDY;   /* full screen: the pointer kept out of the corners (pointOf:) */
     double _lastFx, _lastFy; uint8_t _keyDown[128]; BOOL _fastForward;   /* what the game was last told: releaseInput */
@@ -271,12 +271,6 @@ static BOOL frame_has_panel(const uint32_t *px, int fw, int fh, int pr) {
         tp_view_out_bgra = 1; tp_view_compose_stride(IOSurfaceGetBytesPerRow(sf) / 4);
         tp_view_compose((uint32_t *)IOSurfaceGetBaseAddress(sf), ow, oh, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
         tp_view_out_bgra = 0; tp_view_compose_stride(0);
-        if (tc0 - _cleanAt > 0.25 && tp_view_ui_share() < 0.5) {   /* (a few times a second, while no game window covers the park) */
-            if (_cleanW != ow || _cleanH != oh) { free(_clean); _clean = malloc((size_t)ow * oh * 4); _cleanW = ow; _cleanH = oh; }
-            size_t bp = IOSurfaceGetBytesPerRow(sf); const uint8_t *b = IOSurfaceGetBaseAddress(sf);
-            for (int y = 0; y < oh; y++) memcpy(_clean + (size_t)y * ow, b + (size_t)y * bp, (size_t)ow * 4);
-            _cleanAt = tc0;
-        }
         IOSurfaceUnlock(sf, 0, NULL);
         _bigW = ow; _bigH = oh;
         if (getenv("TP_PACE_DEBUG")) { static double l, worst, sum; static int n; double d = CACurrentMediaTime() - tc0; sum += d; n++; if (d > worst) worst = d;
@@ -311,18 +305,17 @@ static BOOL frame_has_panel(const uint32_t *px, int fw, int fh, int pr) {
         if (getenv("TP_DEV_GAME_VIDEO")) tp_game_video = 1;   /* (development: any game window drawn as the game's video) */
         double lw = _lastLW > 0 ? _lastLW : [self layoutW], pk = [self menuPanelScale]; BOOL video = tp_game_video;
         int cw = (int)lround(_bigW * _sw / lw), cx0 = (_bigW - cw) / 2; if (cw > _bigW) cw = _bigW; if (cx0 < 0) cx0 = 0;
-        BOOL clean = _clean && _cleanW == _bigW && _cleanH == _bigH && CACurrentMediaTime() - _cleanAt < 5;
         /* The panel's rows at the panel's size, at the bottom middle as in the park; the rest of their strip shows the
          * park (as it was before the window came); the window above at its full size. */
         int pr = [self panelRows:fh], ys = video || pk == 1 ? _bigH : (int)lround((double)_bigH * (fh - pr) / fh);
         int pw = (int)lround(cw * pk), ph = (int)lround((double)_bigH * pr / fh * pk), px0 = (_bigW - pw) / 2, py0 = _bigH - ph;
-        /* Entering with no park picture of this size (the window was resized with a game window up: the last picture
-         * was the old size's, with the window in it, and it stayed beside the new one as a second copy; or the window
-         * resized while one is up, the column narrower than the old copy beside it): the park is composed afresh. */
+        /* Entering, the park is composed afresh around the window: alone, without the interface (a copy of the last
+         * screen had it: the panel at its own size behind the smaller one when a question had crossed the panel's band,
+         * and the old size's window beside a resized one); again when the column's width or the panel's size changes. */
         BOOL composed = NO, resized = _menuWide && (cw != _menuCW || pk != _menuPK);   /* (the column's width changed: the window resized; or
                                                     * the panel's size did: a screen without the panel came or went, research to the bank, and the
                                                     * strip kept the other size's panel beside this one) */
-        if (!video && ((!_menuWide && !clean) || resized)) {
+        if (!video && (!_menuWide || resized)) {
             tp_view_out_bgra = 1; tp_view_park_only = 1; tp_view_compose_stride(dp / 4);   /* (the park alone: its interface layer holds the window) */
             tp_view_compose((uint32_t *)dst, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
             tp_view_out_bgra = 0; tp_view_park_only = 0; tp_view_compose_stride(0); composed = YES;
@@ -331,8 +324,7 @@ static BOOL frame_has_panel(const uint32_t *px, int fw, int fh, int pr) {
             uint32_t *d = (uint32_t *)(dst + (size_t)y * dp);
             if (video) for (int x = 0; x < _bigW; x++) d[x] = 0xff000000u;   /* (a video: black beside it) */
             else if (composed) {}
-            else if (!_menuWide && clean) memcpy(d, _clean + (size_t)y * _bigW, (size_t)_bigW * 4);   /* (entering: the park picture around it, */
-            else if (!_menuWide || y >= ys) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* as it was before the window came) */
+            else if (y >= ys) memcpy(d, src + (size_t)y * sp, (size_t)_bigW * 4);   /* (the strip: as composed, the small panel redrawn below) */
             else { memcpy(d, src + (size_t)y * sp, (size_t)cx0 * 4); memcpy(d + cx0 + cw, src + (size_t)y * sp + (size_t)(cx0 + cw) * 4, (size_t)(_bigW - cx0 - cw) * 4); }
             if (y >= ys) {                                  /* the panel's strip */
                 if (y < py0 || ph <= 0) continue;
@@ -1314,7 +1306,14 @@ static uint32_t key_of_char(unichar c) {
         else if ([op isEqual:@"pan"]) [_view panBy:a1 :a2];
         else if ([op isEqual:@"size"]) [_window setContentSize:NSMakeSize(a1, a2)];
         else if ([op isEqual:@"cycles"]) tp_host_set_cycles(a1);
-        else if ([op isEqual:@"shot"]) { char hex[65]; tp_host_png([line substringFromIndex:5].fileSystemRepresentation, hex); fprintf(stderr, "shot %s\n", [line substringFromIndex:5].UTF8String); }
+        else if ([op isEqual:@"shot"]) {                 /* the game's frame (its own pixels; 640x480 too: RGBA) */
+            char hex[65]; const char *path = [line substringFromIndex:5].fileSystemRepresentation;
+            if (!tp_host_png(path, hex)) {
+                static uint32_t px[640 * 480]; int w = 0, h = 0; int tp_host_png_rgba(const char *, const uint32_t *, int, int);
+                if (tp_host_frame_size(&w, &h) && tp_host_frame_rgba_any(px, 640 * 480)) tp_host_png_rgba(path, px, w, h);
+            }
+            fprintf(stderr, "shot %s\n", [line substringFromIndex:5].UTF8String);
+        }
         else if ([op isEqual:@"vshot"]) [self vshot:[line substringFromIndex:6]];
         else if ([op isEqual:@"sleep"]) { until = t + a1; break; }
         else if ([op isEqual:@"ack"]) {

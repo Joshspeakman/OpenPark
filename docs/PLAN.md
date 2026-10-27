@@ -30,6 +30,11 @@ fixed on the way:
   click where they belong missed. The panel is now shrunk only when the frame has it (main.m frame_has_panel: its light
   blue top and bottom rows); a change of size recomposes the strip (research to the bank left a full-size panel
   beside the small one).
+- The park around a game window in the wide view was copied from the last live picture: when a question had crossed the
+  panel's band (the restart question in 640x480) that picture had the panel at its own size, and it stayed behind the
+  smaller one. The park is now composed alone on entry (main.m: no saved picture).
+- PARK > RESTART begins the park again (a new park at the starting balance), checked in both modes; the 640x480 run
+  (E2E_HI=1: the top menus are drawn at half the size there, their places measured) passes all steps.
 - DOS services the code holds but the host lacks (01h, 1Ah/2Fh/4Eh/4Fh, 37h, 41h, 4Ah, 4Bh/4Dh, EDh): only in C
   runtime paths that do not run (tmpfile's delete, spawn/system, other extenders' heap growth). The title's F4 (the
   intro) asks for intro.exe, which is not copied, and does nothing.
