@@ -123,7 +123,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     /* The park view (runtime/view.c): on when zoomed, or when the window is wider
      * than 4:3 (widescreen: the park fills it, the interface stays in a centred
      * 4:3 column); off, the game draws its own view. */
-    BOOL _viewOn, _live, _viewMoved, _menuWide;
+    BOOL _viewOn, _live, _viewMoved, _menuWide, _framePanel;
     uint32_t _curHash;                             /* the game pointer's pixels, as last made (updateGameCursor) */   /* _menuWide: a full-screen game window in the wide view (see present) */
     IOSurfaceRef _surf[2]; int _surfIdx;  /* the park view's pictures, shown in turn */    /* _viewMoved: pan or zoom since the last picture (compose now) */
     double _zoom, _cx, _cy, _offAt;      /* zoom, canvas point at the park area's centre, when the view last ended */
@@ -136,7 +136,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     uint32_t *_walkPx; int _walkW, _walkH;
     CATextLayer *_hud; char _hudText[256];
     AVQueuePlayer *_video; AVPlayerLayer *_videoLayer; AVPlayerLooper *_looper; int _videoType;
-    uint32_t *_clean; int _cleanW, _cleanH, _menuCW; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
+    uint32_t *_clean; int _cleanW, _cleanH, _menuCW; double _menuPK; double _cleanAt, _coverAt;   /* the park picture without a game window over it (present: menuWide) */
     TpVideo *_v3; CALayer *_v3Layer, *_v3Pic; double _v3t0; int _v3shown; dispatch_semaphore_t _v3done;   /* a 3DO ride video (play3DO) */
     BOOL _cornerGuard, _held; NSPoint _virt; NSTimeInterval _letGoAt, _warpAt; CGFloat _warpDX, _warpDY;   /* full screen: the pointer kept out of the corners (pointOf:) */
     double _lastFx, _lastFy; uint8_t _keyDown[128]; BOOL _fastForward;   /* what the game was last told: releaseInput */
@@ -179,7 +179,21 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
 /* A full-screen game window in the wide view (present: menuWide): the window at its full size, its panel at the
  * panel's size (at most 1, over nothing of the window), anchored at the bottom middle as in the park (view.c
  * band_map), so opening one from the panel leaves the panel as it was. The game's own videos: no panel. */
-- (double)menuPanelScale { double k = tp_view_ui_scale(); return tp_game_video || k > 1 ? 1 : k; }
+- (double)menuPanelScale { double k = tp_view_ui_scale(); return tp_game_video || !_framePanel || k > 1 ? 1 : k; }
+/* Whether the game's frame has the park's panel in its bottom rows (its light blue top and bottom rows across the
+ * screen). The game's windows over the park keep it; the screens that replace the park (research, the year-end
+ * details and charts, the title menu) have their own buttons there: shrunk to the panel's size they were drawn in the
+ * middle of the strip, the charts' close button among them, and a click where they belong missed them. */
+static BOOL frame_has_panel(const uint32_t *px, int fw, int fh, int pr) {
+    if (fw <= 0 || fh <= pr || pr <= 0) return NO;
+    int rows[2] = { fh - pr + (fh == 480 ? 2 : 1), fh - 1 };
+    for (int k = 0; k < 2; k++) {
+        const uint32_t *row = px + (size_t)rows[k] * fw; int n = 0, m = 0;
+        for (int x = 0; x < fw; x += fw / 80) { uint32_t c = row[x]; int r = c & 255, g = c >> 8 & 255, b = c >> 16 & 255; m++; if (b > 200 && g > 120 && r < 180) n++; }
+        if (n * 8 < m * 5) return NO;
+    }
+    return YES;
+}
 - (int)panelRows:(int)h { return h == 480 ? 44 : h * 22 / 200; }   /* (the panel's rows: view.c band_map's) */
 /* A point in the column (0..1) to the game's screen: in the smaller panel, its place on the panel; elsewhere in the
  * panel's strip (the park shows there), the panel's nearest point (it was the window's bottom row: going down to the
@@ -215,6 +229,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
     int w, h;
     if (!tp_host_frame_size(&w, &h) || !tp_host_frame_rgba_any(_pixels, 640 * 480)) return;
     int fw = w, fh = h; uint32_t *px = _pixels;
+    _framePanel = frame_has_panel(_pixels, fw, fh, [self panelRows:fh]);
     [self updateGeometry];
     if ((_zoom != 1 || [self wide]) != _viewOn || (_viewOn && fabs([self layoutW] - _lastLW) > 0.5)) [self applyView];
     if (_viewOn && tp_view_camera_moves() != _camMoves) {   /* the game moved its camera itself: look there */
@@ -304,7 +319,9 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
         /* Entering with no park picture of this size (the window was resized with a game window up: the last picture
          * was the old size's, with the window in it, and it stayed beside the new one as a second copy; or the window
          * resized while one is up, the column narrower than the old copy beside it): the park is composed afresh. */
-        BOOL composed = NO, resized = _menuWide && cw != _menuCW;   /* (the column's width changed: the window resized) */
+        BOOL composed = NO, resized = _menuWide && (cw != _menuCW || pk != _menuPK);   /* (the column's width changed: the window resized; or
+                                                    * the panel's size did: a screen without the panel came or went, research to the bank, and the
+                                                    * strip kept the other size's panel beside this one) */
         if (!video && ((!_menuWide && !clean) || resized)) {
             tp_view_out_bgra = 1; tp_view_park_only = 1; tp_view_compose_stride(dp / 4);   /* (the park alone: its interface layer holds the window) */
             tp_view_compose((uint32_t *)dst, _bigW, _bigH, _pixels, fw, fh, [NSUserDefaults.standardUserDefaults boolForKey:@"SmoothPixels"]);
@@ -328,7 +345,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
                 d[cx0 + x] = (c & 0xff00ff00u) | (c & 0xffu) << 16 | (c >> 16 & 0xffu); }
         }
         IOSurfaceUnlock(nx, 0, NULL); IOSurfaceUnlock(cur, kIOSurfaceLockReadOnly, NULL);
-        _surfIdx ^= 1; _menuCW = cw;
+        _surfIdx ^= 1; _menuCW = cw; _menuPK = pk;
         if (!_menuWide || _live) { _menuWide = YES; _live = NO; [self setNeedsLayout:YES]; [self layout]; }
         [self updateGameCursor];
         [self updateScanlines:fh];
