@@ -46,6 +46,11 @@ fixed on the way:
   The user's own park (JOSH copy, 640x480 wide): its year-end warning comes ~108 s after loading (their log's drops were
   at 98-104 s): governed now (10.0M instructions a second in it), no drops; the installed 1c1053b build gave the 158 ms
   year-end frame and no drops in the same run, so the drops themselves stay unreproduced.
+- The panel test is by hue (blue clearly above red, not below green): a storm dims the palette and the panel's light
+  blue became 28,56,101, so every window opened in a storm would have drawn the panel at full size (absolute
+  thresholds; found reviewing). Checked on every saved frame: the park and its windows have it; research, the title,
+  the charts and the game-over screens do not. Buy windows and an open top menu still run at 60 frames a second.
+- Next release notes: the year-end hitch listed under Beta 1.4's known limitations ("the awards check") is fixed.
 - Seen once in a long run, not reproduced since: in 640x480 with a game window open, game stalls past the audio
   lead of 61-89 ms, 5-9 a second (the user's log has the same signature). TP_GOV_DEBUG now logs the governor's long
   sleeps with the code and the instructions before them; the end-to-end run records them.

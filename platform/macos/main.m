@@ -180,7 +180,7 @@ static void refresh_hold(void);                     /* (AppDelegate refreshHold:
  * panel's size (at most 1, over nothing of the window), anchored at the bottom middle as in the park (view.c
  * band_map), so opening one from the panel leaves the panel as it was. The game's own videos: no panel. */
 - (double)menuPanelScale { double k = tp_view_ui_scale(); return tp_game_video || !_framePanel || k > 1 ? 1 : k; }
-/* Whether the game's frame has the park's panel in its bottom rows (its light blue top and bottom rows across the
+/* Whether the game's frame has the park's panel in its bottom rows (its blue top and bottom rows across the
  * screen). The game's windows over the park keep it; the screens that replace the park (research, the year-end
  * details and charts, the title menu) have their own buttons there: shrunk to the panel's size they were drawn in the
  * middle of the strip, the charts' close button among them, and a click where they belong missed them. */
@@ -189,7 +189,7 @@ static BOOL frame_has_panel(const uint32_t *px, int fw, int fh, int pr) {
     int rows[2] = { fh - pr + (fh == 480 ? 2 : 1), fh - 1 };
     for (int k = 0; k < 2; k++) {
         const uint32_t *row = px + (size_t)rows[k] * fw; int n = 0, m = 0;
-        for (int x = 0; x < fw; x += fw / 80) { uint32_t c = row[x]; int r = c & 255, g = c >> 8 & 255, b = c >> 16 & 255; m++; if (b > 200 && g > 120 && r < 180) n++; }
+        for (int x = 0; x < fw; x += fw / 80) { uint32_t c = row[x]; int r = c & 255, g = c >> 8 & 255, b = c >> 16 & 255; m++; if (b > 60 && b > r + 40 && b >= g) n++; }   /* (by hue: a storm dims the palette, the panel's light blue to 28,56,101) */
         if (n * 8 < m * 5) return NO;
     }
     return YES;
