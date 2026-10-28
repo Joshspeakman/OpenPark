@@ -51,9 +51,24 @@ fixed on the way:
   thresholds; found reviewing). Checked on every saved frame: the park and its windows have it; research, the title,
   the charts and the game-over screens do not. Buy windows and an open top menu still run at 60 frames a second.
 - Next release notes: the year-end hitch listed under Beta 1.4's known limitations ("the awards check") is fixed.
-- Seen once in a long run, not reproduced since: in 640x480 with a game window open, game stalls past the audio
-  lead of 61-89 ms, 5-9 a second (the user's log has the same signature). TP_GOV_DEBUG now logs the governor's long
-  sleeps with the code and the instructions before them; the end-to-end run records them.
+- Game stalls past the audio lead of ~61 ms, about one a second, with a drop each time (the user's log has the same
+  signature; seen once in a long run, then reproduced every time on the title's credits in the 640 suite): found and
+  fixed (68f8e07). TP_CARD_DEBUG (logs each stall: interrupts off, event gaps, governor sleep, clock lag, the tick's
+  period and interval) showed the game thread healthy but the 240 Hz timer's ticks 5.5-8 ms apart: the run loop
+  delivers one tick between passes, and a pass was a whole quantum (4000 blocks, ~5 ms at 10M instructions a second),
+  so a governed screen got ~180 ticks a second; the sound card, held to the ticks (card_tick), fell 60 ms behind and
+  skipped. Governed passes are now sized to ~1 ms of the game's time (tp_host_run's gov_quantum, adapted from the
+  instructions each pass ran, growing at most twice a pass). Credits: 0 stalls and 0 drops at Speed 3000, 10000 and
+  30000. Since 514a833 more screens are governed (the credits too), which is why it showed now; a governed screen in a
+  park (the year-end warning) would have done the same before it. Also: getenv in govern() and pace_sync() read once
+  (3% of the game thread in a sample of the credits).
+- Full suites on 68f8e07 (the kit's macOS 26 build): 320 all 23 steps; 640 22 of 23, the one a year's end opening its
+  charts during top_menus (the harness now closes such a screen and tries the menu again; passes). No long frames, no
+  audio drops, no long governor sleeps in either. An earlier 640 run went out of step from its start: an app instance
+  left from a run with another E2E_APP read the same control file and ran its lines (and acks) until the quit step's
+  F6 closed it; stop() now ends every instance the harness launched (work/e2e/pids), never matching by name.
+- Test kit refreshed (testkit-2026-10-18, in place): apps.zip from 68f8e07, MACOSX_DEPLOYMENT_TARGET=26.0, updater
+  removed; installed under a fake HOME and played title to a new park and the panel windows.
 - The year's end ran unthrottled (the user: year-end screens skipped; the "awards check" hitch every 200 s was the same
   thing: a game year at Original speed). The charts screen's loop polls no keys and does not wait for the retrace, so
   host.c paced it as a park frame for two seconds: its ~1000 frames (79M instructions) went by in 0.2 s and it closed

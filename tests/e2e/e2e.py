@@ -32,9 +32,22 @@ def pid():
     except Exception: return 0
 def alive(): p = pid(); return p > 0 and subprocess.run(['kill', '-0', str(p)], capture_output=True).returncode == 0
 def stop():
-    for line in subprocess.run(['pgrep', '-f', APP + '/Contents/MacOS/ThemePark'], capture_output=True, text=True).stdout.split():
-        subprocess.run(['kill', line])
-    time.sleep(1)
+    """every instance the test launched (any app path: E2E_APP), gone before the next launch empties the control file; an
+    instance left running (a run with another E2E_APP) read the new lines too, ran them and wrote their acks: a whole run's
+    steps out of step until its F6 quit it. Only the test's own: the user's game is never matched by name."""
+    def mine():
+        try: ps = [int(x) for x in open(P + '/pids').read().split()]
+        except FileNotFoundError: ps = []
+        out = []
+        for p in ps:
+            c = subprocess.run(['ps', '-o', 'command=', '-p', str(p)], capture_output=True, text=True).stdout
+            if '/Contents/MacOS/ThemePark' in c: out.append(p)
+        return out
+    for p in mine(): subprocess.run(['kill', str(p)])
+    t = time.time()
+    while mine() and time.time() - t < 8: time.sleep(0.25)
+    for p in mine(): subprocess.run(['kill', '-9', str(p)]); print(f'  stop: {p} killed after 8 s', flush=True)
+    open(P + '/pids', 'w').close()
 def launch(hires=None, args=(), env=()):
     stop(); HI[0] = False
     if hires is None: hires = bool(os.environ.get('E2E_HI'))   # (the whole run in 640x480: the park switches after it shows)
@@ -48,7 +61,7 @@ def launch(hires=None, args=(), env=()):
     for _ in range(50):
         time.sleep(0.2)
         r = subprocess.run(['pgrep', '-nf', APP + '/Contents/MacOS/ThemePark'], capture_output=True, text=True).stdout.split()
-        if r: open(P + '/pid', 'w').write(r[0]); break
+        if r: open(P + '/pid', 'w').write(r[0]); open(P + '/pids', 'a').write(r[0] + '\n'); break
     time.sleep(3)
 def ctl(*lines, timeout=120):
     r = subprocess.run([CTL, f'--timeout={timeout}', *lines])
@@ -248,8 +261,11 @@ def research():
 @step
 def top_menus():
     wide(True); check(to_park(), 'not in the park')
-    for x in [M(k) for k in ('park', 'options', 'display', 'extras')]:
-        topmenu(x); vshot(f'menu-{x}'); check(menu_open(), f'the top menu at {x} did not open')
+    for k in ('park', 'options', 'display', 'extras'):
+        x = M(k)
+        topmenu(x)
+        if not menu_open() and to_park(): x = M(k); topmenu(x)   # (a screen that came up meanwhile: the year's end)
+        vshot(f'menu-{x}'); check(menu_open(), f'the top menu at {x} did not open')
         ctl('vmouse 850 500 0', 'sleep 0.3', 'vclick 850 500', 'sleep 0.6')
         check(menus_closed(), f'the top menu at {x} stayed open')
 
