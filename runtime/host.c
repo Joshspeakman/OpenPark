@@ -301,7 +301,8 @@ static double pace_seen; static int passes_since_pace; static uint64_t poll_insn
 extern volatile unsigned long tp_count_hits; static unsigned long presents_at_pace;   /* (verify.c: the game's copies to the screen) */
 static void pace_sync(void) {
     if (tp_frame_paced_at != pace_seen) {
-        if (getenv("TP_PRESENT_DEBUG")) { static int hist[8]; static double l; unsigned long n = tp_count_hits - presents_at_pace; hist[n < 7 ? n : 7]++;
+        static int dbg = -1; if (dbg < 0) dbg = getenv("TP_PRESENT_DEBUG") != NULL;
+        if (dbg) { static int hist[8]; static double l; unsigned long n = tp_count_hits - presents_at_pace; hist[n < 7 ? n : 7]++;
             if (now_s() - l > 2) { fprintf(stderr, "presents per park frame: %d %d %d %d %d %d %d %d+\n", hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6], hist[7]); memset(hist, 0, sizeof hist); l = now_s(); } }
         pace_seen = tp_frame_paced_at; passes_since_pace = 0; presents_at_pace = tp_count_hits;
     }
@@ -493,6 +494,11 @@ int tp_host_timer_behind(void) {
  * and while loading). It never runs ahead of real time, and after a stall longer than the ring's lead it goes on from now (sb16_skip_to): the stall is not replayed. The output ring's
  * lead (sb16_play) covers the hold. Deterministic runs: the wall clock, as before. */
 static double card_allow, card_hold_max;
+/* (development, TP_CARD_DEBUG: what the game thread did across a stall: the longest stretch with interrupts off and
+ * where it began, the longest gap between event checks and where the game resumed, the governor's sleep since the
+ * last tick, and how far the game's clock trailed the wall clock) */
+static int card_debug = -1; static double cd_tick_t, cd_off_t, cd_off_max, cd_gap_max, cd_last_ev, cd_gov0; static uint32_t cd_off_eip, cd_off_max_eip, cd_gap_eip;
+static double emu_now(void);
 static volatile long card_stalls; static volatile double card_stall_max;   /* stalls past the output's lead (tp_host_card_stalls) */   /* (card_hold_max: the longest the card waited for a tick, TP_DEBUG's card: line) */
 static void card_tick(double period) {
     double t = now_s(), sb16_lead_seconds(void);
@@ -501,9 +507,13 @@ static void card_tick(double period) {
      * shorter threshold than the lead let a stall run the ring dry and then replayed it, leaving the effects that
      * much later until the next dry-out.) */
     if (card_allow < t - sb16_lead_seconds()) {
-        if (card_allow) { card_stalls++; if (t - card_allow > card_stall_max) card_stall_max = t - card_allow; }
+        if (card_allow) { card_stalls++; if (t - card_allow > card_stall_max) card_stall_max = t - card_allow;
+            if (card_debug > 0) fprintf(stderr, "card stall %.0f ms: interrupts off %.0f ms from %08x, event gap %.0f ms to %08x, governor slept %.0f ms, clock behind %.0f ms; tick period %.1f ms, since the last %.1f ms, lead %.1f ms\n",
+                                        (t - card_allow) * 1e3, cd_off_max * 1e3, cd_off_max_eip, cd_gap_max * 1e3, cd_gap_eip, (tp_dbg_gov - cd_gov0) * 1e3, (t - emu_now()) * 1e3,
+                                        period * 1e3, (t - cd_tick_t) * 1e3, sb16_lead_seconds() * 1e3); }
         void sb16_skip_to(double t); card_allow = t; sb16_skip_to(t);
     }
+    if (card_debug > 0) { cd_off_max = cd_gap_max = 0; cd_gov0 = tp_dbg_gov; cd_tick_t = t; }
     card_allow += period;                              /* (the card may play a period past this tick before its handler has mixed:
                                                         * safe because the driver mixes further ahead than one period) */
     if (card_allow > t + period) card_allow = t + period;
@@ -522,6 +532,11 @@ static void realtime_events(void) {
     tp_view_poll();
     if (in_callback && tp_watch_hit) in_callback = 0;
     { void sb16_pump(double t); sb16_pump(tp_host_card_clock()); }   /* the card's DMA, in small steps in the game's time (sb16.c) */
+    if (card_debug < 0) card_debug = getenv("TP_CARD_DEBUG") != NULL;
+    if (card_debug > 0) { double t = now_s();
+        if (cd_last_ev && t - cd_last_ev > cd_gap_max) { cd_gap_max = t - cd_last_ev; cd_gap_eip = G(EIP); } cd_last_ev = t;
+        if (!(G(EFLAGS) & 0x200)) { if (!cd_off_t) { cd_off_t = t; cd_off_eip = G(EIP); } }
+        else if (cd_off_t) { if (t - cd_off_t > cd_off_max) { cd_off_max = t - cd_off_t; cd_off_max_eip = cd_off_eip; } cd_off_t = 0; } }
     if (!(G(EFLAGS) & 0x200)) return;
     double t = now_s(), te = emu_now();
     double period = pit_divisor / 1193182.0;
@@ -744,21 +759,23 @@ static double gov_t0; static uint64_t gov_i0;
 
 void tp_host_set_cycles(double per_ms) { gov_rate = per_ms * 1000.0; gov_t0 = 0; }
 double tp_host_cycles(void) { return gov_rate / 1000.0; }
-static void govern(void) {
-    if (gov_rate <= 0) return;
-    if (frame_paced()) { gov_t0 = 0; return; }           /* park frames are released at a steady rate instead (view.c) */
+static int govern(void) {
+    if (gov_rate <= 0) return 0;
+    if (frame_paced()) { gov_t0 = 0; return 0; }         /* park frames are released at a steady rate instead (view.c) */
     double t = now_s();
-    if (!gov_t0) { gov_t0 = t; gov_i0 = tp_insns; return; }
+    if (!gov_t0) { gov_t0 = t; gov_i0 = tp_insns; return 1; }
     double ahead = (double)(tp_insns - gov_i0) / gov_rate - (t - gov_t0);
-    if (getenv("TP_GOV_DEBUG")) { static double l; static uint64_t li; static int resets; if (ahead < -0.1) resets++;
+    static int dbg = -1; if (dbg < 0) dbg = getenv("TP_GOV_DEBUG") != NULL;
+    if (dbg) { static double l; static uint64_t li; static int resets; if (ahead < -0.1) resets++;
         if (t - l >= 1) { if (l) fprintf(stderr, "gov: %.2f M insns/s (target %.2f), ahead %.1f ms, resets %d\n", (tp_insns - li) / (t - l) / 1e6, gov_rate / 1e6, ahead * 1e3, resets); l = t; li = tp_insns; resets = 0; } }
-    if (ahead < -0.1) { gov_t0 = t; gov_i0 = tp_insns; return; }   /* never burst to catch up */
+    if (ahead < -0.1) { gov_t0 = t; gov_i0 = tp_insns; return 1; }   /* never burst to catch up */
     { static uint64_t gi; uint64_t d = tp_insns - gi; gi = tp_insns;   /* (development: a long sleep, and the run before it) */
-      if (ahead > 0.03 && getenv("TP_GOV_DEBUG")) fprintf(stderr, "gov: a sleep of %.0f ms at %08x (%.2fM instructions since the last call)\n", ahead * 1e3, G(EIP), d / 1e6); }
+      if (ahead > 0.03 && dbg) fprintf(stderr, "gov: a sleep of %.0f ms at %08x (%.2fM instructions since the last call)\n", ahead * 1e3, G(EIP), d / 1e6); }
     if (ahead > 0.001) {
         struct timespec ts = {0, (long)(ahead * 1e9)};
         double g0 = now_s(); nanosleep(&ts, NULL); tp_dbg_gov += now_s() - g0;
     }
+    return 1;
 }
 
 /* ---- VESA 640x480x256 (mode 101h), the game's SVGA mode ([R] in the park) ----
@@ -1318,16 +1335,22 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
         return quit_requested ? (snprintf(status, sizeof status, "quit"), stopped = 1, 1) : 0;
     }
     double deadline = now_s() + ms / 1000.0;
+    /* Governed, a pass runs about a millisecond of the game's time. The timer interrupt is delivered between passes,
+     * one at a time: a whole quantum (4000 blocks, about 5 ms at the default Speed) was longer than the 240 Hz
+     * timer's period, so the governed screens (the credits, the year's end, the menus without the park) got about 180
+     * ticks a second, the sound card held to them fell behind real time and dropped 60 ms every second or so. */
+    static uint32_t gov_quantum;                         /* (0: the caller's quantum) */
     int r = setjmp(stop_jb);
     if (r) { stopped = 1; return r == 2 ? 1 : -1; }
     for (;;) {
         if (quit_requested) { snprintf(status, sizeof status, "quit"); stopped = 1; return 1; }
         uint32_t budget = quantum;
+        if (gov_quantum && gov_quantum < budget) budget = gov_quantum;
         if (blocks_limit) {
             if (blocks >= blocks_limit) return 0;
             if (blocks_limit - blocks < budget) budget = (uint32_t)(blocks_limit - blocks);
         }
-        double tr0 = now_s(); int n = tp_run(budget); tp_dbg_run += now_s() - tr0; uint64_t ran = tp_blocks();   /* (before a hook's own runs) */
+        uint64_t i0 = tp_insns; double tr0 = now_s(); int n = tp_run(budget); tp_dbg_run += now_s() - tr0; uint64_t ran = tp_blocks();   /* (before a hook's own runs) */
         if (n == -3) { extern int tp_hook_armed, tp_hook_which; void tp_qol_hook(int nested);
                       if (tp_hook_which >= 12) tp_qol_hook(0); else tp_view_hook(); tp_hook_armed = 0; n = 0; }   /* view.c's points, or qol.c's */
         if (stopped) { if (io_stopped) snprintf(status + strlen(status), sizeof status - strlen(status), " (port I/O)"); return -1; }
@@ -1338,7 +1361,12 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
         if (n) interrupt((uint32_t)n);
         advance_blocks(ran);
         if (!deterministic) {
-            govern();
+            if (govern()) {
+                uint64_t ran_i = tp_insns - i0;
+                if (ran_i > 1000 && budget > 1) { double q = budget * (gov_rate * 0.001) / ran_i;
+                    if (gov_quantum && q > 2.0 * gov_quantum) q = 2.0 * gov_quantum;   /* (a pass a hook cut short) */
+                    gov_quantum = q < 64 ? 64 : q >= quantum ? 0 : (uint32_t)q; }
+            } else gov_quantum = 0;
             realtime_events();
             if (now_s() >= deadline) return 0;
         }

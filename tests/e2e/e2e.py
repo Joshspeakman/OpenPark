@@ -12,10 +12,10 @@ e2e/report.txt; shots in e2e/.
 The game's files are copied into work/e2e/data/game from the installed data (E2E_GAME, default ~/Games/ThemeParkNative/game)
 on the first run. Positions are the game's own (320x200; doubled in 640x480, the panel bottom-anchored) or the wide view's
 (vshot pixels); see docs/PLAN.md (2026-10-27) for what each step covers."""
-import os, re, sys, time, zlib, struct, subprocess, hashlib
+import os, re, sys, time, zlib, struct, subprocess, hashlib, shutil
 ROOT = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + '/../..')
 P = ROOT + '/work/e2e'; OUT = P + '/out'; LOG = P + '/data/theme-park.log'; CTL = os.path.dirname(os.path.abspath(__file__)) + '/ctl.py'
-APP = ROOT + '/build/app/Theme Park Nightly.app'
+APP = os.environ.get('E2E_APP') or ROOT + '/build/app/Theme Park Nightly.app'
 os.environ['E2E_CONTROL'] = P + '/control.txt'
 GAME = os.environ.get('E2E_GAME') or os.path.expanduser('~/Games/ThemeParkNative/game')
 if not os.path.isdir(P + '/data/game'):
@@ -42,7 +42,7 @@ def launch(hires=None, args=(), env=()):
     try: os.remove(P + '/control.txt.ack')
     except FileNotFoundError: pass
     open(LOG, 'w').close(); MARK[0] = 0                 # (the step's log starts again with the app's)
-    e = sum((['--env', x] for x in ('TP_DATA=' + P + '/data', 'TP_CONTROL=' + P + '/control.txt', 'DS_TEST=1', 'W32_AUDIO_MUTE=1', 'TP_SKIP_INTRO=1', 'TP_GOV_DEBUG=1') + tuple(env)), [])
+    e = sum((['--env', x] for x in ('TP_DATA=' + P + '/data', 'TP_CONTROL=' + P + '/control.txt', 'DS_TEST=1', 'W32_AUDIO_MUTE=1', 'TP_SKIP_INTRO=1', 'TP_GOV_DEBUG=1') + tuple(env) + tuple(os.environ.get('E2E_ENV', '').split())), [])
     a = ['-StartFullScreen', 'NO', '-Stretch', 'YES', '-Cycles', '10000', '-StartHiRes', 'YES' if hires else 'NO', '-PanelScale', '0.5'] + list(args)
     subprocess.run(['open', '-n', APP] + e + ['--args'] + a, check=True)
     for _ in range(50):
@@ -114,6 +114,7 @@ def run(name, fn):
         if FATAL.search(l): err = (err + '; ' if err else '') + 'log: ' + l.strip()
         elif l.startswith(('long frame', 'audio drop', 'gov: a sleep')): EVENTS.append(f'{name}: {l.strip()}')
     if not alive() and name not in ('quit',): err = (err + '; ' if err else '') + 'the app is gone'
+    if err: shutil.copy(LOG, f'{OUT}/{name}.log')        # (the next launch empties the log)
     RESULTS.append((name, err, time.time() - t0))
     print(f'{"FAIL" if err else "ok  "} {name} ({time.time() - t0:.0f} s){": " + err if err else ""}', flush=True)
     return not err
