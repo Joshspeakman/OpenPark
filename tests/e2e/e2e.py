@@ -122,6 +122,7 @@ def run(name, fn):
     try: fn()
     except Fail as e: err = str(e)
     except SystemExit as e: err = f'exit {e}'
+    except Exception as e: err = f'{type(e).__name__}: {e}'     # (a missing E2E_APP, a lost control file: the step fails, the run goes on)
     text = since()
     for l in text.splitlines():
         if FATAL.search(l): err = (err + '; ' if err else '') + 'log: ' + l.strip()
