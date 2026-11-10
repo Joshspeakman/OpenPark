@@ -1,3 +1,4 @@
+import shutil
 import sys
 import tempfile
 import unittest
@@ -53,7 +54,9 @@ class DOSTests(unittest.TestCase):
         root=Path(tempfile.mkdtemp(prefix='theme-park-tests-'))
         trash=Path.home()/'.Trash'
         trash.mkdir(exist_ok=True)
-        self.addCleanup(lambda:root.rename(trash/(root.name+'-'+uuid.uuid4().hex)))
+        # shutil.move, not Path.rename: on ubuntu-26.04 runners /tmp is its own
+        # filesystem and rename(2) into ~/.Trash fails with EXDEV.
+        self.addCleanup(lambda:shutil.move(str(root),str(trash/(root.name+'-'+uuid.uuid4().hex))))
         self.game=root/'game';self.game.mkdir()
         (self.game/'Data').mkdir()
         (self.game/'Data'/'Mixed.DAT').write_bytes(b'abcdef')
