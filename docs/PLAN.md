@@ -6,6 +6,17 @@ Apple Silicon code. Ground rules: [CLAUDE.md](../CLAUDE.md).
 ## Current state — 2026-10-18
 
 Played by the player daily on the Nightly app (their reports drive the dated sections below). Since the
+2026-11-09, issues #6 and #26 closed out:
+- The in-process restart (MAIN.EXE exiting with errorlevel 10 or more, which THEME.BAT reruns) is now exercised by a test:
+  `tests/e2e/run.py dos_restart` ends a park from the Visitor View with errorlevel 10 (control `dosexit 10`), then checks the
+  title, a new park at its starting balance, and the Visitor View again. No in-game action that exits that way is known.
+- A blocking key wait (INT 16h 0/10h, INT 21h 7/8) runs its INT again until a key comes, so timers, sound and the pointer
+  carry on inside it (runtime/host.c key_wait_retry); the time waited is credited to the game's clock. tools/build_game.py
+  gives each INT 16h/21h an entry block of its own for this (extra entries: the blocks containing them keep their extents,
+  so block counts still match the oracle). The game itself only calls getch after kbhit answered yes, so it never blocked;
+  `tests/e2e/run.py key_wait` forces one (control `fakekbhit`) and checks timer interrupts during it and the game going on
+  after a key.
+
 2026-10-16 milestone: SVGA 640x480; a zoomable widescreen view with native park passes; 128x128 sandbox parks
 (12,000 things, 10,000 visitors) with Endless and True Freeplay rules; Visitor View (experimental); the EXTRAS
 menu in the game's own top bar; steady frame pacing; an audio overhaul (headroom, cleaned sample ends, a

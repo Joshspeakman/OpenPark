@@ -106,8 +106,6 @@ python3 tools/extras.py --list                                            # what
 
 ## Known limitations (beta 1.4)
 
-- **Restart without a quit:** an in-process restart (the game exiting with errorlevel 10 or more, which
-  `THEME.BAT` reruns) is fixed by reading the code, but not yet tested (#6).
 - **Visitor View** is experimental.
 - **Untested areas:** about half the game's functions have run in testing so far. The audit lists the areas not
   yet exercised (a full Sim or Business year, the stock market, the world map, weather, every breakdown).

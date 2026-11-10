@@ -393,6 +393,33 @@ def restart():
     check(abs(money() - 150000) < 2000, f'money after the restart {money()}')   # (the park begun again: its starting balance)
 
 @step
+def dos_restart():
+    """the game exiting with errorlevel 10 or more, which THEME.BAT reruns (the in-process restart, issue #6): from the Visitor View of a park"""
+    run('title', STEPS['title']); run('new_game', STEPS['new_game'])
+    mark(); ctl('walk -1 -1', 'sleep 3'); m = last(r'control: walk [-\d.,]+: (\d)'); check(m and m[1] == '1', 'the Visitor View did not start')
+    mark(); ctl('dosexit 10', 'sleep 8'); text = since()
+    check('game restarting: DOS exit 10' in text, 'the game did not restart'); check(alive(), 'gone after the restart')
+    f = frame('dos-restart-title'); check(f.w == 320 and f.h == 200, f'title frame after the restart {f.w}x{f.h}')
+    ctl('size 1280 960', 'sleep 1', *key(0x1c0d, 2), 'type QA', *key(0x1c0d, 2), *key(0x3b00, 2))
+    f = frame('dos-restart-details'); check(windowed(f), 'player details not shown after the restart')
+    run('new_game_again', STEPS['new_game']); check(to_park(), 'not in the park after the restart')
+    check(abs(money() - 150000) < 2000, f'money after the restart {money()}'); vshot('dos-restart-park')
+    mark(); ctl('walk -1 -1', 'sleep 3'); m = last(r'control: walk [-\d.,]+: (\d)'); check(m and m[1] == '1', 'no Visitor View in the new game')
+    ctl('walkstop', 'sleep 2'); check(to_park(), 'not back in the park')
+
+def irqs():
+    mark(); ctl('irqs'); m = last(r'control: irqs (\d+)'); check(m, 'no interrupt count'); return int(m[1])
+
+@step
+def key_wait():
+    """a blocking key wait (issue #26): timers carry on inside it, and a key ends it"""
+    run('title', STEPS['title']); run('new_game', STEPS['new_game'])
+    mark(); ctl('fakekbhit', 'sleep 2'); check('the game waits for a key' in since(), 'the game did not block on a key')
+    a = irqs(); ctl('sleep 2'); b = irqs(); check(b - a > 20, f'{b - a} timer interrupts in 2 s of waiting')
+    p = frame('key-wait'); ctl('sleep 1'); q = frame('key-wait-2'); check(changed(p, q) < 0.02, 'the park moved on during the wait: not blocked')
+    ctl(*key(0x1c0d, 2)); ctl('sleep 3'); r = frame('key-wait-after'); check(alive(), 'gone after the key'); check(changed(q, r) > 0.002, 'the park did not move on after the key')
+
+@step
 def year_watch():
     """a fresh FULL park, open, in the wide view: every frame twice a second through two year ends, every screen that
     is not the park shot (are the year-end windows shown, and do they stay until closed?)"""

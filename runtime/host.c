@@ -527,7 +527,9 @@ double tp_host_card_clock(void) {
     if (wall || deterministic || !timer_installed() || card_allow <= 0) return t;
     return t < card_allow ? t : card_allow;
 }
+static volatile int test_exit = -1, test_kbhit;     /* tests: tp_host_test_exit, tp_host_test_kbhit */
 static void realtime_events(void) {
+    if (test_exit >= 0) { exit_code = test_exit; test_exit = -1; snprintf(status, sizeof status, "DOS exit %d", exit_code); longjmp(stop_jb, 2); }
     debug_stats();
     tp_view_poll();
     if (in_callback && tp_watch_hit) in_callback = 0;
@@ -603,19 +605,19 @@ static uint32_t key_pop(void) {
     pthread_mutex_unlock(&input_lock);
     return k;
 }
-/* A blocking key wait (INT 16h 0/10h, INT 21h 7/8). Interrupts cannot be delivered from inside it (hw_interrupt
- * only redirects the game to its handler, which runs after this call returns: several would stack under the key's
- * return), so the timer, the card and the mouse wait with it. Whether Theme Park ever blocks here is not known: the
- * first wait is logged. Paused, it sleeps longer. */
+/* A blocking key wait (INT 16h 0/10h, INT 21h 7/8), one pass at a time. With no key yet the INT instruction runs again:
+ * the run loop goes round between passes, so timers, sound and the pointer carry on and their interrupts return to the
+ * INT (hw_interrupt can only redirect the guest once the host call has returned). 1: no key yet (issue #26). */
 static volatile int paused;
-static uint32_t wait_key(void) {
+static int key_wait_retry(void) {
     if (deterministic && !nkeys) stop("waiting for keyboard input");
-    if (!keys_available()) { static int said; if (!said++) fprintf(stderr, "dos: the game waits for a key (blocking)\n"); }
-    while (!keys_available()) {
-        if (quit_requested) stop("quit");
-        usleep(paused ? 20000 : 2000);
-    }
-    return key_pop();
+    if (keys_available()) return 0;
+    { static int said; if (!said++) fprintf(stderr, "dos: the game waits for a key (blocking)\n"); }
+    if (quit_requested) stop("quit");
+    double t0 = now_s(); usleep(paused ? 20000 : 1000);
+    emu_now(); emu_t += now_s() - t0;                    /* the game's clock runs on instructions: credit the wait's time, or the timer stops */
+    S(EIP, G(EIP) - 2);                                  /* CD nn: this INT again */
+    return 1;
 }
 
 /* ---- files ---- */
@@ -876,8 +878,8 @@ static void interrupt(uint32_t number) {
         /* Handle functions take the handle in BX only (the upper half of EBX
          * can hold anything); counts and offsets are 32-bit under DOS/4GW. */
         if (ah == 0x3e || ah == 0x3f || ah == 0x40 || ah == 0x42 || ax == 0x4400) b &= 0xffff;
-        if (ah == 0xb) { S(EAX, (a & ~255u) | (keys_available() ? 255 : 0)); return; }
-        if (ah == 7 || ah == 8) { uint32_t k = wait_key(); S(EAX, (a & ~255u) | (k & 255)); return; }
+        if (ah == 0xb) { S(EAX, (a & ~255u) | ((keys_available() || test_kbhit) ? 255 : 0)); test_kbhit = 0; return; }
+        if (ah == 7 || ah == 8) { if (key_wait_retry()) return; uint32_t k = key_pop(); S(EAX, (a & ~255u) | (k & 255)); return; }
         if (ah == 0x30) { S(EAX, 0x1606); S(EBX, 0); S(ECX, 0); return; }
         if (ax == 0xff00 && (d & 65535) == 0x78) { S(EAX, (a & ~255u) | 1); return; }
         if (ah == 0x2c) { time_calls++; dos_time(a); return; }
@@ -1068,7 +1070,7 @@ static void interrupt(uint32_t number) {
             if (deterministic) { timer_irq(); mouse_callback(); }
             return;
         }
-        if (ah == 0 || ah == 0x10) { uint32_t k = wait_key(); S(EAX, (a & 0xffff0000u) | k); return; }
+        if (ah == 0 || ah == 0x10) { if (key_wait_retry()) return; uint32_t k = key_pop(); S(EAX, (a & 0xffff0000u) | k); return; }
     }
     if (number == 0x31) {
         /* HMI's timer shutdown sends INT 21h function 2508h to INT 31h; a DPMI
@@ -1375,6 +1377,10 @@ int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
 
 const char *tp_host_status(void) { return status; }
 int tp_host_exit_code(void) { return exit_code; }
+/* Tests only (TP_CONTROL): end the game as if it had exited with this errorlevel; answer one "key waiting?" yes with none there */
+void tp_host_test_exit(int code) { test_exit = code; }
+void tp_host_test_kbhit(void) { test_kbhit = 1; }
+unsigned tp_host_test_irqs(void) { return irq_count; }
 uint64_t tp_host_blocks(void) { return blocks; }
 
 int tp_host_frame_rgba(uint32_t *out) {

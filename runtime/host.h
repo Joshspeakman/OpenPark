@@ -33,6 +33,7 @@ void tp_host_shift(uint32_t flags);                    /* BIOS shift-state byte 
 void tp_host_key_raw(uint8_t scan, int down);  /* make/break codes for programs with their own INT 9 */
 void tp_host_mouse(double fx, double fy, uint32_t buttons); /* fx/fy in 0..1 of the screen */
 void tp_host_quit(void);
+void tp_host_test_exit(int code); void tp_host_test_kbhit(void); unsigned tp_host_test_irqs(void);   /* tests only */
 void tp_host_pause(int on);                             /* hold the game (window hidden or minimised) */
 void tp_host_set_image(const char *path);     /* the LE image tp_host_init loads (instead of TP_IMAGE) */
 void tp_host_set_args(const char *args);      /* the program's command tail, before tp_host_init (" -l1": German) */
