@@ -1042,7 +1042,7 @@ static void *game_thread(void *arg) {
         main_running = 0;
         game_result = r;
         /* THEME.BAT restarts the game when it exits with errorlevel >= 10. */
-        if (r == 1 && tp_host_exit_code() >= 10) { tp_walk_stop(); continue; }   /* (Visitor View does not outlive its game, issue #6) */
+        if (r == 1 && tp_host_exit_code() >= 10) { fprintf(stderr, "game restarting: DOS exit %d, as THEME.BAT does\n", tp_host_exit_code()); tp_walk_stop(); continue; }   /* (Visitor View does not outlive its game, issue #6) */
         break;
     }
     game_done = 1;
@@ -1230,7 +1230,7 @@ static void *game_thread(void *arg) {
 
 /* Development: live control for playtests (TP_CONTROL=<file>). Lines appended to the file run in
  * order, one batch per tick: key HEX | type TEXT | mouse X Y B | click X Y [B] | vmouse X Y B |
- * vclick X Y [B] | raw SCAN 1|0 | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
+ * dosexit N | fakekbhit | irqs | vclick X Y [B] | raw SCAN 1|0 | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
  * sleep S | ack TAG | show (the window, which control runs keep hidden) | quit. mouse/click are in the game frame's pixels (320x200 or 640x480);
  * vmouse/vclick in a vshot's pixels (what the window shows, 960 rows high). ack appends TAG to
  * <file>.ack once everything before it has run. */
@@ -1372,6 +1372,9 @@ static uint32_t key_of_char(unichar c) {
             if (x < 0 && !tp_view_point_to_world(0.5, 0.45, &x, &y)) x = y = 32;
             fprintf(stderr, "control: walk %.2f,%.2f: %d\n", x, y, [_view walkStartAt:x :y]);
         }
+        else if ([op isEqual:@"dosexit"]) tp_host_test_exit((int)a1);      /* dosexit N: as if the game exited with errorlevel N (10 up: THEME.BAT restarts it) */
+        else if ([op isEqual:@"fakekbhit"]) tp_host_test_kbhit();          /* the game's next "key waiting?" is told yes, so it blocks on a key */
+        else if ([op isEqual:@"irqs"]) fprintf(stderr, "control: irqs %u\n", tp_host_test_irqs());
         else if ([op isEqual:@"walkcmd"]) tp_walk_command((int)a1);   /* 1 follow, 2 hop, 3 ride along, 4 view, 5 noclip */
         else if ([op isEqual:@"walkhold"]) [_view walkHold:a1 :a2 :p.count > 3 ? [p[3] doubleValue] : 0 :p.count > 4 ? [p[4] doubleValue] : 1];   /* walkhold FWD STRAFE TURN SECONDS */
         else if ([op isEqual:@"walkteleport"]) tp_walk_teleport(a1, a2, p.count > 3 ? [p[3] doubleValue] * M_PI / 180 : NAN);   /* X Y YAW(degrees) */

@@ -215,6 +215,17 @@ def main():
                 elif not inside:
                     outside.add(t)
 
+    # Each keyboard or DOS interrupt is also an entry of its own: a blocking key wait runs its INT again until a key
+    # comes (runtime/host.c key_wait_retry, issue #26). Extra entries only: the blocks that contain these INTs keep
+    # their extents, so block counts still match the oracle.
+    for a in list(blocks):
+        for _, decoded in blocks[a]:
+            for pc, i in (decoded or {}).items():
+                if pc != a and pc not in blocks and i.mnemonic == 'int' and i.op_str in ('0x16', '0x21'):
+                    variants = block_at(pc)
+                    if variants and all(d for _, d in variants):
+                        blocks[pc] = variants
+
     # Generate C.
     names, sources = {}, []
     for a in sorted(blocks):
