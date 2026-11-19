@@ -135,3 +135,9 @@ buying land and entering the first park. The native-only runner then reproduces 
 Theme Park is © Bullfrog Productions / Electronic Arts. This is an unofficial fan project, not affiliated with or
 endorsed by them. It distributes no game code, data or art: you need your own copy, and the build reads it on
 your Mac. The project's own source is under the [MIT License](LICENSE).
+
+## Support
+
+If you get some use out of this, you can buy me a coffee on Ko-fi.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/speakerjosh)
