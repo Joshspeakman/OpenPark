@@ -61,8 +61,7 @@ def main():
         '--clicks', '180:564:316,220:280:90', '--block-clicks', '2450000:72:310,2650000:568:316,2800000:604:380')
     run(0.10, "Following the intro", op / 'tools/trace_startup.py', intro_exe, '--out', w / 'intro-trace', '--quantum', '1000',
         '--blocks', '30000000', '--seconds', '2400')
-    run(0.20, "Making the sound drivers from the game's files", op / 'tools/make_drivers.py', main_exe, '--reference', ref, '--out', w,
-        '--allow-unpinned')   # (a few bytes the drivers set from the run's memory layout differ from this project's run: guarded either way)
+    run(0.20, "Making the sound drivers from the game's files", op / 'tools/make_drivers.py', main_exe, '--reference', ref, '--out', w)
     run(0.55, "Translating the game's code", op / 'tools/build_game.py', main_exe, '--reference', ref, '--trace', w / 'check-startup/trace.json',
         '--survey', w / 'main-survey.json', '--out', w / 'app-release', '--opt=-O2', '--drivers', w, '--no-link')
     run(0.85, 'Translating the intro', op / 'tools/build_game.py', intro_exe, '--reference', ref, '--trace', w / 'intro-trace/trace.json',
@@ -75,6 +74,9 @@ def main():
     import toolchain
     toolchain.link_game_library(a.out / 'libgame.dylib.tmp', objects)
     os.replace(a.out / 'libgame.dylib.tmp', a.out / 'libgame.dylib')
+    snd = a.game / 'GAME/sndsetup.inf'                     # sound on, as tools/build_app.sh sets the installed game up
+    if not snd.exists():
+        shutil.copy(a.game / 'THEME.CD/SNDSETUP.INF', snd)
     for exe, name in ((main_exe, 'MAIN.TPIMG'), (intro_exe, 'INTRO.TPIMG')):
         run(0.96, 'Putting it together', op / 'tools/export_image.py', exe, a.out / name)
     say(1.0, 'Built')

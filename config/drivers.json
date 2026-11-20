@@ -14,9 +14,9 @@
     "drv-402c0-flat-det.bin": "312e0ef1896e2acc455294b2aedecfcba5a39b04c298e9c0a91823dc3b173c97",
     "drv-402c0-flat-dig.bin": "883e1e041b4ecdcc1ad877ab956311d1d8ccaa4d4ec9666fc6f48cb306cba57f",
     "drv-402c0-flat-dig.bin.mask": "8bdd5824624dfcee17cf6391d3a9368b5226324d566c2d36ef88ebc9a09f5c35",
-    "drv-409a8-cs-mix.bin": "fb0e843371b1e9de2307335cf3a0a32b8561ce5cacf5530450d0bc47389e51f8",
-    "drv-409a8-cs-mix.bin.mask": "84087604c811fb7a1f76913affdaaa9e392dcb84722174b395cf3c2ce1cfca6e",
-    "drv-409a8-flat-mix.bin": "fb0e843371b1e9de2307335cf3a0a32b8561ce5cacf5530450d0bc47389e51f8",
-    "drv-409a8-flat-mix.bin.mask": "84087604c811fb7a1f76913affdaaa9e392dcb84722174b395cf3c2ce1cfca6e"
+    "drv-409a8-cs-mix.bin": "af3963b9869ea6736ccb2b72df308addb340c17ad9bcb366c2c3b584ebad49ed",
+    "drv-409a8-cs-mix.bin.mask": "53be29a4a3e222c20c6ca1bc1d39c4df9e6299b524a63766c6d41210589cf3d6",
+    "drv-409a8-flat-mix.bin": "af3963b9869ea6736ccb2b72df308addb340c17ad9bcb366c2c3b584ebad49ed",
+    "drv-409a8-flat-mix.bin.mask": "53be29a4a3e222c20c6ca1bc1d39c4df9e6299b524a63766c6d41210589cf3d6"
   }
 }
