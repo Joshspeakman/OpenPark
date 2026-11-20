@@ -14,6 +14,8 @@ build it from your own copy of the game; this repository contains no game code, 
 | ![Zoomed out over a busy park](docs/screenshots/zoomed-out.jpg) | ![Zoomed in on the Super Spinner](docs/screenshots/zoomed-in.jpg) |
 | **Visitor View (experimental)** | **The original ride videos** |
 | ![Walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The Super Spinner's ride video](docs/screenshots/ride-video.jpg) |
+| **The launch window** | |
+| ![The launch window](media/screenshots/screenshot-launcher.png) | |
 
 **Status: beta 1.4.** The intro and the whole game run natively, at the original's pace. The recompiled code is
 checked against the original x86 code: scripted runs and long random-play runs match it. See [the plan](docs/PLAN.md) for what is verified and what is not, and [the port audit](docs/reports/2026-10-18-port-audit.md)
