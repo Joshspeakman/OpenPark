@@ -172,9 +172,17 @@ static NSString *update_check(NSString *updater) {        /* the newest commit o
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_global_queue(0, 0), ^{ if (t.running) [t terminate]; });
     NSData *d = [p.fileHandleForReading readDataToEndOfFile]; [t waitUntilExit];
     NSString *out = [[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return t.terminationStatus == 0 && out.length >= 40 ? [out substringToIndex:40] : nil;
+    if (t.terminationStatus != 0 || !out.length) return nil;
+    if (out.length >= 40) return [out substringToIndex:40];   /* a commit (an app built from source) */
+    return [out rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location == NSNotFound ? out : nil;   /* a release's tag (the downloaded app) */
 }
 static NSString *update_phase(NSString *line, NSString *branch) {   /* the updater's output, in words */
+    if ([branch isEqualToString:@"release"]) {   /* the downloaded app's updater (setup/update.sh) */
+        if ([line hasPrefix:@"== downloading "]) return [NSString stringWithFormat:@"Downloading %@ from GitHub", [line substringFromIndex:15]];
+        if ([line hasPrefix:@"== unpacking"]) return @"Unpacking it";
+        if ([line hasPrefix:@"== installing"]) return @"Installing the new app";
+        return nil;
+    }
     if ([line hasPrefix:@"== fetching"]) return @"Downloading the update from GitHub";
     if ([line hasPrefix:[NSString stringWithFormat:@"== %@:", branch]]) return [@"Got " stringByAppendingString:[line substringFromIndex:branch.length + 4]];
     if ([line hasPrefix:@"== making the sound"]) return @"Making the sound drivers from your game (once)";
@@ -270,8 +278,11 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
         NSBundle *b = NSBundle.mainBundle; NSString *p;
-        if ((p = [b pathForResource:@"keyart" ofType:@"jpg"])) _keyart = [[NSImage alloc] initWithContentsOfFile:p];
-        if ((p = [b pathForResource:@"logo" ofType:@"png"])) _logo = trimmed([[NSImage alloc] initWithContentsOfFile:p]);
+        NSString *art = getenv("TP_IMAGE_DIR") && getenv("TP_DATA") ? [@(getenv("TP_DATA")) stringByAppendingPathComponent:@"art"] : nil;   /* the downloaded app: setup's art */
+        if ((p = [b pathForResource:@"keyart" ofType:@"jpg"]) || (art && [NSFileManager.defaultManager fileExistsAtPath:(p = [art stringByAppendingPathComponent:@"keyart.jpg"])]))
+            _keyart = [[NSImage alloc] initWithContentsOfFile:p];
+        if ((p = [b pathForResource:@"logo" ofType:@"png"]) || (art && [NSFileManager.defaultManager fileExistsAtPath:(p = [art stringByAppendingPathComponent:@"logo.png"])]))
+            _logo = trimmed([[NSImage alloc] initWithContentsOfFile:p]);
         NSImage *title = (p = [b pathForResource:@"banner" ofType:@"png"]) ? [[NSImage alloc] initWithContentsOfFile:p] : nil;
         if (title) {
             _grass = pixel_crop(title, CGRectMake(272, 64, 40, 40), 2);           /* the title screen's lawn */
@@ -408,7 +419,9 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     if (_ustate != UPD_AVAILABLE) { [self checkUpdates]; return; }
     NSAlert *a = [NSAlert new];
     a.messageText = [NSString stringWithFormat:@"Update to the newest %@?", [_branch isEqual:@"nightly"] ? @"Nightly" : @"version"];
-    a.informativeText = @"The app is rebuilt from your copy of the game (a few minutes). Your saves and settings are kept.";
+    a.informativeText = [_branch isEqualToString:@"release"]   /* the downloaded app (recomp's setup/update.sh) */
+        ? [NSString stringWithFormat:@"%@ is downloaded from GitHub and replaces this app. Your game, saves and settings are kept; if the game's code changed, it is rebuilt from your copy when the app starts again.", _latest ?: @"The newest release"]
+        : @"The app is rebuilt from your copy of the game (a few minutes). Your saves and settings are kept.";
     [a addButtonWithTitle:@"Update"]; [a addButtonWithTitle:@"Cancel"];
     if ([a runModal] != NSAlertFirstButtonReturn) return;
     NSString *env = NSProcessInfo.processInfo.environment[@"TP_DATA"];
@@ -417,7 +430,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     if (update_run(self.window, _updater, _branch, [root stringByAppendingPathComponent:@"update.log"])) {
         /* the new app (installed where this one was) opens, this one ends */
         NSString *app = [[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"] stringByAppendingPathComponent:@"Theme Park Nightly.app"];
-        if (![NSFileManager.defaultManager fileExistsAtPath:app]) app = NSBundle.mainBundle.bundlePath;
+        if ([_branch isEqualToString:@"release"] || ![NSFileManager.defaultManager fileExistsAtPath:app]) app = NSBundle.mainBundle.bundlePath;   /* the downloaded app: replaced in place */
         NSTask *o = [NSTask new]; o.executableURL = [NSURL fileURLWithPath:@"/usr/bin/open"]; o.arguments = @[@"-n", app]; [o launchAndReturnError:nil];
         exit(0);
     }
@@ -459,6 +472,9 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
         NSString *pack = [s->key isEqual:@"MusicType"] && [self valueIndex:s] == 1 ? @"amiga-cd32" : @"3do-usa";
         NSString *root = NSProcessInfo.processInfo.environment[@"TP_DATA"] ?: [NSHomeDirectory() stringByAppendingPathComponent:@"Games/ThemeParkNative"];
         if (![NSFileManager.defaultManager fileExistsAtPath:[root stringByAppendingFormat:@"/extras/%@/manifest.json", pack]])
+            if (getenv("TP_IMAGE_DIR"))   /* the downloaded app: discs are dropped on it (main.m application:openFiles:) */
+                return [s->key isEqual:@"MusicType"] ? @"Not imported yet: drop your disc's image (.cue) on the app; MIDI plays until then"
+                                                     : @"Not imported yet: drop your 3DO disc's image (.cue) on the app";
             return [s->key isEqual:@"MusicType"] ? @"Not imported yet: tools/extras.py <your disc's .cue>; MIDI plays until then"
                                                  : @"Not imported yet: tools/extras.py <your 3DO disc's .cue>";
     }
@@ -719,7 +735,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     [self sign:self.quitRect title:self.open >= 0 ? @"Back" : @"Quit" primary:NO state:self.hover == HIT_QUIT || self.hover == HIT_BACK];
     [self sign:self.playRect title:@"Play" primary:YES state:self.hover == HIT_PLAY];
     NSString *build = NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"dev";
-    label([NSString stringWithFormat:@"Nightly %@", build], plain(11), [note_c() colorWithAlphaComponent:0.6], NSMakeRect(WIN_W - 216, WIN_H - 22, 200, 16), NSTextAlignmentRight, 0.5, NO);
+    label([NSString stringWithFormat:[_branch isEqualToString:@"release"] ? @"Version %@" : @"Nightly %@", build], plain(11), [note_c() colorWithAlphaComponent:0.6], NSMakeRect(WIN_W - 216, WIN_H - 22, 200, 16), NSTextAlignmentRight, 0.5, NO);
 }
 - (void)drawControlsIn:(NSRect)p {
     NSArray *rows = @[

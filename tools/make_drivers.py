@@ -126,12 +126,19 @@ def main():
     for round_no in range(1, args.rounds + 1):
         write(final=False)
         build = work / 'build'
+        prebuilt = os.environ.get('TP_RUNNER')   # the drag-and-drop app's setup: its headless runner, binding the game at load
         subprocess.run([python, str(ROOT / 'tools/build_game.py'), str(args.exe), '--reference', str(args.reference),
                         '--trace', str(args.trace), '--survey', str(args.survey), '--out', str(build), '--opt=-O1',
-                        '--drivers', str(imgdir)], check=True, stdout=subprocess.DEVNULL)
-        runner = work / 'tp-headless'
-        subprocess.run([*toolchain.cc(), '-O2', '-w', '-I', str(inc), '-I', str(ROOT / 'runtime')]
-                       + [str(ROOT / 'runtime' / f) for f in RUNTIME] + [str(ROOT / 'platform/macos/platform_macos.c'), str(build / 'game.a'), '-lz', '-o', str(runner)], check=True)
+                        '--drivers', str(imgdir)] + (['--no-link'] if prebuilt else []), check=True, stdout=subprocess.DEVNULL)
+        if prebuilt:
+            runner = Path(prebuilt)
+            (work / 'lib').mkdir(exist_ok=True)
+            objs = (build / 'objects.txt').read_text().splitlines()
+            toolchain.link_game_library(work / 'lib' / 'libgame.dylib', objs)
+        else:
+            runner = work / 'tp-headless'
+            subprocess.run([*toolchain.cc(), '-O2', '-w', '-I', str(inc), '-I', str(ROOT / 'runtime')]
+                           + [str(ROOT / 'runtime' / f) for f in RUNTIME] + [str(ROOT / 'platform/macos/platform_macos.c'), str(build / 'game.a'), '-lz', '-o', str(runner)], check=True)
         if overlay.exists():
             shutil.rmtree(overlay)
         overlay.mkdir()
@@ -140,6 +147,8 @@ def main():
         if ckpt.exists():
             ckpt.unlink()
         env = dict(os.environ, DS_TEST='1', W32_AUDIO_MUTE='1', TP_DUMP_ON_STOP=str(ckpt))
+        if prebuilt:
+            env['DYLD_LIBRARY_PATH'] = str(work / 'lib')
         r = subprocess.run([str(runner), '--game', str(game), '--overlay', str(overlay), '--image', str(tpimg),
                             '--out', str(work / ('run%d' % round_no))] + PARK, env=env, capture_output=True, text=True)
         status = re.search(r'"status": "([^"]*)"', r.stdout)
