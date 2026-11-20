@@ -1060,9 +1060,9 @@ static void *game_thread(void *arg) {
 - (void)applicationDidFinishLaunching:(NSNotification *)n {
     app = self;
     NSString *root = dataRoot();
-    _game = [root stringByAppendingPathComponent:@"game"];
+    _game = getenv("TP_GAME_DIR") ? @(getenv("TP_GAME_DIR")) : [root stringByAppendingPathComponent:@"game"];   /* (the downloaded app's own) */
     _saves = [root stringByAppendingPathComponent:@"saves"];
-    _image = [NSBundle.mainBundle pathForResource:@"MAIN" ofType:@"TPIMG"];
+    _image = getenv("TP_IMAGE_DIR") ? [@(getenv("TP_IMAGE_DIR")) stringByAppendingPathComponent:@"MAIN.TPIMG"] : [NSBundle.mainBundle pathForResource:@"MAIN" ofType:@"TPIMG"];
     if (![NSFileManager.defaultManager fileExistsAtPath:[_game stringByAppendingPathComponent:@"DATA"]] || !_image) {
         [self fail:[NSString stringWithFormat:@"The game files were not found in %@. Run tools/build_app.sh with your Theme Park package to install them.", root]];
         return;
@@ -1083,7 +1083,7 @@ static void *game_thread(void *arg) {
     if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
     if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }
     if (!getenv("TP_CYCLES")) tp_host_set_cycles([u doubleForKey:@"Cycles"]);
-    if ([u boolForKey:@"PlayIntro"] && !getenv("TP_SKIP_INTRO")) _intro = [NSBundle.mainBundle pathForResource:@"INTRO" ofType:@"TPIMG"];
+    if ([u boolForKey:@"PlayIntro"] && !getenv("TP_SKIP_INTRO")) _intro = getenv("TP_IMAGE_DIR") ? [@(getenv("TP_IMAGE_DIR")) stringByAppendingPathComponent:@"INTRO.TPIMG"] : [NSBundle.mainBundle pathForResource:@"INTRO" ofType:@"TPIMG"];
     [NSFileManager.defaultManager createDirectoryAtPath:_saves withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *logPath = [root stringByAppendingPathComponent:@"theme-park.log"];
     freopen(logPath.fileSystemRepresentation, "a", stderr);
@@ -1569,6 +1569,37 @@ static uint32_t key_of_char(unichar c) {
     CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
     fprintf(stderr, "park picture %dx%d -> %s\n", w, h, path.fileSystemRepresentation);
 }
+/* The downloaded app: another release's disc dropped on the app (the Amiga CD32's or 3DO's .cue, a mounted disc or a folder)
+ * goes through tools/extras.py, as in a checkout, with the Python the app sets the game up with (unpacked once into
+ * <data>/.python): the extras appear in the launch window (Music Type, Ride Videos). */
+- (void)application:(NSApplication *)sender openFiles:(NSArray<NSString *> *)paths {
+    NSString *res = NSBundle.mainBundle.resourcePath, *tk = [res stringByAppendingPathComponent:@"setup/toolkit.tar.xz"];
+    NSString *tool = [res stringByAppendingPathComponent:@"setup/openpark/tools/extras.py"];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if (![fm fileExistsAtPath:tk] || ![fm fileExistsAtPath:tool]) { [sender replyToOpenOrPrint:NSApplicationDelegateReplyFailure]; return; }
+    NSString *data = dataRoot(), *dir = [data stringByAppendingPathComponent:@".python"];
+    for (NSString *disc in paths) {
+        NSTask *t = [NSTask new]; t.executableURL = [NSURL fileURLWithPath:@"/bin/bash"];
+        NSString *script = @"[ -x \"$TP_PY_DIR/python/bin/python3\" ] || { mkdir -p \"$TP_PY_DIR\" && /usr/bin/tar -xf \"$TP_TOOLKIT\" -C \"$TP_PY_DIR\" python && "
+                            "/usr/bin/xattr -r -d com.apple.quarantine \"$TP_PY_DIR\" 2>/dev/null; true; } && exec \"$TP_PY_DIR/python/bin/python3\" -I \"$@\"";
+        t.arguments = @[@"-c", script, @"extras", tool, disc, @"--data", data];
+        NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy]; env[@"TP_PY_DIR"] = dir; env[@"TP_TOOLKIT"] = tk; t.environment = env;
+        NSPipe *pipe = [NSPipe pipe]; t.standardOutput = pipe; t.standardError = pipe;
+        t.terminationHandler = ^(NSTask *task) {
+            NSString *out = [[NSString alloc] initWithData:[pipe.fileHandleForReading readDataToEndOfFile] encoding:NSUTF8StringEncoding] ?: @"";
+            NSString *last = [[out stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsSeparatedByString:@"\n"].lastObject ?: @"";
+            int code = task.terminationStatus;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSAlert *a = [NSAlert new];
+                a.messageText = code ? @"That disc couldn't be imported" : @"Imported from your disc";
+                a.informativeText = code ? last : [last stringByAppendingString:@"\n\nChoose it in the launch window: Sound > Music Type, Display > Ride Videos."];
+                [a runModal];
+            });
+        };
+        if (![t launchAndReturnError:nil]) [sender replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+    }
+    [sender replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
+}
 @end
 
 /* The game's code (27 MB of it) read into memory at the start, in the background: otherwise each part runs from the
@@ -1587,6 +1618,17 @@ static void prefault_code(void) {
 }
 int main(int argc, const char **argv) {
     @autoreleasepool {
+#ifdef DS_EASY_INSTALL
+        if (!getenv("TP_DATA")) {   /* the downloaded app (tools/make_dropin.sh): setup builds the game from the player's copy first */
+            int ds_easy_install(const char **, const char **, const char **);   /* recomp/setup/setup_ui.m: returns when it's ready */
+            const char *exe = 0, *game = 0, *data = 0;
+            if (ds_easy_install(&exe, &game, &data) > 0) {
+                setenv("TP_DATA", data, 1);                                                      /* saves, extras, ride videos */
+                setenv("TP_GAME_DIR", [@(game) stringByAppendingPathComponent:@"GAME"].fileSystemRepresentation, 1);
+                setenv("TP_IMAGE_DIR", [@(exe) stringByDeletingLastPathComponent].fileSystemRepresentation, 1);   /* MAIN.TPIMG, INTRO.TPIMG */
+            }
+        }
+#endif
         prefault_code();
         NSApplication *a = NSApplication.sharedApplication;
         a.activationPolicy = NSApplicationActivationPolicyRegular;
