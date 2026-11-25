@@ -15,7 +15,8 @@ on the first run. Positions are the game's own (320x200; doubled in 640x480, the
 import os, re, sys, time, zlib, struct, subprocess, hashlib, shutil
 ROOT = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + '/../..')
 P = ROOT + '/work/e2e'; OUT = P + '/out'; LOG = P + '/data/theme-park.log'; CTL = os.path.dirname(os.path.abspath(__file__)) + '/ctl.py'
-APP = os.environ.get('E2E_APP') or ROOT + '/build/app/Theme Park Nightly.app'
+APP = os.path.realpath(os.environ.get('E2E_APP') or ROOT + '/build/app/Theme Park Nightly.app')   # (resolved: build/ may be a symlink,
+                                                    # and the running process's path, which pgrep matches, is the real one)
 os.environ['E2E_CONTROL'] = P + '/control.txt'
 GAME = os.environ.get('E2E_GAME') or os.path.expanduser('~/Games/ThemeParkNative/game')
 if not os.path.isdir(P + '/data/game'):
@@ -127,7 +128,7 @@ def run(name, fn):
     for l in text.splitlines():
         if FATAL.search(l): err = (err + '; ' if err else '') + 'log: ' + l.strip()
         elif l.startswith(('long frame', 'audio drop', 'gov: a sleep')): EVENTS.append(f'{name}: {l.strip()}')
-    if not alive() and name not in ('quit',): err = (err + '; ' if err else '') + 'the app is gone'
+    if not alive() and name not in ('quit', 'park_picture'): err = (err + '; ' if err else '') + 'the app is gone'
     if err: shutil.copy(LOG, f'{OUT}/{name}.log')        # (the next launch empties the log)
     RESULTS.append((name, err, time.time() - t0))
     print(f'{"FAIL" if err else "ok  "} {name} ({time.time() - t0:.0f} s){": " + err if err else ""}', flush=True)
@@ -314,6 +315,24 @@ def visitor_view():
     wide(True); check(to_park(), 'not in the park')
     mark(); ctl('walk -1 -1', 'sleep 3'); m = last(r'control: walk [-\d.,]+: (\d)'); check(m and m[1] == '1', 'the Visitor View did not start')
     ctl('walkcmd 1', 'sleep 2', 'walkstop', 'sleep 2'); check(to_park(), 'not back in the park after the Visitor View')
+
+@step
+def park_picture():
+    """quitting the app (as Cmd-Q does) with a park open saves the whole park's picture for the launch window: <data>/art/your-park.png,
+    a PNG at least 320x200 that isn't blank; then a new start for the steps after"""
+    pic = P + '/data/art/your-park.png'
+    if os.path.exists(pic): os.remove(pic)
+    check(to_park(), 'not in the park')
+    mark(); subprocess.run([CTL, '--timeout=10', 'quit'])
+    t = time.time()
+    while alive() and time.time() - t < 15: time.sleep(0.5)
+    check(not alive(), 'the app did not quit')
+    if 'not built on yet' in since(): return            # (a new park's empty lawn is not kept: the launch window keeps its picture)
+    check(os.path.exists(pic), 'no park picture was saved at quit')
+    d = open(pic, 'rb').read(); w, h = struct.unpack('>II', d[16:24])
+    check(d[:8] == b'\x89PNG\r\n\x1a\n' and w >= 320 and h >= 200, f'the park picture is not a PNG of a park ({w}x{h})')
+    check(len(d) > 20000, f'the park picture looks blank ({len(d)} bytes)')
+    check('your park:' in since(), 'no "your park" line in the log')
 
 @step
 def monkey():

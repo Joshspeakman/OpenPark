@@ -90,6 +90,39 @@ for name, key in (("keyart.jpg", "galaxyBackgroundImage"), ("logo.png", "logo"),
   done <<< "$links"
 }
 fetch_art
+# GOG's screenshots that show a park (mostly lawn), cut above the game's bar: the launch window's backdrop until the
+# player's own park picture exists (main.m saves it at quit). Picked by their pixels, not their place in GOG's list.
+fetch_park_shots() {
+  [[ -z ${TP_NO_DOWNLOADS:-} ]] || return 0
+  ls "$DATA"/art/park-shot-*.png >/dev/null 2>&1 && return 0
+  local tmp; tmp=$(mktemp -d "$OUT/shots-XXXXXXXX")
+  curl -fsSL -m 30 "https://api.gog.com/products/1207660423?expand=screenshots" | python3 -c '
+import json, sys
+for x in json.load(sys.stdin).get("screenshots", []): print(x["formatter_template_url"].replace("_{formatter}", ""))' > "$tmp/urls" \
+    || { echo "   (GOG's screenshots could not be listed)"; mv "$tmp" "$HOME/.Trash/theme-park-shots-$(date +%s)"; return 0; }
+  local n=0 k=0
+  while read -r url; do
+    n=$((n + 1)); curl -fsSL -m 60 -o "$tmp/s$n.png" "$url" || continue
+    sips -s format bmp "$tmp/s$n.png" --out "$tmp/s$n.bmp" >/dev/null 2>&1 || continue
+    python3 - "$tmp/s$n.bmp" <<'PY' || continue
+import struct, sys
+d = open(sys.argv[1], 'rb').read(); off = struct.unpack_from('<I', d, 10)[0]; w, h = struct.unpack_from('<ii', d, 18); bpp = struct.unpack_from('<H', d, 28)[0] // 8
+row = (w * bpp + 3) & ~3; top = h < 0; h = abs(h); green = total = 0
+for y in range(0, int(h * 0.8), 6):                     # the picture above the game's bar
+    yy = y if top else h - 1 - y
+    for x in range(0, w, 6):
+        o = off + yy * row + x * bpp; b, g, r = d[o], d[o + 1], d[o + 2]
+        total += 1; green += g > r + 15 and g > b + 15
+sys.exit(0 if total * 0.3 < green < total * 0.55 else 1)   # (a park: lawn among paths and rides; the world map is nearly all green)
+PY
+    k=$((k + 1)); local hgt; hgt=$(sips -g pixelHeight "$tmp/s$n.png" | awk '/pixelHeight/ {print $2}')
+    sips -c $((hgt * 85 / 100)) "$(sips -g pixelWidth "$tmp/s$n.png" | awk '/pixelWidth/ {print $2}')" --cropOffset 0 0 "$tmp/s$n.png" --out "$DATA/art/park-shot-$k.png" >/dev/null
+    [[ $k -ge 4 ]] && break
+  done < "$tmp/urls"
+  echo "   $k of GOG's park pictures for the launch window"
+  mv "$tmp" "$HOME/.Trash/theme-park-shots-$(date +%s)"
+}
+fetch_park_shots
 for f in keyart.jpg logo.png; do [[ -s $DATA/art/$f ]] && cp "$DATA/art/$f" "$APP.new/Contents/Resources/$f"; done
 # The icon: the park planet (GOG's box art, else GOG's icon from the package) on a Nightly tile like
 # the other ports' (platform/macos/tp_icon.m); GOG's own icon if that cannot be made.

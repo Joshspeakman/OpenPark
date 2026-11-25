@@ -29,3 +29,44 @@ for name, key in (('keyart.jpg', 'galaxyBackgroundImage'), ('logo.png', 'logo'))
     except Exception:
         pass
 print(' '.join(sorted(os.listdir(out))))
+
+
+def park_shots():
+    """GOG's screenshots that show a park (mostly lawn among paths and rides), cut above the game's bar, as
+    park-shot-<n>.png: the launch window's backdrop until the player's own park picture exists (the app saves it at
+    quit). Picked by their pixels (sips makes a BMP to read), not their place in GOG's list."""
+    import struct, subprocess, tempfile
+    if any(f.startswith('park-shot-') for f in os.listdir(out)):
+        return
+    try:
+        with urllib.request.urlopen('https://api.gog.com/products/1207660423?expand=screenshots', timeout=30) as r:
+            urls = [x['formatter_template_url'].replace('_{formatter}', '') for x in json.load(r).get('screenshots', [])]
+    except Exception:
+        return
+    k = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for n, url in enumerate(urls):
+            png, bmp = os.path.join(tmp, f's{n}.png'), os.path.join(tmp, f's{n}.bmp')
+            try:
+                with urllib.request.urlopen(url, timeout=60) as r:
+                    open(png, 'wb').write(r.read())
+                subprocess.run(['sips', '-s', 'format', 'bmp', png, '--out', bmp], check=True, capture_output=True)
+            except Exception:
+                continue
+            d = open(bmp, 'rb').read(); off = struct.unpack_from('<I', d, 10)[0]; w, h = struct.unpack_from('<ii', d, 18)
+            bpp = struct.unpack_from('<H', d, 28)[0] // 8; row = (w * bpp + 3) & ~3; top = h < 0; h = abs(h); green = total = 0
+            for y in range(0, int(h * 0.8), 6):
+                yy = y if top else h - 1 - y
+                for x in range(0, w, 6):
+                    o = off + yy * row + x * bpp; b, g, rr = d[o], d[o + 1], d[o + 2]
+                    total += 1; green += g > rr + 15 and g > b + 15
+            if not (total * 0.3 < green < total * 0.55):
+                continue
+            k += 1
+            subprocess.run(['sips', '-c', str(h * 85 // 100), str(w), '--cropOffset', '0', '0', png, '--out',
+                            os.path.join(out, f'park-shot-{k}.png')], capture_output=True)
+            if k >= 4:
+                break
+
+
+park_shots()

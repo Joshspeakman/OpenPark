@@ -1482,7 +1482,37 @@ static uint32_t key_of_char(unichar c) {
 - (void)windowDidResignKey:(NSNotification *)n { [_view releaseInput]; }
 - (void)applicationDidResignActive:(NSNotification *)n { [_view releaseInput]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a { return YES; }
+/* At quit, with a park open: the whole park's picture into <data>/art/your-park.png, for the launch window's backdrop (the
+ * player's own park, drawn pixel-sharp). Made only here: it renders every pass, a hitch the player would see mid-game. */
+static void save_your_park(void) {
+    if (!game_started || game_done || !tp_view_live() || NSProcessInfo.processInfo.environment[@"TP_NO_PARK_ART"]) return;
+    tp_view_request_poster();
+    double t0 = CACurrentMediaTime(); uint32_t *px = NULL; int w = 0, h = 0;
+    while (!tp_view_take_poster(&px, &w, &h) && CACurrentMediaTime() - t0 < 2.0) usleep(20000);
+    if (!px) return;
+    if (w < 320 || h < 200) { free(px); return; }
+    {   /* a park worth showing: built on (not a new park's empty lawn). The share of pixels off the commonest colours:
+         * grass is a few shades; paths, rides, shops and people bring many */
+        uint32_t cnt[64] = {0}; size_t n = 0, other = 0;
+        for (int y = 0; y < h; y += 4) for (int x = 0; x < w; x += 4) { uint32_t c = px[(size_t)y * w + x]; if (!(c >> 24)) continue; cnt[(c ^ (c >> 7) ^ (c >> 13)) & 63]++; n++; }
+        uint32_t top4 = 0; for (int k = 0; k < 4; k++) { int b = 0; for (int i = 1; i < 64; i++) if (cnt[i] > cnt[b]) b = i; top4 += cnt[b]; cnt[b] = 0; }
+        other = n - top4;
+        if (n == 0 || other * 100 < n * 12) { free(px); fprintf(stderr, "your park: not built on yet (%.0f%% detail): the launch window keeps its picture\n", n ? 100.0 * other / n : 0); return; }
+    }
+    NSString *dir = [dataRoot() stringByAppendingPathComponent:@"art"], *path = [dir stringByAppendingPathComponent:@"your-park.png"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *part = [path stringByAppendingString:@".part"];
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(px, (size_t)w, (size_t)h, 8, (size_t)w * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGImageRef img = ctx ? CGBitmapContextCreateImage(ctx) : NULL;
+    CGImageDestinationRef d = img ? CGImageDestinationCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:part], (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL) : NULL;
+    BOOL ok = NO; if (d) { CGImageDestinationAddImage(d, img, NULL); ok = CGImageDestinationFinalize(d); CFRelease(d); }
+    if (img) CGImageRelease(img); if (ctx) CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
+    if (ok) { [NSFileManager.defaultManager removeItemAtPath:path error:nil]; [NSFileManager.defaultManager moveItemAtPath:part toPath:path error:nil];
+              fprintf(stderr, "your park: %dx%d picture for the launch window\n", w, h); }
+}
 - (void)applicationWillTerminate:(NSNotification *)n {
+    save_your_park();
     tp_host_quit();
     if (game_started) for (int i = 0; i < 100 && !game_done; i++) usleep(10000);   /* (the game thread out first: it sends the synth MIDI) */
     tp_audio_stop();

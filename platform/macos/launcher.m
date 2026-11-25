@@ -8,8 +8,14 @@
  * rendered by the compiled game, which gives the grass and, if the download failed, the logo. Without any of it the
  * window falls back to plain colours and type. Settings live in the app's user defaults and are read by main.m.
  * TP_LAUNCHER_SHOT=<png> renders the window to an image and exits (TP_LAUNCHER_OPEN=<group> with a group open,
- * TP_LAUNCHER_FOCUS=<n> with a row focused, TP_LAUNCHER_HOVER=<hit> with something under the pointer). */
+ * TP_LAUNCHER_FOCUS=<n> with a row focused, TP_LAUNCHER_HOVER=<hit> with something under the pointer, TP_LAUNCHER_TIME=<s>
+ * the animation's clock).
+ * It moves (TPFair, below): the player's own park (<data>/art/your-park.png, saved by main.m at quit) pans behind the
+ * settings at whole-pixel sizes, the key art drifts, marquee bulbs chase along the banner's edge and around Play, the
+ * bunting sways, balloons rise and confetti falls now and then. Core Animation layers set from one clock, so the
+ * settings are drawn only when they change; with Reduce Motion on, it holds still. */
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 static NSColor *rgb(int r, int g, int b) { return [NSColor colorWithSRGBRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:1]; }
 static NSColor *gold(void) { return rgb(247, 201, 72); }
@@ -79,6 +85,206 @@ static void bulbs(NSRect r, CGFloat step, BOOL sides) {
         [rgb(255, 250, 215) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(p.x - 2.6, p.y - 2.6, 5.2, 5.2)] fill];
     }
 }
+
+
+/* ---- the fairground: animated layers behind and over the settings (Core Animation, set from one clock) ---- */
+static CGImageRef cg_of(NSImage *img) { return img ? [img CGImageForProposedRect:NULL context:nil hints:nil] : NULL; }
+static NSImage *drawn(NSSize sz, void (^draw)(NSRect r)) {
+    NSImage *i = [[NSImage alloc] initWithSize:sz];
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)(sz.width * 2) pixelsHigh:(NSInteger)(sz.height * 2)
+        bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+    rep.size = sz;
+    [NSGraphicsContext saveGraphicsState]; [NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:rep]];
+    draw(NSMakeRect(0, 0, sz.width, sz.height));
+    [NSGraphicsContext restoreGraphicsState];
+    [i addRepresentation:rep]; return i;
+}
+static NSImage *drawn_px(NSSize px, void (^draw)(NSRect r)) {   /* (one point a pixel) */
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)px.width pixelsHigh:(NSInteger)px.height
+        bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+    [NSGraphicsContext saveGraphicsState]; [NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:rep]];
+    draw(NSMakeRect(0, 0, px.width, px.height)); [NSGraphicsContext restoreGraphicsState];
+    NSImage *i = [[NSImage alloc] initWithSize:px]; [i addRepresentation:rep]; return i;
+}
+static double frand(unsigned k) { k ^= k >> 13; k *= 0x5bd1e995u; k ^= k >> 15; return (k & 0xffffff) / (double)0x1000000; }   /* (steady: the same each run) */
+static NSImage *balloon_img(NSColor *c) {
+    return drawn(NSMakeSize(30, 64), ^(NSRect r) {
+        NSBezierPath *str = [NSBezierPath bezierPath]; [str moveToPoint:NSMakePoint(15, 26)];
+        [str curveToPoint:NSMakePoint(14, 0) controlPoint1:NSMakePoint(20, 16) controlPoint2:NSMakePoint(9, 9)];
+        [[NSColor colorWithWhite:0.92 alpha:0.75] setStroke]; str.lineWidth = 0.8; [str stroke];
+        NSRect b = NSMakeRect(2, 26, 26, 34);
+        NSGradient *g = [[NSGradient alloc] initWithColorsAndLocations:[c blendedColorWithFraction:0.45 ofColor:NSColor.whiteColor], 0.0, c, 0.5,
+                         [c blendedColorWithFraction:0.45 ofColor:NSColor.blackColor], 1.0, nil];
+        [g drawInBezierPath:[NSBezierPath bezierPathWithOvalInRect:b] relativeCenterPosition:NSMakePoint(-0.35, 0.4)];
+        [[NSColor colorWithWhite:1 alpha:0.55] setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(8, 46, 6, 9)] fill];
+        NSBezierPath *knot = [NSBezierPath bezierPath]; [knot moveToPoint:NSMakePoint(12, 24)]; [knot lineToPoint:NSMakePoint(18, 24)]; [knot lineToPoint:NSMakePoint(15, 28)]; [knot closePath];
+        [[c blendedColorWithFraction:0.3 ofColor:NSColor.blackColor] setFill]; [knot fill];
+    });
+}
+static NSImage *bulb_img(BOOL lit) {
+    return drawn(NSMakeSize(22, 22), ^(NSRect r) {
+        NSPoint p = NSMakePoint(11, 11);
+        if (lit) { NSGradient *glow = [[NSGradient alloc] initWithStartingColor:[bulb() colorWithAlphaComponent:0.75] endingColor:[bulb() colorWithAlphaComponent:0]];
+                   [glow drawFromCenter:p radius:0 toCenter:p radius:11 options:0]; }
+        [rgb(110, 62, 18) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(7, 7, 8, 8)] fill];
+        [(lit ? rgb(255, 252, 222) : rgb(150, 112, 60)) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(8.2, 8.2, 5.6, 5.6)] fill];
+    });
+}
+
+@interface TPFair : NSObject
+- (instancetype)initWithSize:(NSSize)size park:(NSImage *)park soft:(BOOL)soft keyart:(NSImage *)keyart grass:(NSImage *)grass banner:(CGFloat)bannerH play:(NSRect)play quit:(NSRect)quit;
+@property (readonly) CALayer *back, *front;   /* behind the settings; over them (no clicks) */
+- (void)setTime:(double)t;
+- (void)setPageOpen:(BOOL)open;   /* a settings page over the window: the banner's bulbs and strip, bunting and confetti hide */
+@end
+@implementation TPFair {
+    NSSize _sz; CGFloat _bh; CALayer *_park, *_key, *_parkDim; NSMutableArray<CALayer *> *_balloons, *_bunting, *_bulbs, *_confetti;
+    NSMutableArray<NSValue *> *_bulbAt; NSSize _parkSize; double _parkScale; NSInteger _nMarquee; NSMutableArray<CALayer *> *_bannerOnly;
+}
+static CGFloat flipY(NSSize sz, CGFloat y) { return sz.height - y; }   /* (layers count up from the bottom; the window's layout counts down) */
+- (instancetype)initWithSize:(NSSize)size park:(NSImage *)park soft:(BOOL)soft keyart:(NSImage *)keyart grass:(NSImage *)grass banner:(CGFloat)bannerH play:(NSRect)play quit:(NSRect)quit {
+    if (!(self = [super init])) return nil;
+    _sz = size; _bh = bannerH;
+    _back = [CALayer layer]; _back.frame = CGRectMake(0, 0, size.width, size.height); _back.backgroundColor = CGColorCreateGenericRGB(0.04, 0.07, 0.03, 1);
+    _front = [CALayer layer]; _front.frame = _back.frame;
+    /* the park below the banner: the player's own, whole-pixel sizes (3 points a park pixel: sharp on any display), else the title's lawn */
+    CALayer *lower = [CALayer layer]; lower.frame = CGRectMake(0, 0, size.width, size.height - bannerH); lower.masksToBounds = YES; [_back addSublayer:lower];
+    if (park) {
+        _parkSize = park.size; _parkScale = soft ? 0.6 : (_parkSize.width * 3 >= size.width * 1.4 && _parkSize.height * 3 >= (size.height - bannerH) * 1.3) ? 3 : 4;
+        _park = [CALayer layer]; _park.contents = (__bridge id)cg_of(park); _park.magnificationFilter = kCAFilterNearest; _park.minificationFilter = kCAFilterTrilinear;
+        _park.bounds = CGRectMake(0, 0, _parkSize.width * _parkScale, _parkSize.height * _parkScale); _park.anchorPoint = CGPointZero;
+        [lower addSublayer:_park];
+    } else if (grass) {
+        _park = [CALayer layer]; _park.anchorPoint = CGPointZero; _parkScale = 0;
+        _park.backgroundColor = [NSColor colorWithPatternImage:grass].CGColor; _park.bounds = CGRectMake(0, 0, size.width + 160, size.height - bannerH + 160);
+        [lower addSublayer:_park];
+    }
+    _parkDim = [CAGradientLayer layer]; _parkDim.frame = lower.bounds;   /* darker at the top (the settings) and the bottom (the signs) */
+    ((CAGradientLayer *)_parkDim).colors = @[(__bridge_transfer id)CGColorCreateGenericRGB(0.02, 0.03, 0.02, park ? 0.66 : 0.66), (__bridge_transfer id)CGColorCreateGenericRGB(0.02, 0.03, 0.02, park ? 0.46 : 0.55),
+                                             (__bridge_transfer id)CGColorCreateGenericRGB(0.02, 0.03, 0.02, park ? 0.70 : 0.72)];
+    ((CAGradientLayer *)_parkDim).locations = @[@0, @0.55, @1]; [lower addSublayer:_parkDim];
+    /* the key art across the top, drifting */
+    CALayer *top = [CALayer layer]; top.frame = CGRectMake(0, size.height - bannerH, size.width, bannerH); top.masksToBounds = YES; [_back addSublayer:top];
+    if (keyart) {
+        _key = [CALayer layer]; _key.contents = (__bridge id)cg_of(keyart); _key.contentsGravity = kCAGravityResizeAspectFill;
+        NSSize s = keyart.size; CGFloat k = MAX(size.width / (s.width * 0.83), bannerH / s.height) * 1.08;
+        _key.bounds = CGRectMake(0, 0, s.width * k, s.height * k); _key.anchorPoint = CGPointMake(1, 0.5);
+        [top addSublayer:_key];
+        CAGradientLayer *left = [CAGradientLayer layer]; left.frame = top.bounds; left.startPoint = CGPointMake(0, 0.5); left.endPoint = CGPointMake(0.55, 0.5);
+        left.colors = @[(__bridge_transfer id)CGColorCreateGenericRGB(16 / 255.0, 70 / 255.0, 150 / 255.0, 0.6), (__bridge_transfer id)CGColorCreateGenericRGB(16 / 255.0, 70 / 255.0, 150 / 255.0, 0)];
+        [top addSublayer:left];
+    } else { top.backgroundColor = CGColorCreateGenericRGB(0.1, 0.38, 0.75, 1); }
+    CAGradientLayer *fade = [CAGradientLayer layer]; fade.frame = top.bounds;
+    fade.colors = @[(__bridge_transfer id)CGColorCreateGenericRGB(0, 0, 0, 0.75), (__bridge_transfer id)CGColorCreateGenericRGB(0, 0, 0, 0)]; fade.locations = @[@0, @0.3]; [top addSublayer:fade];
+    /* bunting across the top of the banner: two strings of pennants */
+    _bunting = [NSMutableArray array]; _bannerOnly = [NSMutableArray array];
+    NSArray *flagc = @[rgb(214, 40, 40), rgb(250, 204, 44), rgb(40, 120, 220), rgb(60, 170, 80), rgb(245, 130, 30)];
+    for (int line = 0; line < 2; line++) {
+        CGFloat x0 = line ? size.width * 0.46 : -10, x1 = line ? size.width + 10 : size.width * 0.54, sag = 18, ytop = 6 + line * 10;
+        CAShapeLayer *str = [CAShapeLayer layer]; CGMutablePathRef sp = CGPathCreateMutable();
+        CGPathMoveToPoint(sp, NULL, x0, flipY(size, ytop)); CGPathAddQuadCurveToPoint(sp, NULL, (x0 + x1) / 2, flipY(size, ytop + 2 * sag), x1, flipY(size, ytop));
+        str.path = sp; CGPathRelease(sp); str.strokeColor = CGColorCreateGenericRGB(0.95, 0.92, 0.85, 0.8); str.fillColor = NULL; str.lineWidth = 1.2; [_front addSublayer:str]; [_bannerOnly addObject:str];
+        int n = (int)((x1 - x0) / 26);
+        for (int i = 1; i < n; i++) {
+            double u = (double)i / n; CGFloat x = x0 + (x1 - x0) * u, y = ytop + 4 * sag * u * (1 - u);
+            CAShapeLayer *f = [CAShapeLayer layer]; CGMutablePathRef fp = CGPathCreateMutable();
+            CGPathMoveToPoint(fp, NULL, -8, 0); CGPathAddLineToPoint(fp, NULL, 8, 0); CGPathAddLineToPoint(fp, NULL, 0, -20); CGPathCloseSubpath(fp);
+            f.path = fp; CGPathRelease(fp); f.fillColor = [(NSColor *)flagc[(i + line * 2) % flagc.count] CGColor];
+            f.strokeColor = CGColorCreateGenericRGB(0, 0, 0, 0.25); f.lineWidth = 0.6; f.shadowOpacity = 0.35; f.shadowOffset = CGSizeMake(0, -2); f.shadowRadius = 2;
+            f.position = CGPointMake(x, flipY(size, y)); [_front addSublayer:f]; [_bunting addObject:f]; [_bannerOnly addObject:f];
+        }
+    }
+    /* balloons rising on the right of the banner */
+    _balloons = [NSMutableArray array];
+    NSArray *bc = @[rgb(226, 44, 52), rgb(250, 196, 40), rgb(46, 132, 226), rgb(236, 90, 170), rgb(70, 180, 90), rgb(250, 130, 40), rgb(140, 80, 210)];
+    for (int i = 0; i < 9; i++) {
+        CALayer *b = [CALayer layer]; b.contents = (__bridge id)cg_of(balloon_img(bc[i % bc.count])); b.bounds = CGRectMake(0, 0, 30, 64);
+        CGFloat k = 0.75 + 0.45 * frand(i * 7 + 1); b.transform = CATransform3DMakeScale(k, k, 1); b.zPosition = k;
+        [_back addSublayer:b]; [_balloons addObject:b];     /* (behind the logo and riders' frame: they rise through the sky) */
+    }
+    /* marquee bulbs along the banner's edge and around Play and Quit */
+    _bulbs = [NSMutableArray array]; _bulbAt = [NSMutableArray array];
+    CGImageRef on = cg_of(bulb_img(YES)), off = cg_of(bulb_img(NO));
+    for (CGFloat x = 11; x < size.width; x += 22) [_bulbAt addObject:[NSValue valueWithPoint:NSMakePoint(x, bannerH)]];
+    _nMarquee = (NSInteger)_bulbAt.count;
+    for (NSValue *rv in @[[NSValue valueWithRect:play], [NSValue valueWithRect:quit]]) {
+        NSRect r = NSInsetRect(rv.rectValue, -7, -7);
+        CGFloat per = 2 * (r.size.width + r.size.height); int n = (int)lround(per / 17);
+        for (int i = 0; i < n; i++) {                  /* round the sign, clockwise from its top-left corner */
+            CGFloat d = per * i / n, x, y;
+            if (d < r.size.width) { x = r.origin.x + d; y = r.origin.y; }
+            else if ((d -= r.size.width) < r.size.height) { x = NSMaxX(r); y = r.origin.y + d; }
+            else if ((d -= r.size.height) < r.size.width) { x = NSMaxX(r) - d; y = NSMaxY(r); }
+            else { d -= r.size.width; x = r.origin.x; y = NSMaxY(r) - d; }
+            [_bulbAt addObject:[NSValue valueWithPoint:NSMakePoint(x, y)]];
+        }
+    }
+    CALayer *strip = [CALayer layer]; strip.frame = CGRectMake(0, flipY(size, bannerH) - 7, size.width, 14);
+    strip.backgroundColor = CGColorCreateGenericRGB(0.28, 0.13, 0.04, 1); strip.borderColor = CGColorCreateGenericRGB(0.75, 0.5, 0.16, 1); strip.borderWidth = 1;
+    [_front addSublayer:strip]; [_bannerOnly addObject:strip];
+    NSInteger bi = 0;
+    for (NSValue *v in _bulbAt) {
+        NSPoint p = v.pointValue;
+        CALayer *b = [CALayer layer]; b.bounds = CGRectMake(0, 0, 22, 22); b.position = CGPointMake(p.x, flipY(size, p.y)); b.contents = (__bridge id)off;
+        CALayer *lit = [CALayer layer]; lit.frame = b.bounds; lit.contents = (__bridge id)on; [b addSublayer:lit];
+        [_front addSublayer:b]; [_bulbs addObject:lit]; if (bi++ < _nMarquee) [_bannerOnly addObject:b];
+    }
+    /* confetti (a burst over the banner now and then) */
+    _confetti = [NSMutableArray array];
+    CALayer *sky = [CALayer layer]; sky.frame = CGRectMake(0, size.height - bannerH + 7, size.width, bannerH - 7); sky.masksToBounds = YES;   /* (the banner only) */
+    [_front insertSublayer:sky atIndex:0]; [_bannerOnly addObject:sky];
+    for (int i = 0; i < 34; i++) {
+        CALayer *c = [CALayer layer]; c.bounds = CGRectMake(0, 0, 5 + 3 * frand(i * 3), 9 + 4 * frand(i * 5));
+        c.backgroundColor = [(NSColor *)flagc[i % flagc.count] CGColor]; c.opacity = 0; [sky addSublayer:c]; [_confetti addObject:c];
+    }
+    return self;
+}
+- (void)setPageOpen:(BOOL)open {
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    for (CALayer *l in _bannerOnly) l.hidden = open;
+    [CATransaction commit];
+}
+- (void)setTime:(double)t {
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    NSSize sz = _sz; CGFloat lowerH = sz.height - _bh;
+    if (_park && _parkScale > 0) {                     /* a slow pan round the park: corner to corner, there and back (~2 min) */
+        CGFloat w = _park.bounds.size.width, h = _park.bounds.size.height, mx = MAX(0, w - sz.width), my = MAX(0, h - lowerH);
+        double u = 0.5 - 0.5 * cos(t * 2 * M_PI / 130), v = 0.5 - 0.5 * cos(t * 2 * M_PI / 97 + 1.1);
+        CGFloat q = MAX(_parkScale, 0.5), x = -round(mx * u / q) * q, y = -round(my * v / q) * q;   /* (whole park pixels: no shimmer) */
+        if (w < sz.width) x = round((sz.width - w) / 2); if (h < lowerH) y = round((lowerH - h) / 2);
+        _park.position = CGPointMake(x, y);
+    } else if (_park) _park.position = CGPointMake(-fmod(t * 6, 80), -fmod(t * 3, 80));
+    if (_key) {                                       /* the riders: a slow drift and breath */
+        double z = 1 + 0.035 * (0.5 - 0.5 * cos(t * 2 * M_PI / 28));
+        _key.position = CGPointMake(sz.width + 14 * sin(t * 2 * M_PI / 40), _bh / 2 + 6 * sin(t * 2 * M_PI / 33));
+        _key.transform = CATransform3DMakeScale(z, z, 1);
+    }
+    for (NSUInteger i = 0; i < _bunting.count; i++) {
+        CALayer *f = _bunting[i]; f.transform = CATransform3DMakeRotation(0.09 * sin(t * 2.1 + i * 0.7), 0, 0, 1);
+    }
+    for (NSUInteger i = 0; i < _balloons.count; i++) {   /* up through the sky on the right, each at its own pace, round again */
+        CALayer *b = _balloons[i]; double sp = 16 + 12 * frand((unsigned)i * 11 + 3), span = _bh + 140;
+        double y = fmod(t * sp + span * frand((unsigned)i * 13 + 5), span) - 70;     /* from below the banner to above it */
+        double x = sz.width * (0.5 + 0.48 * frand((unsigned)i * 17 + 9)) + 12 * sin(t * (0.6 + 0.3 * frand((unsigned)i * 19)) + i);
+        b.position = CGPointMake(x, sz.height - _bh + y); b.opacity = y < 10 ? MAX(0, (y + 70) / 80) : 1;
+    }
+    long step = (long)floor(t * 7);                    /* the chase: every third bulb, moving on 7 times a second */
+    for (NSUInteger i = 0; i < _bulbs.count; i++) {
+        long k = (long)i < _nMarquee ? (long)i - step : (long)i + step;
+        _bulbs[i].opacity = ((k % 3) + 3) % 3 == 0 ? 1 : 0.08;
+    }
+    double cyc = fmod(t, 14);                          /* confetti for 4 s of every 14 */
+    for (NSUInteger i = 0; i < _confetti.count; i++) {
+        CALayer *c = _confetti[i]; double d = cyc - 0.6 * frand((unsigned)i * 23);
+        if (d < 0 || d > 4) { c.opacity = 0; continue; }
+        double x = sz.width * (0.08 + 0.84 * frand((unsigned)i * 29 + 1)) + 22 * sin(d * 3 + i);
+        double y = _bh - 7 - (d * (55 + 40 * frand((unsigned)i * 31))) + 10;   /* (in the banner's own layer) */
+        c.position = CGPointMake(x, y); c.opacity = d > 3.2 ? (float)((4 - d) / 0.8) : 1;
+        c.transform = CATransform3DMakeRotation(d * (3 + 5 * frand((unsigned)i * 37)) + i, 0.3, 1, 0.2);
+    }
+    [CATransaction commit];
+}
+@end
 
 /* ---- settings ---- */
 typedef struct { NSString *title, *key; NSArray *values; NSArray<NSString *> *labels, *notes; BOOL slider; } Setting;
@@ -260,6 +466,8 @@ static BOOL update_run(NSWindow *parent, NSString *updater, NSString *branch, NS
 @property NSInteger focus, hover, open;   /* open: -1 or group index */
 @property NSInteger dragRow;              /* a slider being dragged, or -1 */
 @property BOOL result, done;
+@property (weak) id fair;                 /* TPFair: told when a page opens */
+- (NSImage *)keyart; - (NSImage *)grass; - (NSImage *)park; - (BOOL)parkSoft; - (NSRect)playRect; - (NSRect)quitRect;
 @end
 
 enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
@@ -268,7 +476,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
 #define BANNER_H 250
 
 @implementation TPLaunchView {
-    NSImage *_keyart, *_logo, *_grass;
+    NSImage *_keyart, *_logo, *_grass, *_park; BOOL _parkSoft;
     Setting _top[4];
     int _ustate; NSString *_latest, *_updater, *_branch, *_built;   /* the Updates row (below) */
     NSArray<NSString *> *_groups;                  /* the pages: Game, Display, Sound (the main screen's buttons), and nested */
@@ -289,6 +497,29 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
             if (!_logo) _logo = pixel_crop(title, CGRectMake(58, 17, 206, 36), 8); /* its logo box, if GOG's art is missing */
         }
         if (_keyart.size.width < 400) _keyart = nil;
+        {   /* the player's own park (main.m saves its picture at quit), for the backdrop */
+            const char *d = getenv("TP_DATA"), *h = getenv("HOME");
+            NSString *root = d && *d ? @(d) : [(h && *h ? @(h) : NSHomeDirectory()) stringByAppendingPathComponent:@"Games/ThemeParkNative"];
+            NSString *pp = [root stringByAppendingPathComponent:@"art/your-park.png"];
+            if (getenv("TP_LAUNCHER_PARK")) pp = @(getenv("TP_LAUNCHER_PARK"));    /* (development: another park's picture) */
+            NSImage *pk = [[NSImage alloc] initWithContentsOfFile:pp];
+            NSBitmapImageRep *rep = (NSBitmapImageRep *)pk.representations.firstObject;
+            if (pk && [rep isKindOfClass:NSBitmapImageRep.class]) { pk.size = NSMakeSize(rep.pixelsWide, rep.pixelsHigh); if (pk.size.width >= 320) _park = pk; }
+            if (!_park) {   /* none yet: GOG's pictures of a park (fetched at install), one image pixel per display pixel */
+                NSString *art = [root stringByAppendingPathComponent:@"art"]; NSMutableArray *shots = [NSMutableArray array];
+                for (NSString *f in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:art error:nil] sortedArrayUsingSelector:@selector(compare:)])
+                    if ([f hasPrefix:@"park-shot-"] && [f hasSuffix:@".png"]) { NSImage *i = [[NSImage alloc] initWithContentsOfFile:[art stringByAppendingPathComponent:f]]; if (i) [shots addObject:i]; }
+                if (shots.count) {   /* side by side, as one strip */
+                    NSBitmapImageRep *r0 = (NSBitmapImageRep *)[shots[0] representations].firstObject; CGFloat sw = r0.pixelsWide, sh = r0.pixelsHigh;
+                    NSUInteger n = MIN(shots.count, 4);   /* two rows, the second one turned round so no picture meets itself */
+                    _park = drawn_px(NSMakeSize(sw * n, sh * 2), ^(NSRect r) {
+                        for (NSUInteger k = 0; k < n; k++) {
+                            [(NSImage *)shots[k] drawInRect:NSMakeRect(sw * k, sh, sw, sh)];
+                            [(NSImage *)shots[(k + 1) % n] drawInRect:NSMakeRect(sw * k, 0, sw, sh)]; } });
+                    _parkSoft = YES;
+                }
+            }
+        }
         NSArray *vol = @[@0.0, @0.1, @0.2, @0.3, @0.4, @0.5, @0.6, @0.7, @0.8, @0.9, @1.0];
         NSArray *volL = @[@"Off", @"10%", @"20%", @"30%", @"40%", @"50%", @"60%", @"70%", @"80%", @"90%", @"100%"];
         NSArray *volN = @[@"", @"", @"", @"", @"", @"", @"", @"", @"", @"", @""];
@@ -436,6 +667,10 @@ enum { HIT_NONE = -1, HIT_PLAY = 1000, HIT_QUIT = 1001, HIT_BACK = 1002 };
     }
     [self checkUpdates];
 }
+- (NSImage *)keyart { return _keyart; }
+- (NSImage *)grass { return _grass; }
+- (NSImage *)park { return _park; }
+- (BOOL)parkSoft { return _parkSoft; }
 - (BOOL)isFlipped { return YES; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
@@ -622,20 +857,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     if (state == 2) rounded(NSInsetRect(r, 1.5, 1.5), 9, nil, [NSColor colorWithWhite:1 alpha:0.55], 2);   /* (keyboard focus) */
     label(t.uppercaseString, display(primary ? 25 : 21), primary ? gold() : cream(), NSInsetRect(r, 10, 0), NSTextAlignmentCenter, 2, YES);
 }
-- (void)drawBanner {
-    NSRect br = NSMakeRect(0, 0, WIN_W, BANNER_H);
-    if (_keyart) {   /* the riders on the right, the sky on the left for the logo */
-        NSSize s = _keyart.size; CGFloat k = MAX(br.size.width / s.width, br.size.height / s.height), w = br.size.width / k, h = br.size.height / k;
-        NSRect from = NSMakeRect(MAX(0, s.width * 0.83 - w), (s.height - h) * 0.5, w, h);   /* GOG's art fades out on its right */
-        [_keyart drawInRect:br fromRect:from operation:NSCompositingOperationCopy fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
-        NSGradient *left = [[NSGradient alloc] initWithColorsAndLocations:[rgb(16, 70, 150) colorWithAlphaComponent:0.55], 0.0, [rgb(16, 70, 150) colorWithAlphaComponent:0.0], 0.55, nil];
-        [left drawInRect:br angle:0];
-    } else {
-        NSGradient *sky = [[NSGradient alloc] initWithStartingColor:rgb(40, 120, 210) endingColor:rgb(20, 70, 150)];
-        [sky drawInRect:br angle:90];
-    }
-    NSGradient *fade = [[NSGradient alloc] initWithColorsAndLocations:[NSColor colorWithWhite:0 alpha:0], 0.0, [NSColor colorWithWhite:0 alpha:0], 0.72, [NSColor colorWithWhite:0 alpha:0.75], 1.0, nil];
-    [fade drawInRect:br angle:90];
+- (void)drawBanner {                                  /* (the key art, its shading and the bulbs are TPFair's layers) */
     if (_logo) {
         CGFloat w = 372, h = w * _logo.size.height / _logo.size.width;
         NSRect dst = NSMakeRect(44, 58, w, h);
@@ -648,7 +870,6 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
         label(@"THEME PARK", display(56), cream(), NSMakeRect(44, 60, 460, 70), NSTextAlignmentLeft, 2, YES);
         label(@"NATIVE EDITION FOR MACOS", heavy(15), cream(), NSMakeRect(46, 136, 460, 22), NSTextAlignmentLeft, 3.2, YES);
     }
-    [rgb(160, 96, 30) setFill]; NSRectFill(NSMakeRect(0, BANNER_H, WIN_W, 2));
 }
 - (void)drawRow:(NSInteger)k {
     Setting *s = [self rowSetting:k];
@@ -693,11 +914,13 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     }
 }
 - (void)drawRect:(NSRect)dirty {
-    [self fillGrass:self.bounds darken:0.64];
+    [(TPFair *)self.fair setPageOpen:self.open >= 0];
     [self drawBanner];
     if (self.open < 0) {
         NSRect f = self.topFrame;
-        rounded(f, 8, [NSColor colorWithWhite:0 alpha:0.45], rgb(170, 110, 40), 2);
+        NSShadow *bs = [NSShadow new]; bs.shadowColor = [NSColor colorWithWhite:0 alpha:0.7]; bs.shadowOffset = NSMakeSize(0, -5); bs.shadowBlurRadius = 14;
+        [NSGraphicsContext saveGraphicsState]; [bs set]; rounded(f, 8, [rgb(16, 22, 12) colorWithAlphaComponent:0.82], nil, 0); [NSGraphicsContext restoreGraphicsState];
+        rounded(f, 8, nil, rgb(198, 134, 48), 2);
         rounded(NSInsetRect(f, 6, 6), 5, nil, [rgb(170, 110, 40) colorWithAlphaComponent:0.45], 1);
         [[rgb(170, 110, 40) colorWithAlphaComponent:0.5] setFill];
         for (NSInteger k = 0; k + 1 < self.rowCount; k++) NSRectFill(NSMakeRect(f.origin.x + 24, NSMaxY([self rowRect:k]), f.size.width - 48, 1));
@@ -706,7 +929,10 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
             NSRect r = [self groupRect:gi];
             int st = self.focus == self.rowCount + gi ? 2 : self.hover == 300 + gi ? 1 : 0;
             [self sign:r title:_groups[gi] primary:NO state:st];
-            label([self summary:gi], plain(14), note_c(), NSMakeRect(r.origin.x - 10, NSMaxY(r) + 6, r.size.width + 20, 20), NSTextAlignmentCenter, 0.6, YES);
+            NSString *sum = [self summary:gi];   /* (on a dark pill: the park moves behind it) */
+            CGFloat sw = [sum sizeWithAttributes:@{NSFontAttributeName: plain(14), NSKernAttributeName: @0.6}].width + 26;
+            rounded(NSMakeRect(NSMidX(r) - sw / 2, NSMaxY(r) + 5, sw, 22), 11, [rgb(12, 16, 8) colorWithAlphaComponent:0.78], [rgb(198, 134, 48) colorWithAlphaComponent:0.45], 1);
+            label(sum, plain(14), note_c(), NSMakeRect(r.origin.x - 10, NSMaxY(r) + 6, r.size.width + 20, 20), NSTextAlignmentCenter, 0.6, YES);
         }
     } else {
         NSRect p = self.panel;
@@ -758,11 +984,26 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
 BOOL tp_launcher_run(void) {
     NSRect frame = NSMakeRect(0, 0, WIN_W, WIN_H);
     TPLaunchView *v = [[TPLaunchView alloc] initWithFrame:frame];
+    /* (the signs' rects count down from the top, as TPFair's do) */
+    TPFair *fair = [[TPFair alloc] initWithSize:frame.size park:v.park soft:v.parkSoft keyart:v.keyart grass:v.grass banner:BANNER_H play:v.playRect quit:v.quitRect];
+    v.fair = fair;
+    const char *te = getenv("TP_LAUNCHER_TIME"); double t0 = te ? atof(te) : 3.0;
+    [fair setTime:t0];
     NSString *shot = NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"];
-    if (shot) {                                             /* bounded preview render */
+    if (shot) {                                             /* bounded preview render: the layers behind, the settings, the layers over */
+        int W = WIN_W * 2, H = WIN_H * 2;
+        CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGContextRef cx = CGBitmapContextCreate(NULL, W, H, 8, 0, cs, kCGImageAlphaPremultipliedLast); CGColorSpaceRelease(cs);
+        CGContextScaleCTM(cx, 2, 2);
+        [fair.back renderInContext:cx];
         NSBitmapImageRep *rep = [v bitmapImageRepForCachingDisplayInRect:v.bounds];
         [v cacheDisplayInRect:v.bounds toBitmapImageRep:rep];
-        [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:shot atomically:YES];
+        CGContextDrawImage(cx, CGRectMake(0, 0, WIN_W, WIN_H), rep.CGImage);
+        [fair.front renderInContext:cx];
+        CGImageRef img = CGBitmapContextCreateImage(cx);
+        NSBitmapImageRep *out = [[NSBitmapImageRep alloc] initWithCGImage:img];
+        [[out representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:shot atomically:YES];
+        CGImageRelease(img); CGContextRelease(cx);
         return NO;
     }
     NSWindow *w = [[NSWindow alloc] initWithContentRect:frame
@@ -770,18 +1011,32 @@ BOOL tp_launcher_run(void) {
                                                 backing:NSBackingStoreBuffered defer:NO];
     w.releasedWhenClosed = NO; w.titlebarAppearsTransparent = YES; w.titleVisibility = NSWindowTitleHidden; w.movableByWindowBackground = YES;
     w.title = @"Theme Park"; w.backgroundColor = NSColor.blackColor; w.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-    w.contentView = v;
+    NSView *root = [[NSView alloc] initWithFrame:frame]; root.wantsLayer = YES;
+    [root.layer addSublayer:fair.back];
+    v.wantsLayer = YES; v.layer.backgroundColor = NSColor.clearColor.CGColor; [root addSubview:v];   /* (drawn only when a setting changes) */
+    v.layer.zPosition = 1;
+    fair.front.zPosition = 2; [root.layer addSublayer:fair.front];
+    w.contentView = root;
     [w center];
     [w makeKeyAndOrderFront:nil];
     [w makeFirstResponder:v];
     [NSApp activateIgnoringOtherApps:YES];
+    BOOL still = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;   /* (Reduce Motion: it holds still) */
+    double start = CACurrentMediaTime() - t0;
+    static double prof_n, prof_sum, prof_max, prof_t0; const char *prof = getenv("TP_LAUNCHER_PROFILE");   /* (development: ticks' cost, then quits) */
+    NSTimer *tick = still ? nil : [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *tm) { (void)tm;
+        double a = CACurrentMediaTime(); [fair setTime:a - start]; [CATransaction flush]; double d = CACurrentMediaTime() - a;
+        if (prof) { if (!prof_t0) prof_t0 = a; prof_n++; prof_sum += d; if (d > prof_max) prof_max = d;
+                    if (a - prof_t0 > atof(prof)) { fprintf(stderr, "launcher: %.0f ticks in %.1f s (%.1f/s), %.2f ms each, longest %.2f ms\n", prof_n, a - prof_t0, prof_n / (a - prof_t0), 1000 * prof_sum / prof_n, 1000 * prof_max); v.done = YES; } } }];
+    if (tick) [NSRunLoop.mainRunLoop addTimer:tick forMode:NSRunLoopCommonModes];
     while (!v.done && w.isVisible) {
         @autoreleasepool {
-            NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]
+            NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate dateWithTimeIntervalSinceNow:1.0 / 60]
                                                inMode:NSDefaultRunLoopMode dequeue:YES];
             if (e) [NSApp sendEvent:e];
         }
     }
+    [tick invalidate];
     [w orderOut:nil];
     return v.done && v.result;
 }
