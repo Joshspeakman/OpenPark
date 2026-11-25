@@ -17,6 +17,24 @@ ROOT = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + '/../..')
 P = ROOT + '/work/e2e'; OUT = P + '/out'; LOG = P + '/data/theme-park.log'; CTL = os.path.dirname(os.path.abspath(__file__)) + '/ctl.py'
 APP = os.path.realpath(os.environ.get('E2E_APP') or ROOT + '/build/app/Theme Park Nightly.app')   # (resolved: build/ may be a symlink,
                                                     # and the running process's path, which pgrep matches, is the real one)
+def own_copy(src):
+    """The app under test, copied to work/e2e/app with its own bundle identifier (re-signed ad hoc): its user defaults
+    (window frame autosave, panel size, debug overlays, launcher choices) are the test's, never the player's. The
+    installed Nightly app and build/app share one identifier, so a run used to move the player's window. E2E_SHARED_DEFAULTS=1:
+    the built app as is."""
+    if os.environ.get('E2E_SHARED_DEFAULTS') or not os.path.isdir(src): return src
+    dst = P + '/app/Theme Park E2E.app'
+    if os.path.isdir(dst): shutil.move(dst, P + f'/app/old-{os.getpid()}-{time.time_ns()}.app')   # (a fresh copy each run)
+    for old in [x for x in (os.listdir(P + '/app') if os.path.isdir(P + '/app') else []) if x.startswith('old-')]:
+        shutil.rmtree(P + '/app/' + old, ignore_errors=True)   # (test output under work/: its own scratch)
+    os.makedirs(P + '/app', exist_ok=True)
+    subprocess.run(['cp', '-Rc', src, dst], check=True)
+    pl = dst + '/Contents/Info.plist'
+    subprocess.run(['/usr/libexec/PlistBuddy', '-c', 'Set :CFBundleIdentifier com.joshspeakman.themepark.e2e', pl], check=True)
+    subprocess.run(['codesign', '--force', '--deep', '-s', '-', dst], check=True, capture_output=True)
+    subprocess.run(['defaults', 'delete', 'com.joshspeakman.themepark.e2e'], capture_output=True)   # (each run from the defaults)
+    return os.path.realpath(dst)
+APP = own_copy(APP)
 os.environ['E2E_CONTROL'] = P + '/control.txt'
 GAME = os.environ.get('E2E_GAME') or os.path.expanduser('~/Games/ThemeParkNative/game')
 if not os.path.isdir(P + '/data/game'):
