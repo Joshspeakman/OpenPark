@@ -131,6 +131,20 @@ static NSImage *bulb_img(BOOL lit) {
     });
 }
 
+/* The controls, one table for the launch window's Controls page and the in-game card (main.m, ⌘/ or Help > Controls). */
+NSArray<NSArray<NSString *> *> *tp_controls_rows(void) {
+    return @[
+        @[@"Click", @"Select, build, place"], @[@"Right- or Control-click", @"Cancel, rotate, close panels"],
+        @[@"Pinch or ⌘-scroll", @"Zoom the park in and out"], @[@"⌘=  ⌘−  ⌘0", @"Zoom in, zoom out, actual size"],
+        @[@"Scroll, arrows, drag", @"Move the view (middle- or Option-drag)"], @[@"Hold Tab", @"Fast forward"],
+        @[@"R in the park", @"The game's 640 × 480 mode, and back"], @[@"⌘E", @"Save a picture of the whole park"],
+        @[@"Game controller", @"Sticks move; A, B click; shoulders zoom"],
+        @[@"Hold View + Menu", @"Quit from a game controller (one second)"],
+        @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘/", @"This card, in the game"],
+        @[@"⌘Q", @"Quit (save in the game first)"],
+    ];
+}
+
 @interface TPFair : NSObject
 - (instancetype)initWithSize:(NSSize)size park:(NSImage *)park soft:(BOOL)soft keyart:(NSImage *)keyart grass:(NSImage *)grass banner:(CGFloat)bannerH play:(NSRect)play quit:(NSRect)quit;
 @property (readonly) CALayer *back, *front;   /* behind the settings; over them (no clicks) */
@@ -966,16 +980,10 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     label([NSString stringWithFormat:[_branch isEqualToString:@"release"] ? @"Version %@" : @"Nightly %@", build], plain(11), [note_c() colorWithAlphaComponent:0.6], NSMakeRect(WIN_W - 216, WIN_H - 22, 200, 16), NSTextAlignmentRight, 0.5, NO);
 }
 - (void)drawControlsIn:(NSRect)p {
-    NSArray *rows = @[
-        @[@"Click", @"Select, build, place"], @[@"Right- or Control-click", @"Cancel, rotate, close panels"],
-        @[@"Pinch or ⌘-scroll", @"Zoom the park in and out"], @[@"⌘=  ⌘−  ⌘0", @"Zoom in, zoom out, actual size"],
-        @[@"Scroll, arrows, drag", @"Move the park view (middle- or Option-drag)"], @[@"Hold Tab", @"Fast forward"],
-        @[@"R in the park", @"The game's 640 × 480 mode, and back"], @[@"⌘E", @"Save a picture of the whole park"],
-        @[@"Game controller", @"Sticks move; A, B click; shoulders zoom"],
-        @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘Q", @"Quit (save in the game first)"],
-    ];
+    NSArray *rows = tp_controls_rows();
+    CGFloat step = rows.count > 12 ? 29 : 34;
     for (NSUInteger i = 0; i < rows.count; i++) {
-        CGFloat y = p.origin.y + 88 + 34 * i;
+        CGFloat y = p.origin.y + 88 + step * i;
         label([rows[i][0] uppercaseString], heavy(16), gold(), NSMakeRect(p.origin.x + 50, y, 300, 26), NSTextAlignmentLeft, 1.5, YES);
         label(rows[i][1], plain(17), cream(), NSMakeRect(p.origin.x + 350, y, p.size.width - 390, 26), NSTextAlignmentLeft, 0.4, YES);
     }

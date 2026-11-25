@@ -941,6 +941,51 @@ static int ride_video_3do(int ride) {
 }
 
 /* A window that can be key without a title bar (the borderless full screen). */
+/* The controls card in the game (⌘/, Help > Controls, or the control file's "controls"): launcher.m's table over the
+ * dimmed game, which waits while it is up (AppDelegate refreshHold). Any key or click puts it away. */
+NSArray<NSArray<NSString *> *> *tp_controls_rows(void);
+@interface TPControlsCard : NSView
+@property (copy) void (^dismiss)(void);
+@end
+@implementation TPControlsCard
+- (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)isFlipped { return YES; }
+- (void)mouseDown:(NSEvent *)e { if (self.dismiss) self.dismiss(); }
+- (void)rightMouseDown:(NSEvent *)e { if (self.dismiss) self.dismiss(); }
+- (void)keyDown:(NSEvent *)e { if (self.dismiss) self.dismiss(); }
+- (BOOL)performKeyEquivalent:(NSEvent *)e {           /* (⌘/ again: the menu's own item closes it; ⌘Q etc. go on) */
+    return [super performKeyEquivalent:e];
+}
+- (void)drawRect:(NSRect)dirty {
+    [[NSColor colorWithWhite:0 alpha:0.62] setFill]; NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+    NSArray *rows = tp_controls_rows();
+    CGFloat W = MIN(self.bounds.size.width - 40, 760), rowH = 30, H = 96 + rowH * rows.count + 44;
+    CGFloat k = MIN(1, (self.bounds.size.height - 40) / H);   /* (a small window: the card smaller) */
+    NSAffineTransform *t = [NSAffineTransform transform];
+    [t translateXBy:self.bounds.size.width / 2 yBy:self.bounds.size.height / 2]; [t scaleBy:k]; [t translateXBy:-W / 2 yBy:-H / 2];
+    [NSGraphicsContext saveGraphicsState]; [t concat];
+    NSRect card = NSMakeRect(0, 0, W, H);
+    NSBezierPath *bp = [NSBezierPath bezierPathWithRoundedRect:card xRadius:18 yRadius:18];
+    [[NSColor colorWithSRGBRed:0.20 green:0.11 blue:0.05 alpha:0.96] setFill]; [bp fill];
+    [[NSColor colorWithSRGBRed:0.93 green:0.70 blue:0.25 alpha:1] setStroke]; bp.lineWidth = 3; [bp stroke];
+    NSColor *gold = [NSColor colorWithSRGBRed:1 green:0.80 blue:0.30 alpha:1], *cream = [NSColor colorWithSRGBRed:1 green:0.96 blue:0.86 alpha:1];
+    NSMutableParagraphStyle *mid = [NSMutableParagraphStyle new]; mid.alignment = NSTextAlignmentCenter;
+    [@"CONTROLS" drawInRect:NSMakeRect(0, 24, W, 40) withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:28 weight:NSFontWeightHeavy],
+        NSForegroundColorAttributeName: gold, NSParagraphStyleAttributeName: mid, NSKernAttributeName: @3}];
+    NSDictionary *ka = @{NSFontAttributeName: [NSFont systemFontOfSize:15 weight:NSFontWeightHeavy], NSForegroundColorAttributeName: gold, NSKernAttributeName: @1};
+    NSDictionary *va = @{NSFontAttributeName: [NSFont systemFontOfSize:16], NSForegroundColorAttributeName: cream};
+    CGFloat split = W * 0.42;
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        CGFloat y = 84 + rowH * i;
+        [[rows[i][0] uppercaseString] drawInRect:NSMakeRect(36, y + 4, split - 44, rowH) withAttributes:ka];
+        [rows[i][1] drawInRect:NSMakeRect(split, y + 3, W - split - 30, rowH) withAttributes:va];
+    }
+    [@"Any key or click goes back to the game" drawInRect:NSMakeRect(0, H - 38, W, 22) withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:13],
+        NSForegroundColorAttributeName: [cream colorWithAlphaComponent:0.6], NSParagraphStyleAttributeName: mid}];
+    [NSGraphicsContext restoreGraphicsState];
+}
+@end
+
 @interface GameWindow : NSWindow
 @end
 @implementation GameWindow
@@ -955,6 +1000,7 @@ static int ride_video_3do(int ride) {
     NSWindow *_window;
     GameView *_view;
     NSView *_container;                  /* black, holds the view (full screen: below the notch) */
+    TPControlsCard *_card;               /* the controls card while it is up (⌘/) */
     BOOL _full; NSRect _windowedFrame;   /* the borderless full screen, and the window's frame before it */
     NSTimer *_timer;
     id _link;                            /* CADisplayLink (macOS 14+) */
@@ -1197,6 +1243,19 @@ static void *game_thread(void *arg) {
 - (void)pollController {
     GCExtendedGamepad *g = GCController.controllers.firstObject.extendedGamepad;
     if (!g) return;
+    {   /* quick exit from the couch: hold View (Options) and Menu together for a second */
+        static double held_since;
+        BOOL both = g.buttonOptions.pressed && g.buttonMenu.pressed;
+        if (!both) held_since = 0;
+        else if (!held_since) held_since = CACurrentMediaTime();
+        else if (CACurrentMediaTime() - held_since > 1.0) { fprintf(stderr, "controller: View + Menu held: quit\n"); held_since = 0; [NSApp terminate:nil]; return; }
+        if (g.buttonOptions.pressed) return;            /* (View held: Menu is not Escape, nothing else moves) */
+    }
+    {   static BOOL after_card;                         /* the card: A, B or Menu puts it away; then nothing until they are let go */
+        BOOL any = g.buttonA.pressed || g.buttonB.pressed || g.buttonMenu.pressed;
+        if (_card) { if (any) { [self hideControls]; after_card = YES; } return; }
+        if (after_card) { if (any) return; after_card = NO; }
+    }
     if (tp_walk_active()) {                             /* Visitor View: left stick walks, right stick looks, A follow, X hop, Y ride, Menu leaves */
         static BOOL a0, x0, y0, m0;
         float lx = g.leftThumbstick.xAxis.value, ly = g.leftThumbstick.yAxis.value, rx = g.rightThumbstick.xAxis.value, ry = g.rightThumbstick.yAxis.value;
@@ -1386,6 +1445,13 @@ static uint32_t key_of_char(unichar c) {
             fprintf(stderr, "walkshot %s drawn=%d | %s\n", [line substringFromIndex:9].UTF8String, ok, st);
         }
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
+        else if ([op isEqual:@"controls"]) [self showControls:nil];   /* the controls card, on or off */
+        else if ([op isEqual:@"controlsshot"] && p.count > 1) {        /* controlsshot PATH: the card as drawn (a test) */
+            NSView *c = _card ?: [[TPControlsCard alloc] initWithFrame:_container.bounds];
+            NSBitmapImageRep *r = [c bitmapImageRepForCachingDisplayInRect:c.bounds]; [c cacheDisplayInRect:c.bounds toBitmapImageRep:r];
+            [[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[line substringFromIndex:13] atomically:YES];
+            fprintf(stderr, "controlsshot %s up=%d paused=%d\n", [line substringFromIndex:13].UTF8String, _card != nil, _card != nil);
+        }
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
         else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
     }
@@ -1460,12 +1526,32 @@ static uint32_t key_of_char(unichar c) {
     }
 }
 
+/* Help > Controls (⌘/): the controls card over the game, which waits meanwhile; again, any key or a click: away. */
+- (void)showControls:(id)sender {
+    if (_card) { [self hideControls]; return; }
+    if (!_container) return;
+    [_view releaseInput];
+    _card = [[TPControlsCard alloc] initWithFrame:_container.bounds];
+    _card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    __weak AppDelegate *me = self; _card.dismiss = ^{ [me hideControls]; };
+    [_container addSubview:_card];
+    [_window makeFirstResponder:_card];
+    [self refreshHold];
+    fprintf(stderr, "controls card: shown\n");
+}
+- (void)hideControls {
+    if (!_card) return;
+    [_card removeFromSuperview]; _card = nil;
+    [_window makeFirstResponder:_view];
+    [self refreshHold];
+    fprintf(stderr, "controls card: away\n");
+}
 /* Hidden or minimised, the park waits (and is silent) until it is back; under a 3DO ride video it waits too (the
  * video's sound plays). Worked out from all three each time: one event alone resumed a game still minimised, or
  * under a video. */
 - (void)refreshHold {
     BOOL away = NSApp.isHidden || _window.miniaturized;
-    tp_host_pause(away || [_view playing3DO]);
+    tp_host_pause(away || [_view playing3DO] || _card != nil);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     if (away) tp_audio_set_volumes(0, 0);
     else tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
@@ -1693,6 +1779,10 @@ int main(int argc, const char **argv) {
         dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
         [viewMenu addItemWithTitle:@"Visitor View" action:@selector(visitorView:) keyEquivalent:@"V"];   /* ⇧⌘V (experimental) */
         viewItem.submenu = viewMenu;
+        NSMenuItem *helpItem = [NSMenuItem new]; [bar addItem:helpItem];
+        NSMenu *helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
+        [helpMenu addItemWithTitle:@"Controls" action:@selector(showControls:) keyEquivalent:@"/"];
+        helpItem.submenu = helpMenu;
         a.mainMenu = bar;
         AppDelegate *d = [AppDelegate new];
         a.delegate = d;
