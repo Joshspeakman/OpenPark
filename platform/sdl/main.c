@@ -1004,7 +1004,7 @@ int main(int argc, char *argv[]) {
         if (game_done) {
             fprintf(stderr, "game ended: %s\n", tp_host_status());
             if (game_result < 0 && strcmp(tp_host_status(), "quit")) {
-                char m[600]; snprintf(m, sizeof m, "%s\n\nDetails are in %s/theme-park.log.", tp_host_status(), data_root); fail(m);
+                char m[1700]; snprintf(m, sizeof m, "%s\n\nDetails are in %s/theme-park.log.", tp_host_status(), data_root); fail(m);
             }
             running = 0;
         }
