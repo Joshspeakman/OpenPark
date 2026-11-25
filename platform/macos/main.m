@@ -1497,7 +1497,8 @@ static void save_your_park(void) {
         for (int y = 0; y < h; y += 4) for (int x = 0; x < w; x += 4) { uint32_t c = px[(size_t)y * w + x]; if (!(c >> 24)) continue; cnt[(c ^ (c >> 7) ^ (c >> 13)) & 63]++; n++; }
         uint32_t top4 = 0; for (int k = 0; k < 4; k++) { int b = 0; for (int i = 1; i < 64; i++) if (cnt[i] > cnt[b]) b = i; top4 += cnt[b]; cnt[b] = 0; }
         other = n - top4;
-        if (n == 0 || other * 100 < n * 12) { free(px); fprintf(stderr, "your park: not built on yet (%.0f%% detail): the launch window keeps its picture\n", n ? 100.0 * other / n : 0); return; }
+        const char *me = getenv("TP_PARK_ART_MIN"); double min = me ? atof(me) : 10;   /* (percent; tests lower it) */
+        if (n == 0 || other * 100.0 < n * min) { free(px); fprintf(stderr, "your park: not built on yet (%.0f%% detail): the launch window keeps its picture\n", n ? 100.0 * other / n : 0); return; }
     }
     NSString *dir = [dataRoot() stringByAppendingPathComponent:@"art"], *path = [dir stringByAppendingPathComponent:@"your-park.png"];
     [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];

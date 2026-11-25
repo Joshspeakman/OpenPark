@@ -147,10 +147,12 @@ static CGFloat flipY(NSSize sz, CGFloat y) { return sz.height - y; }   /* (layer
     _sz = size; _bh = bannerH;
     _back = [CALayer layer]; _back.frame = CGRectMake(0, 0, size.width, size.height); _back.backgroundColor = CGColorCreateGenericRGB(0.04, 0.07, 0.03, 1);
     _front = [CALayer layer]; _front.frame = _back.frame;
-    /* the park below the banner: the player's own, whole-pixel sizes (3 points a park pixel: sharp on any display), else the title's lawn */
+    /* the park below the banner: the player's own at whole-pixel sizes (sharp on any display), GOG's pictures, else the title's lawn */
     CALayer *lower = [CALayer layer]; lower.frame = CGRectMake(0, 0, size.width, size.height - bannerH); lower.masksToBounds = YES; [_back addSublayer:lower];
     if (park) {
-        _parkSize = park.size; _parkScale = soft ? 0.6 : (_parkSize.width * 3 >= size.width * 1.4 && _parkSize.height * 3 >= (size.height - bannerH) * 1.3) ? 3 : 4;
+        _parkSize = park.size; _parkScale = 0.6;                       /* GOG's pictures: shrunk a little (soft) */
+        if (!soft) { _parkScale = 1;                                   /* the player's park: the smallest whole size with room to pan */
+            while (_parkScale < 4 && (_parkSize.width * _parkScale < size.width * 1.15 || _parkSize.height * _parkScale < (size.height - bannerH) * 1.15)) _parkScale++; }
         _park = [CALayer layer]; _park.contents = (__bridge id)cg_of(park); _park.magnificationFilter = kCAFilterNearest; _park.minificationFilter = kCAFilterTrilinear;
         _park.bounds = CGRectMake(0, 0, _parkSize.width * _parkScale, _parkSize.height * _parkScale); _park.anchorPoint = CGPointZero;
         [lower addSublayer:_park];

@@ -317,24 +317,6 @@ def visitor_view():
     ctl('walkcmd 1', 'sleep 2', 'walkstop', 'sleep 2'); check(to_park(), 'not back in the park after the Visitor View')
 
 @step
-def park_picture():
-    """quitting the app (as Cmd-Q does) with a park open saves the whole park's picture for the launch window: <data>/art/your-park.png,
-    a PNG at least 320x200 that isn't blank; then a new start for the steps after"""
-    pic = P + '/data/art/your-park.png'
-    if os.path.exists(pic): os.remove(pic)
-    check(to_park(), 'not in the park')
-    mark(); subprocess.run([CTL, '--timeout=10', 'quit'])
-    t = time.time()
-    while alive() and time.time() - t < 15: time.sleep(0.5)
-    check(not alive(), 'the app did not quit')
-    if 'not built on yet' in since(): return            # (a new park's empty lawn is not kept: the launch window keeps its picture)
-    check(os.path.exists(pic), 'no park picture was saved at quit')
-    d = open(pic, 'rb').read(); w, h = struct.unpack('>II', d[16:24])
-    check(d[:8] == b'\x89PNG\r\n\x1a\n' and w >= 320 and h >= 200, f'the park picture is not a PNG of a park ({w}x{h})')
-    check(len(d) > 20000, f'the park picture looks blank ({len(d)} bytes)')
-    check('your park:' in since(), 'no "your park" line in the log')
-
-@step
 def monkey():
     """three minutes of random clicks and keys (seeded): panel buttons, windows, the park; no top bar"""
     wide(False); check(to_park(), 'not in the park'); rnd = random.Random(7); t = time.time(); n = 0
@@ -389,6 +371,26 @@ def close_window():
     return in_park(frame('close'))
 
 # ---- separate runs (a fresh start each) ----
+@step
+def park_picture():
+    """quitting the app (as Cmd-Q does) with a park open saves the whole park's picture for the launch window: <data>/art/your-park.png,
+    a PNG at least 320x200 that isn't blank (a fresh start of its own, built on: a new park's empty lawn is not kept)"""
+    pic = P + '/data/art/your-park.png'
+    if os.path.exists(pic): os.remove(pic)
+    was = os.environ.get('E2E_ENV', ''); os.environ['E2E_ENV'] = (was + ' TP_PARK_ART_MIN=5.5').strip()   # (a test park's little
+    try: title(); new_game(); build()                   # building: above an empty park's ~5%) (a fresh start of its own: it quits the app)
+    finally: os.environ['E2E_ENV'] = was
+    wide(True); check(to_park(), 'not in the park')     # (the zoomable view: a 4:3 window at 1x has none, and keeps GOG's pictures)
+    mark(); subprocess.run([CTL, '--timeout=10', 'quit'])
+    t = time.time()
+    while alive() and time.time() - t < 15: time.sleep(0.5)
+    check(not alive(), 'the app did not quit')
+    check(os.path.exists(pic), 'no park picture was saved at quit')
+    d = open(pic, 'rb').read(); w, h = struct.unpack('>II', d[16:24])
+    check(d[:8] == b'\x89PNG\r\n\x1a\n' and w >= 320 and h >= 200, f'the park picture is not a PNG of a park ({w}x{h})')
+    check(len(d) > 20000, f'the park picture looks blank ({len(d)} bytes)')
+    check('your park:' in since(), 'no "your park" line in the log')
+
 @step
 def title_extras():
     """the title menu's credits (F5) and intro (F4: the DOS intro program is not there, so nothing runs)"""
