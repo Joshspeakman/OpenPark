@@ -121,6 +121,8 @@ void tp_audio_report(void) {
     long sb16_underruns(void), tp_host_card_stalls(double *longest);
     static long dry0; long dry = sb16_underruns(); double st; long stalls = tp_host_card_stalls(&st);
     long late = late_callbacks; double lw = late_worst_ms; late_callbacks = 0; late_worst_ms = 0;
+    static long held0; long held = tp_host_paused_runs();
+    if (held != held0) { held0 = held; dry0 = dry; return; }   /* (held paused meanwhile: the ring ran dry on purpose) */
     if (!late && dry == dry0 && !stalls) return;
     fprintf(stderr, "audio drop at %.0f s: late output callbacks %ld (longest %.0f ms), ran dry %ld, game stalls past the lead %ld (longest %.0f ms)\n",
             t - t0, late, lw, dry - dry0, stalls, st * 1e3);
