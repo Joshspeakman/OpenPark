@@ -993,17 +993,17 @@ double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace;                  /* developm
 /* A park frame that took more than three frames' time, in the log (always): where its time went. (Not a menu in
  * between, the game's load dialog: governed, its time is the player's.) */
 static void long_frame(uint64_t insns) {
-    extern double tp_dbg_run, tp_dbg_gov, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
-    static double run0, pass0, gov0, lock0, file0; static uint64_t ins0; static int logged; static long screen0;
+    extern double tp_dbg_run, tp_dbg_gov, tp_dbg_paused, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
+    static double run0, pass0, gov0, lock0, file0, paused0; static uint64_t ins0; static int logged; static long screen0;
     double t = now(), took = t - park_paced_at; if (!tp_view_t0) tp_view_t0 = t;
-    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && took > 0.05 && took < 30 && (logged < 500 || getenv("TP_STATS_LOG"))) {
+    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && tp_dbg_paused - paused0 < 0.01 && took > 0.05 && took < 30 && (logged < 500 || getenv("TP_STATS_LOG"))) {
         logged++;
         fprintf(stderr, "long frame at %.1f s: %.0f ms (game code %.0f ms for %.1fM instructions, of which the view's passes %.0f; "
                 "governor %.0f, view lock %.0f; files %.0f ms, %ld KB%s%s), weather %#x\n", t - tp_view_t0, took * 1e3,
                 (tp_dbg_run - run0) * 1e3, (insns - ins0) / 1e6, (tp_dbg_passes - pass0) * 1e3, (tp_dbg_gov - gov0) * 1e3,
                 (tp_dbg_lockwait - lock0) * 1e3, (tp_file_time - file0) * 1e3, tp_file_bytes / 1024, tp_file_note[0] ? ": " : "", tp_file_note, M[0x1b14cc]);
     }
-    run0 = tp_dbg_run; pass0 = tp_dbg_passes; gov0 = tp_dbg_gov; lock0 = tp_dbg_lockwait; file0 = tp_file_time; ins0 = insns;
+    paused0 = tp_dbg_paused; run0 = tp_dbg_run; pass0 = tp_dbg_passes; gov0 = tp_dbg_gov; lock0 = tp_dbg_lockwait; file0 = tp_file_time; ins0 = insns;
     tp_file_note[0] = 0; tp_file_bytes = 0; screen0 = screen_paces;
 }
 void tp_view_hook(void) {
