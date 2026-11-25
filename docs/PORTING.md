@@ -6,19 +6,24 @@ page is the contract a new platform implements, and what is already portable.
 | | macOS (Apple Silicon) | Linux | Windows |
 |---|---|---|---|
 | Recompiled game code (`tools/build_game.py`) | done | portable C, x86-64 and arm64 | portable C |
-| Runtime: DOS host, Sound Blaster model, view, Visitor View, extras (`runtime/`) | done | compiles (CI); `runtime/platform_posix.c` | needs `platform_windows.c`, and pthreads or a shim |
-| Platform layer (`runtime/platform.h`) | `platform/macos/platform_macos.c` | `runtime/platform_posix.c` (untested in play) | to write |
-| App: window, sound output, input, launcher (`platform/<os>/`) | `platform/macos/` (Cocoa, Core Audio) | to write | to write |
-| Build of the app | `tools/build_app.sh` | to write | to write |
-| Owned-package extraction (`tools/prepare.py`) | GOG's Mac `.pkg` | GOG's Windows installer: to write | GOG's Windows installer: to write |
+| Runtime: DOS host, Sound Blaster model, view, Visitor View, extras (`runtime/`) | done | compiles (CI) | cross-compiles (MinGW-w64); `runtime/platform.h` file shims |
+| Platform layer (`runtime/platform.h`) | `platform/macos/platform_macos.c` | `runtime/platform_posix.c` + `runtime/platform_pool.c` | `platform/windows/platform_windows.c` + `runtime/platform_pool.c` (branch `pc`) |
+| App: window, sound output, input (`platform/<os>/`) | `platform/macos/` (Cocoa, Core Audio) | `platform/sdl/` (SDL2; branch `pc`): CI-built, run on the Mac with the real game | `platform/sdl/` (branch `pc`): CI-built (MSYS2), not run on Windows |
+| Launch window | `platform/macos/launcher.m` | to write (settings.ini for now) | to write (settings.ini for now) |
+| Build of the app | `tools/build_app.sh` | `tools/build_linux.sh` (branch `pc`, not run with the game) | `tools/build_windows.sh` (branch `pc`, not run) |
+| Owned-package extraction (`tools/prepare.py`) | GOG's Mac `.pkg` (xar) | the same `.pkg` through `tools/pkgextract.py` | the same `.pkg` through `tools/pkgextract.py`; GOG's Windows installer: to write |
 | Extras importer (`tools/extras.py`) | done | portable Python, except mounting `.iso`/`.img` (`hdiutil`) | portable, except mounting |
+
+Branch `pc` and its state: `docs/PC-HANDOFF.md`.
 
 CI (`.github/workflows/ci.yml`) runs everything that needs no game files on Ubuntu and macOS:
 - the parser and host tests;
 - the CPU model against Unicorn;
 - `tests/check_portable.sh`: every runtime file compiles for arm64 and x86-64, with platform-only calls as
   errors;
-- the Visitor View tests.
+- the Visitor View tests;
+- `tests/check_sdl.sh` (branch `pc`): the SDL2 app built on Ubuntu (clang and gcc) and Windows (MSYS2 CLANG64)
+  against stand-ins for the game (`tests/stub_game.c`), and stopped cleanly without game files.
 
 ## What is already portable
 
@@ -40,10 +45,10 @@ CI (`.github/workflows/ci.yml`) runs everything that needs no game files on Ubun
 
 | Function | What it does | macOS | POSIX |
 |---|---|---|---|
-| `tp_plat_realtime_thread(period)` | asks for the game thread to be woken on time | Mach time-constraint policy | `SCHED_FIFO` if allowed |
+| `tp_plat_realtime_thread(period)` | asks for the game thread to be woken on time | Mach time-constraint policy | `SCHED_RR` with `TP_RT_SCHED=1` (Windows: HIGHEST + MMCSS) |
 | `tp_plat_game_thread()` | marks the game thread interactive | QoS user-interactive | nothing |
 | `tp_plat_sleep(seconds)` | a precise short sleep | `mach_wait_until` | `clock_nanosleep` |
-| `tp_plat_parallel_for(n, ctx, fn)` | the compositor's row bands across the cores | `dispatch_apply_f` | serial for now |
+| `tp_plat_parallel_for(n, ctx, fn)` | the compositor's row bands across the cores | `dispatch_apply_f` | a thread pool (`runtime/platform_pool.c`) |
 
 ## What a platform's app provides (`platform/macos/` is the reference)
 
@@ -72,11 +77,6 @@ CI (`.github/workflows/ci.yml`) runs everything that needs no game files on Ubun
 
 ## Open items
 
-- **Linux:** an app (SDL2 is the likely choice for the window, sound and input), its build script, and
-  `prepare.py` for GOG's Windows installer (InnoSetup: `innoextract`, or a Python reader).
-- **Windows:** the same, plus `platform_windows.c` (`QueryPerformanceCounter`, waitable timers, a thread pool)
-  and pthreads (MinGW provides them; with MSVC, a shim).
-- **The development checks:** the Unicorn oracle in `tests/check_macos.sh` is architecture-neutral in
-  principle; the script still names macOS and links the macOS platform file.
-- **Scaling:** `tp_plat_parallel_for` is serial on POSIX; a thread pool would bring the compositor's speed up
-  to macOS's on large views.
+See `docs/PC-HANDOFF.md` (branch `pc`): the proof with the game on x86-64 (`tests/check_native.sh --park`), a played
+session on each system, then the app-layer parity list (launch window, extras' music and videos, quick exit and the
+controls card, the audit's app-layer fixes).

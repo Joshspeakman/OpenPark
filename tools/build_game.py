@@ -457,7 +457,7 @@ int tp_dispatch(Ctx *c) {
         obj = path.with_suffix('.o')
         if same and obj.exists() and obj.stat().st_mtime >= path.stat().st_mtime:
             return obj
-        subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(path), '-o', str(obj)], check=True)
+        subprocess.run([*toolchain.cc(), args.opt, '-c', *toolchain.pic(), '-w', '-I', inc, str(path), '-o', str(obj)], check=True)
         return obj
 
     with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as pool:
@@ -480,7 +480,7 @@ int tp_dispatch(Ctx *c) {
 
 def link_game(args, out, objects, inc, image):
     runtime = out / 'runtime.o'
-    subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
+    subprocess.run([*toolchain.cc(), args.opt, '-c', *toolchain.pic(), '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
     library = out / 'game.dylib'
     if not args.prefix:    # a prefixed image is linked into the app beside the main one
         subprocess.run([*toolchain.cc(), *toolchain.shared(), *map(str, objects), str(runtime), '-o', str(library)], check=True)

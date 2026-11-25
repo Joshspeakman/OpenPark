@@ -167,7 +167,7 @@ static int save_trailer_read(int fd, SaveTrailer *tr) {
     struct stat st; uint8_t t[TRAILER_N];   /* (fstat, not lseek: the game's position in the file stays) */
     if (fstat(fd, &st)) return 0;
     off_t end = st.st_size;
-    if (end < TRAILER_N || pread(fd, t, TRAILER_N, end - TRAILER_N) != TRAILER_N || memcmp(t + 16, "TPX1", 4)) return 0;
+    if (end < TRAILER_N || tp_pread(fd, t, TRAILER_N, end - TRAILER_N) != TRAILER_N || memcmp(t + 16, "TPX1", 4)) return 0;
     tr->w = (uint16_t)(t[0] | t[1] << 8); memcpy(&tr->things, t + 2, 4); tr->rules = (int8_t)t[6];
     tr->months = (uint16_t)(t[8] | t[9] << 8); tr->ramp = (uint16_t)(t[10] | t[11] << 8);
     return (tr->w == 64 || tr->w == 128) && tr->rules >= 0 && tr->rules <= 2;
@@ -679,7 +679,7 @@ static int resolve(const char *name, char *out, size_t size) {
 static void mkparents(const char *path) {
     char buf[1024]; snprintf(buf, sizeof buf, "%s", path);
     for (char *p = buf + strlen(overlay_root) + 1; *p; p++)
-        if (*p == '/') { *p = 0; mkdir(buf, 0755); *p = '/'; }
+        if (*p == '/') { *p = 0; tp_mkdir(buf); *p = '/'; }
 }
 static int overlay_path(const char *name, char *out, size_t size) {
     char tmp[1024];
@@ -1225,7 +1225,7 @@ int tp_host_init(const char *game_dir, const char *overlay_dir, int det, const T
     if (s) script = *s;
     snprintf(game_root, sizeof game_root, "%s", game_dir);
     snprintf(overlay_root, sizeof overlay_root, "%s", overlay_dir);
-    mkdir(overlay_root, 0755);
+    tp_mkdir(overlay_root);
     for (int i = 0; i < 20; i++) { if (handles_fd[i] >= 0) close(handles_fd[i]); handles_fd[i] = -1; }
     /* Full reset: the app restarts the game in-process (THEME.BAT errorlevel >= 10). */
     memset(bases, 0, sizeof bases); memset(has_base, 0, sizeof has_base);
