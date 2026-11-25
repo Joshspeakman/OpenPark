@@ -335,6 +335,21 @@ def visitor_view():
     ctl('walkcmd 1', 'sleep 2', 'walkstop', 'sleep 2'); check(to_park(), 'not back in the park after the Visitor View')
 
 @step
+def controls_card():
+    """Help > Controls (⌘/): the card is drawn, the game waits under it (its frames stop changing), then goes on"""
+    check(to_park(), 'not in the park')
+    mark(); ctl('controls', 'sleep 1', f'controlsshot {OUT}/controls-card.png', 'sleep 0.5')
+    check('controls card: shown' in since(), 'the card did not show')
+    check(os.path.getsize(f'{OUT}/controls-card.png') > 20000, 'the card picture is empty')
+    a = frame('cc-up1').digest; ctl('sleep 2'); b = frame('cc-up2').digest
+    check(a == b, 'the game kept running under the card')
+    mark(); ctl('controls', 'sleep 0.5')
+    check('controls card: away' in since(), 'the card did not go away')
+    t = time.time(); moved = False
+    while time.time() - t < 10 and not moved: ctl('sleep 1'); moved = frame('cc-after').digest != b
+    check(moved, 'the game did not go on after the card')
+
+@step
 def monkey():
     """three minutes of random clicks and keys (seeded): panel buttons, windows, the park; no top bar"""
     wide(False); check(to_park(), 'not in the park'); rnd = random.Random(7); t = time.time(); n = 0

@@ -282,7 +282,7 @@ extern uint64_t tp_insns;
 static double gov_rate;
 static double emu_t; static uint64_t emu_last; static int emu_on = -1;
 volatile double tp_frame_paced_at;                       /* steady pacing: when a park frame was last released (view.c) */
-double tp_dbg_run, tp_dbg_gov;                           /* (development: qol.c's tick gaps) */
+double tp_dbg_run, tp_dbg_gov, tp_dbg_paused;            /* (development: qol.c's tick gaps; paused: view.c's long-frame log) */
 /* The game's file activity, for view.c's long-frame log: the files opened or made since it last looked, and
  * the time and bytes of reads and writes. */
 char tp_file_note[160]; double tp_file_time; long tp_file_bytes;
@@ -1333,7 +1333,9 @@ void tp_host_pause(int on) { paused = on; }       /* the app is hidden or minimi
 int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
     if (stopped) return -1;
     if (paused && !deterministic) {                /* the timer skips the stall on resume (realtime_events) */
-        struct timespec ts = {0, 20000000}; nanosleep(&ts, NULL); gov_t0 = 0;
+        struct timespec ts = {0, 20000000}; double p0 = now_s(); nanosleep(&ts, NULL); gov_t0 = 0;
+        tp_dbg_paused += now_s() - p0;
+        card_allow = 0;                            /* (the card starts afresh on resume: a pause is not a stall to report) */
         return quit_requested ? (snprintf(status, sizeof status, "quit"), stopped = 1, 1) : 0;
     }
     double deadline = now_s() + ms / 1000.0;
