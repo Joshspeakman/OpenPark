@@ -1599,6 +1599,8 @@ static void save_your_park(void) {
               fprintf(stderr, "your park: %dx%d picture for the launch window\n", w, h); }
 }
 - (void)applicationWillTerminate:(NSNotification *)n {
+    if (game_started && !game_done) { tp_audio_set_volumes(0, 0); tp_host_pause(0); }   /* (paused: under the card, hidden or
+                                                        * minimised, the game thread could not make the park's picture; silent now) */
     save_your_park();
     tp_host_quit();
     if (game_started) for (int i = 0; i < 100 && !game_done; i++) usleep(10000);   /* (the game thread out first: it sends the synth MIDI) */

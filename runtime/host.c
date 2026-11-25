@@ -1330,11 +1330,12 @@ uint8_t *tp_host_memory(void) { return mem; }
 int tp_host_is_realtime(void) { return !deterministic; }
 
 void tp_host_pause(int on) { paused = on; }       /* the app is hidden or minimised: the game waits */
+static volatile long paused_runs; long tp_host_paused_runs(void) { return paused_runs; }   /* (passes held: the drop report skips them) */
 int tp_host_run(uint32_t quantum, uint32_t blocks_limit, double ms) {
     if (stopped) return -1;
     if (paused && !deterministic) {                /* the timer skips the stall on resume (realtime_events) */
         struct timespec ts = {0, 20000000}; double p0 = now_s(); nanosleep(&ts, NULL); gov_t0 = 0;
-        tp_dbg_paused += now_s() - p0;
+        tp_dbg_paused += now_s() - p0; paused_runs++;
         card_allow = 0;                            /* (the card starts afresh on resume: a pause is not a stall to report) */
         return quit_requested ? (snprintf(status, sizeof status, "quit"), stopped = 1, 1) : 0;
     }
