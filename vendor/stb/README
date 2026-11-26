@@ -1,0 +1,3 @@
+stb (https://github.com/nothings/stb), commit 6b5799bae8a1fe3792691ef4b72ae26434c3e799, fetched 2026-11-25.
+Public domain or MIT (LICENSE). Used by platform/sdl: stb_truetype (the launch window's type), stb_image (its art),
+stb_image_write (its test renders).

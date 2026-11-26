@@ -10,16 +10,22 @@
 #define FULL_KEY "⌃⌘F"
 #define SYS_PTR "The Mac's"
 #define SYNTH_NOTE "The Mac's synthesizer; → picks a SoundFont"
+#define FOLDER "Show in Finder"
+#define ENTER "Return"
 #elif defined(_WIN32)
 #define CMD "Ctrl+"
 #define FULL_KEY "F11"
 #define SYS_PTR "Windows'"
 #define SYNTH_NOTE "Windows' own synthesizer; → picks a SoundFont"
+#define FOLDER "Show in Explorer"
+#define ENTER "Enter"
 #else
 #define CMD "Ctrl+"
 #define FULL_KEY "F11"
 #define SYS_PTR "The system's"
 #define SYNTH_NOTE "FluidSynth with the system's SoundFont; → picks another"
+#define FOLDER "Open Folder"
+#define ENTER "Enter"
 #endif
 #define N(a) ((int)(sizeof a / sizeof a[0]))
 
@@ -35,7 +41,7 @@ static const TpRow r_speed = {"Game Speed", "Cycles", TP_ROW_CHOICE, N(c_speed),
 static const TpRow r_intro = {"Intro", "PlayIntro", TP_ROW_BOOL, N(c_intro), c_intro};
 static const TpRow r_lang = {"Language", "Language", TP_ROW_CHOICE, N(c_lang), c_lang};
 static const TpRow r_pacing = {"Frame Pacing", "SteadyPacing", TP_ROW_BOOL, N(c_pacing), c_pacing};
-static const TpRow r_files = {"Saved Parks", NULL, TP_ROW_FILES, 0, NULL, "Your saved parks' folder", "Show in Finder"};
+static const TpRow r_files = {"Saved Parks", NULL, TP_ROW_FILES, 0, NULL, "Your saved parks' folder", FOLDER};
 
 /* ---- Display ---- */
 static const TpChoice c_screen[] = {{0, "Window", "A window you can resize; " FULL_KEY " switches"}, {1, "Full Screen", "The whole display; " FULL_KEY " switches"}};
@@ -202,7 +208,7 @@ const TpAppSpec *tp_app_spec(void) {
 #endif
             "Build the rides, hire the staff, set the prices: and keep\nthe crowds screaming for the right reasons.",
             "LOOP THE LOOP", "Hold on tight. Keep your burger down.", "NOW OPEN",
-            "Click a ticket or a tile  ·  arrows move  ·  Return chooses  ·  Esc quits",
+            "Click a ticket or a tile  ·  arrows move  ·  " ENTER " chooses  ·  Esc quits",
             "Click the arrows or a row  ·  ↑ ↓ choose  ·  ← → change  ·  Esc goes back"};
         ready = 1;
     }

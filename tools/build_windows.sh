@@ -70,16 +70,20 @@ if [[ -n ${TP_FLUIDSYNTH:-} ]]; then
   SYNTH=(-DTP_FLUIDSYNTH $(pkg-config --cflags fluidsynth)); SYNTH_LIBS=($(pkg-config --libs fluidsynth))
 fi
 RUNTIME=(runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c
-         runtime/walk.c runtime/bigmap.c runtime/freemode.c runtime/cinepak.c runtime/sha256.c
+         runtime/walk.c runtime/bigmap.c runtime/freemode.c runtime/cinepak.c runtime/sha256.c runtime/app_spec.c
          platform/windows/platform_windows.c runtime/platform_pool.c)
+# The app: the game's window, its sound and settings, and the launch window (launcher.c, drawn by draw.c and midway.c).
+APP=(platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c platform/sdl/launcher.c platform/sdl/draw.c platform/sdl/midway.c)
+BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 "$CC" -O2 -Wall -Wno-unused-function -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I "$INC" -I runtime $(pkg-config --cflags sdl2) ${SYNTH[@]+"${SYNTH[@]}"} \
-  platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c "${RUNTIME[@]}" work/app-release/game.a work/app-release-intro/game.a "$OUT/app.res.o" \
+  -DTP_BUILD="\"$BUILD_ID\"" "${APP[@]}" "${RUNTIME[@]}" work/app-release/game.a work/app-release-intro/game.a "$OUT/app.res.o" \
   ${SYNTH_LIBS[@]+"${SYNTH_LIBS[@]}"} $(pkg-config --static --libs sdl2) -lz -lwinmm -lpthread -o "$NEW/ThemePark.exe"
 if [[ -n ${TP_FLUIDSYNTH:-} ]]; then                 # (FluidSynth links dynamically: its DLLs beside the program)
   ldd "$NEW/ThemePark.exe" | awk '/clang64|clangarm64|ucrt64/ {print $3}' | while read -r dll; do cp "$dll" "$NEW/"; done
 fi
 "$PYTHON" tools/export_image.py "$EXE" "$NEW/MAIN.TPIMG" >/dev/null
 "$PYTHON" tools/export_image.py "$INTRO" "$NEW/INTRO.TPIMG" >/dev/null
+mkdir -p "$NEW/fonts"; cp platform/sdl/fonts/* "$NEW/fonts/"      # (the launch window's type and its licences)
 
 # Replaced things go to the Recycle Bin, never deleted.
 recycle() {

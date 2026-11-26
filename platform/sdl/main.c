@@ -17,6 +17,9 @@
 #include "host.h"
 #include "platform.h"
 #include "app.h"
+#ifndef TP_BUILD
+#define TP_BUILD "dev"                                   /* (the build scripts pass the commit) */
+#endif
 
 struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
@@ -589,6 +592,35 @@ static void save_picture(void) {
     set_subtitle(note);
 }
 
+/* At quit, with a park open: the whole park's picture into <data>/art/your-park.png, the launch window's backdrop (the
+ * player's own park, drawn pixel-sharp), as the Mac's save_your_park (main.m:1571-1600). Made only here: it renders every
+ * pass, a hitch the player would see mid-game. */
+static void save_your_park(void) {
+    if (game_done || !tp_view_live() || getenv("TP_NO_PARK_ART")) return;
+    tp_view_request_poster();
+    double t0 = now(); uint32_t *px = NULL; int w = 0, h = 0;
+    while (!tp_view_take_poster(&px, &w, &h) && now() - t0 < 2.0) SDL_Delay(20);
+    if (!px) return;
+    if (w < 320 || h < 200) { free(px); return; }
+    {   /* a park worth showing: built on (not a new park's empty lawn). The share of pixels off the commonest colours:
+         * grass is a few shades; paths, rides, shops and people bring many */
+        uint32_t cnt[64] = {0}; size_t n = 0, other;
+        for (int y = 0; y < h; y += 4) for (int x = 0; x < w; x += 4) { uint32_t c = px[(size_t)y * w + x]; if (!(c >> 24)) continue; cnt[(c ^ (c >> 7) ^ (c >> 13)) & 63]++; n++; }
+        uint32_t top4 = 0; for (int k = 0; k < 4; k++) { int b = 0; for (int i = 1; i < 64; i++) if (cnt[i] > cnt[b]) b = i; top4 += cnt[b]; cnt[b] = 0; }
+        other = n - top4;
+        const char *me = getenv("TP_PARK_ART_MIN"); double min = me ? atof(me) : 10;   /* (percent; tests lower it) */
+        if (n == 0 || other * 100.0 < n * min) {
+            free(px); fprintf(stderr, "your park: not built on yet (%.0f%% detail): the launch window keeps its picture\n", n ? 100.0 * other / n : 0); return;
+        }
+    }
+    char dir[1100], path[1200], part[1210];
+    snprintf(dir, sizeof dir, "%s/art", data_root); tp_mkdir(dir);
+    snprintf(path, sizeof path, "%s/your-park.png", dir); snprintf(part, sizeof part, "%s.part", path);
+    int ok = tp_host_png_rgba(part, px, w, h); free(px);
+    if (ok) { remove(path); rename(part, path); fprintf(stderr, "your park: %dx%d picture for the launch window\n", w, h); }
+    else remove(part);
+}
+
 /* What the window shows (zoomed or not), 1280x960 or wider; a game window in the wide view: what is shown. */
 static void vshot_size(int *ow, int *oh) {
     *oh = 960; *ow = 1280; Rect vb = bounds();
@@ -942,15 +974,24 @@ int main(int argc, char *argv[]) {
         fail(m); SDL_Quit(); return 1;
     }
     setenv("TP_IMAGE", image_path, 1);
-    if (!getenv("TP_CYCLES")) tp_host_set_cycles(settings_getf("Cycles"));
-    snprintf(intro_path, sizeof intro_path, "%sINTRO.TPIMG", base_dir);
-    if (!settings_get("PlayIntro") || getenv("TP_SKIP_INTRO") || !exists(intro_path)) intro_path[0] = 0;
     tp_mkdir(saves_dir);
     if (!getenv("TP_LOG_STDERR")) {
         char logp[1100]; snprintf(logp, sizeof logp, "%s/theme-park.log", data_root);
         if (freopen(logp, "a", stderr)) setvbuf(stderr, NULL, _IOLBF, 1024);   /* (a file: whole lines at once, so the log is current) */
     }
     { time_t t = time(NULL); fprintf(stderr, "--- Theme Park started %s", ctime(&t)); }
+    /* The launch window first, as the Mac's (main.m:1129-1130): what it sets is read below. Self-tests skip it;
+     * TP_LAUNCHER_SHOT renders it and ends. */
+    {
+        const char *shot = getenv("TP_LAUNCHER_SHOT");
+        if ((shot && *shot) || !self_test) {
+            int play = tp_launcher_run(data_root, base_dir, TP_BUILD);
+            if (!play || (shot && *shot)) { SDL_Quit(); return 0; }
+        }
+    }
+    if (!getenv("TP_CYCLES")) tp_host_set_cycles(settings_getf("Cycles"));
+    snprintf(intro_path, sizeof intro_path, "%sINTRO.TPIMG", base_dir);
+    if (!settings_get("PlayIntro") || getenv("TP_SKIP_INTRO") || !exists(intro_path)) intro_path[0] = 0;
 
     win = SDL_CreateWindow("Theme Park", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 720,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | (self_test ? SDL_WINDOW_HIDDEN : 0));   /* self-tests stay in the background */
@@ -1022,6 +1063,10 @@ int main(int argc, char *argv[]) {
             running = 0;
         }
     }
+    /* (as the Mac's applicationWillTerminate: held games run again, silent, so the game thread can make the park's
+     * picture) */
+    if (!game_done) { tp_audio_set_volumes(0, 0); tp_host_pause(0); }
+    save_your_park();
     tp_host_quit();
     for (int i = 0; i < 100 && !game_done; i++) SDL_Delay(10);
     tp_audio_stop();

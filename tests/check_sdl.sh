@@ -10,7 +10,7 @@ CC=${CC:-cc}
 command -v sdl2-config >/dev/null || command -v pkg-config >/dev/null || { echo 'SDL2 development files not found' >&2; exit 1; }
 SDL_CFLAGS=$(sdl2-config --cflags 2>/dev/null || pkg-config --cflags sdl2); SDL_LIBS=$(sdl2-config --libs 2>/dev/null || pkg-config --libs sdl2)
 RUNTIME=(runtime/host.c runtime/sha256.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c
-         runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c runtime/cinepak.c)
+         runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c runtime/cinepak.c runtime/app_spec.c)
 case $(uname -s) in
   Darwin) PLAT=(platform/macos/platform_macos.c); LIBS=(-lz) ;;
   MINGW*|MSYS*|CYGWIN*) PLAT=(platform/windows/platform_windows.c runtime/platform_pool.c); LIBS=(-lz -lwinmm -lpthread) ;;
@@ -26,8 +26,14 @@ INC=vendor/freedom-force-recomp/recomp/runtime
 "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Werror -I "$INC" -I runtime $SDL_CFLAGS -c platform/sdl/audio.c -o build/check-sdl/audio.o
 # shellcheck disable=SC2086
 "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Werror -I runtime $SDL_CFLAGS -c platform/sdl/settings.c -o build/check-sdl/settings.o
+# The launch window and its drawing (draw.c compiles the vendored stb libraries, which it quiets itself)
+for f in launcher draw midway; do
+  # shellcheck disable=SC2086
+  "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Werror -I runtime $SDL_CFLAGS -c platform/sdl/$f.c -o build/check-sdl/$f.o
+done
 # shellcheck disable=SC2086
 "$CC" -std=gnu11 -O1 -w -I "$INC" -I runtime build/check-sdl/main.o build/check-sdl/audio.o build/check-sdl/settings.o \
+  build/check-sdl/launcher.o build/check-sdl/draw.o build/check-sdl/midway.o \
   "${RUNTIME[@]}" "${PLAT[@]}" tests/stub_game.c $SDL_LIBS "${LIBS[@]}" -o build/check-sdl/ThemePark
 echo "the SDL app compiles and links ($(uname -s))"
 scratch=$(mktemp -d)
