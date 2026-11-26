@@ -1071,6 +1071,14 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
             SDL_RenderPresent(ren);
             double spent = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - now;
             total += spent; ticks++; if (spent > longest) longest = spent;
+            /* No faster than the display, and at most 120 a second: a present that doesn't wait for vsync (as on a
+             * 209 Hz display here, 317 frames a second) would otherwise spin. */
+            {
+                SDL_DisplayMode dm; double period = 1.0 / 120;
+                if (!SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(win), &dm) && dm.refresh_rate > 0 && dm.refresh_rate < 120) period = 1.0 / dm.refresh_rate;
+                double left = period - ((double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - now);
+                if (left > 0.001) SDL_Delay((Uint32)(left * 1000));
+            }
             if (profile > 0 && now - start >= profile) {
                 fprintf(stderr, "launcher: %d ticks in %.1f s (%.0f/s), %.2f ms each, longest %.1f ms\n", ticks, now - start, ticks / (now - start),
                         1000 * total / ticks, 1000 * longest);
