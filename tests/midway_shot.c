@@ -91,7 +91,8 @@ int main(int argc, char **argv) {
     } else if (pw > 0 && ph > 0) park = checker(pw, ph, 0);
     MidwayLayout lay = {box(44, 30, 584, 166), box(664, 30, 292, 412), box(734, 588, 222, 64), box(88, 80, 496, 94)};
     Uint64 f = SDL_GetPerformanceFrequency(), c0 = SDL_GetPerformanceCounter();
-    Midway *m = midway_new(r, sc, park, soft, lay);
+    Midway *m = midway_new(r, sc, soft ? NULL : park, lay);
+    if (m && soft) midway_set_backdrop(m, park, 1);
     Uint64 c1 = SDL_GetPerformanceCounter();
     img_free(park);
     if (!m) { fprintf(stderr, "midway_new failed: %s\n", SDL_GetError()); return 1; }

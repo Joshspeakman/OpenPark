@@ -344,7 +344,8 @@ static void make_park(Midway *m, const Image *park, int soft) {
         img_free(k);
     }
 }
-void midway_set_park(Midway *m, const Image *park, int soft) { if (m) make_park(m, park, soft); }
+void midway_set_backdrop(Midway *m, const Image *park, int soft) { if (m) make_park(m, park, soft); }
+void midway_set_park(Midway *m, const Image *park) { midway_set_backdrop(m, park, 0); }
 
 Image *midway_park_from_shots(const Image *const *shots, int n) {
     if (n < 1 || !shots[0]) return NULL;
@@ -386,7 +387,7 @@ static int ring(Midway *m, Box r, float step) {
     return m->nbulb;
 }
 
-Midway *midway_new(SDL_Renderer *r, float scale, const Image *park, int soft, MidwayLayout lay) {
+Midway *midway_new(SDL_Renderer *r, float scale, const Image *park, MidwayLayout lay) {
     if (!r || scale <= 0) return NULL;
     Midway *m = calloc(1, sizeof *m);
     if (!m) return NULL;
@@ -408,7 +409,7 @@ Midway *midway_new(SDL_Renderer *r, float scale, const Image *park, int soft, Mi
     for (int q = 0; q < QUADS; q++)
         for (int k = 0; k < 6; k++) m->index[q * 6 + k] = q * 4 + corner[k];
     m->fill = generic(0.04f, 0.04f, 0.10f, 1);   /* the back layer's colour */
-    make_park(m, park, soft);
+    make_park(m, park, 0);
     int ok = 1;
     {   Spec sp = {160, 760, 80, 760, 1, paint_beam, NULL}; ok &= sheet(m, &sp, 1, &m->beam); }
     {   /* the sparks (five colours: coral, gold, sky, lilac, green) and the mote */

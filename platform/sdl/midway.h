@@ -21,9 +21,9 @@
  * t in seconds, starting at MIDWAY_T0 (the Mac's TP_LAUNCHER_TIME default). Under reduce motion, draw every frame at
  * MIDWAY_T0 and don't advance it (the Mac stops its timer and keeps that frame).
  *
- * Changes from the planned interface: midway_new and midway_set_park take `soft` (the Mac shows GOG's screenshots at 0.6
- * of their size, the player's own park at the smallest whole size 1..4 that leaves room to pan); midway_park_from_shots
- * builds GOG's backdrop from its park screenshots; midway_upload and midway_premultiplied; MIDWAY_T0. The Mac's bulbs
+ * Added to the planned interface: midway_set_backdrop (GOG's screenshots: the Mac shows them at 0.6 of their size, "soft",
+ * where the player's own park is shown at the smallest whole size 1..4 that leaves room to pan); midway_park_from_shots
+ * builds that backdrop from GOG's park screenshots; midway_upload and midway_premultiplied; MIDWAY_T0. The Mac's bulbs
  * don't react to hover or focus (only the clock and an open page move them), so there are no parameters for that. */
 #ifndef TP_MIDWAY_H
 #define TP_MIDWAY_H
@@ -37,11 +37,14 @@ typedef struct { Box sign, poster, play, logo; } MidwayLayout;   /* points, top-
                                                                   * the logo (or the THEME PARK words) is drawn in; the
                                                                   * glint sweeps across it, clipped to it */
 
-/* scale: device pixels per point. park: the player's park picture (soft 0), or GOG's park screenshots composed by
- * midway_park_from_shots (soft 1); premultiplied; NULL: no picture, the back fill under an opaque dusk. The picture is
- * uploaded: the caller may free it after the call. NULL if the renderer can't make the sprites. */
-Midway *midway_new(SDL_Renderer *r, float scale, const Image *park, int soft, MidwayLayout lay);
-void midway_set_park(Midway *m, const Image *park, int soft);  /* another picture (or none); the dusk follows */
+/* scale: device pixels per point. park: the player's park picture (your-park.png), premultiplied; NULL: no picture, the
+ * back fill under an opaque dusk (or call midway_set_backdrop with GOG's). Pictures are uploaded: the caller may free
+ * them after the call. NULL if the renderer can't make the sprites. */
+Midway *midway_new(SDL_Renderer *r, float scale, const Image *park, MidwayLayout lay);
+void midway_set_park(Midway *m, const Image *park);             /* another picture of the player's park (or none) */
+/* The backdrop, either kind: soft 0 the player's park, soft 1 GOG's park screenshots (midway_park_from_shots); NULL none.
+ * The dusk follows (see-through over a picture, opaque without one). */
+void midway_set_backdrop(Midway *m, const Image *park, int soft);
 void midway_draw_back(Midway *m, double t);                    /* fill, park, dusk, searchlights, fireworks */
 void midway_draw_front(Midway *m, double t, int page_open);    /* bunting, bulbs (sign, poster, Play), glint, motes. With
                                                                 * a page open the sign's and poster's bulbs, the glint and
