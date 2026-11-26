@@ -1,21 +1,35 @@
-# OpenPark
+<p align="center">
+  <img src="media/readme-banner.png" alt="OpenPark: Bullfrog's Theme Park, natively, for macOS, Windows and Linux" width="900">
+</p>
 
-[![Buy me a Continue on Ko-fi](https://img.shields.io/badge/Buy_me_a_Continue_%7C_%245-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/speakerjosh)
+<p align="center">
+  <a href="https://ko-fi.com/speakerjosh"><img src="https://img.shields.io/badge/Buy_me_a_Continue_%7C_%245-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Buy me a Continue on Ko-fi"></a>
+</p>
+
+# OpenPark
 
 **Theme Park, natively.** Bullfrog's Theme Park (1994) running as native code. The DOS game's own code is statically recompiled to C and
 compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU emulator at run time. macOS on Apple
-Silicon is the first platform; Windows and Linux are next ([docs/PORTING.md](docs/PORTING.md)). You
-build it from your own copy of the game; this repository contains no game code, data or art.
+Silicon is playable today; Windows and Linux are well under way ([Platforms](#platforms)). You build it from your own
+copy of the game; this repository contains no game code, data or art.
 
-![A park in full swing, widescreen](docs/screenshots/park.jpg)
+![Opening day: the bus pulls in and the gates swing open, in a widescreen window](docs/screenshots/opening-day.jpg)
 
-| Zoomed out | Zoomed in |
+| | |
 |---|---|
-| ![Zoomed out over a busy park](docs/screenshots/zoomed-out.jpg) | ![Zoomed in on the Super Spinner](docs/screenshots/zoomed-in.jpg) |
-| **Visitor View (experimental)** | **The original ride videos** |
-| ![Walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The Super Spinner's ride video](docs/screenshots/ride-video.jpg) |
-| **The launch window** | |
-| ![The launch window](media/screenshots/screenshot-launcher.png) | |
+| ![Burger o'clock: zoomed in close on the visitors](docs/screenshots/burger-oclock.jpg) | ![Haunted House Row: panning the park at any zoom](docs/screenshots/haunted-row.jpg) |
+| ![The whole park in the game's own 640 x 480 mode](docs/screenshots/whole-park.jpg) | ![The controls card over the paused park](docs/screenshots/help-at-hand.jpg) |
+| ![Visitor View: walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The original ride films](docs/screenshots/ride-films.jpg) |
+
+### The launch window
+
+![The launch window: the midway at dusk](docs/screenshots/launcher-main.jpg)
+
+| ![The Display page](docs/screenshots/launcher-display.jpg) | ![The Sound page](docs/screenshots/launcher-sound.jpg) |
+|---|---|
+
+The title on a lit marquee sign, the settings as ride tickets, quick settings along the bottom, an ADMIT ONE ticket to
+play; behind it your own park at dusk (its picture is taken when you quit), with searchlights and fireworks.
 
 **Status: beta 1.4.** The intro and the whole game run natively, at the original's pace. The recompiled code is
 checked against the original x86 code: scripted runs and long random-play runs match it. See [the plan](docs/PLAN.md) for what is verified and what is not, and [the port audit](docs/reports/2026-10-18-port-audit.md)
@@ -39,16 +53,29 @@ for coverage, the original developers' unfinished features, and a modding map.
   - music, effects and interface volumes;
   - "ew" (sick visitors) and purchase sound levels.
 - **Saves:** saving and loading work, including 128 × 128 parks.
-- **Mac comforts:** full screen, a launch window, and the game's pointer as the Mac pointer. Control-click is
+- **Mac comforts:** full screen, the launch window, and the game's pointer as the Mac pointer. Control-click is
   the right mouse button.
+- **Controls at hand:** ⌘/ (Help > Controls) shows every control over the paused game; a game controller works too
+  (sticks, A and B click, shoulders zoom), and holding View + Menu for a second quits.
 
 ## Platforms
 
 | Platform | Status |
 |---|---|
-| macOS, Apple Silicon | Playable (this beta) |
-| Linux | The runtime compiles and its tests pass in CI; an app is to be written |
-| Windows | Planned |
+| macOS, Apple Silicon | **Playable** (this beta) |
+| Windows (x86-64) | **In progress** on the [`pc` branch](https://github.com/Joshspeakman/OpenPark/tree/pc): builds from GOG's Windows installer, passes the golden first-park check, runs to the title screen, and has the same launch window; matching the Mac app feature by feature |
+| Linux (x86-64) | **In progress** on the same branch: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
+
+**Windows and Linux, as of 2026-11-25.** One app on three systems: the same recompiled game, the same settings (one
+shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 front end in place of the Mac's Cocoa one.
+- **Proven on both:** the recompiled code reproduces the golden first-park frame and saved profile, byte for byte
+  (`tests/check_native.sh --park`, the same check the Mac passes), and a muted test run reaches the title screen.
+- **Ported so far:** the launch window with every page and its animation, the in-game controls card, controller quit,
+  the park picture for the launcher, GOG's store art, the icon and title banner, and the extras importer
+  (CD images read in place).
+- **Still to come:** the CD32 and 3DO music, the 3DO ride films, the updater, Save Park Picture, game windows in the
+  wide view, and a drag-and-drop setup like the Mac's.
+- The checklist and results: [docs/PC-HANDOFF.md on `pc`](https://github.com/Joshspeakman/OpenPark/blob/pc/docs/PC-HANDOFF.md).
 
 How a platform is added, and what is portable today: [docs/PORTING.md](docs/PORTING.md).
 
