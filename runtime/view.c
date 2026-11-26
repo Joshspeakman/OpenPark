@@ -196,6 +196,14 @@ static int cam_oy(int cy) { return UY * cy + OY; }
 
 /* ---- shared with the app (lock) ---- */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+/* The game's thread runs at real-time priority and takes this lock at every hook: a thread holding it (the app's main
+ * thread composing, the pointer) inherits that priority while it does, or a busy Mac could park it with the lock held
+ * and the game would wait (the sound runs dry). */
+__attribute__((constructor)) static void lock_inherit(void) {
+    pthread_mutexattr_t a; pthread_mutexattr_init(&a);
+    if (pthread_mutexattr_setprotocol(&a, PTHREAD_PRIO_INHERIT) == 0) pthread_mutex_init(&lock, &a);
+    pthread_mutexattr_destroy(&a);
+}
 static int want;                                  /* the app shows the zoomed view */
 static double vis_x, vis_y, vis_z = 1;            /* visible canvas: corner and zoom */
 static double vis_lw;                             /* the layout's width in screen pixels (wider than the
@@ -205,6 +213,7 @@ typedef struct { double fx, fy; uint32_t buttons; } Ev;
 static Ev evq[256]; static int evn;
 static int restore, restore_cx, restore_cy;       /* camera for the game's own view after zooming */
 static uint8_t pub_canvas[MAX_CANVAS];
+static long pub_extra;                            /* published changes outside a frame (tp_view_enable): the compose copies again */
 static volatile double pub_ui_share;                     /* how much of the park's area the interface covered in the last frame */
 double tp_view_ui_share(void) { return pub_ui_share; }    /* (main.m: a clean park picture to keep behind the game's windows) */
 static uint16_t pub_overlay[MAX_SCREEN], prev_overlay[MAX_SCREEN];         /* 0xffff: no interface there */
@@ -984,17 +993,17 @@ double tp_dbg_lockwait, tp_dbg_passes, tp_dbg_pace;                  /* developm
 /* A park frame that took more than three frames' time, in the log (always): where its time went. (Not a menu in
  * between, the game's load dialog: governed, its time is the player's.) */
 static void long_frame(uint64_t insns) {
-    extern double tp_dbg_run, tp_dbg_gov, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
-    static double run0, pass0, gov0, lock0, file0; static uint64_t ins0; static int logged; static long screen0;
+    extern double tp_dbg_run, tp_dbg_gov, tp_dbg_paused, tp_file_time; extern long tp_file_bytes; extern char tp_file_note[160];
+    static double run0, pass0, gov0, lock0, file0, paused0; static uint64_t ins0; static int logged; static long screen0;
     double t = now(), took = t - park_paced_at; if (!tp_view_t0) tp_view_t0 = t;
-    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && took > 0.05 && took < 30 && (logged < 500 || getenv("TP_STATS_LOG"))) {
+    if (park_paced_at && screen_paces == screen0 && tp_dbg_gov - gov0 < took / 2 && tp_dbg_paused - paused0 < 0.01 && took > 0.05 && took < 30 && (logged < 500 || getenv("TP_STATS_LOG"))) {
         logged++;
         fprintf(stderr, "long frame at %.1f s: %.0f ms (game code %.0f ms for %.1fM instructions, of which the view's passes %.0f; "
                 "governor %.0f, view lock %.0f; files %.0f ms, %ld KB%s%s), weather %#x\n", t - tp_view_t0, took * 1e3,
                 (tp_dbg_run - run0) * 1e3, (insns - ins0) / 1e6, (tp_dbg_passes - pass0) * 1e3, (tp_dbg_gov - gov0) * 1e3,
                 (tp_dbg_lockwait - lock0) * 1e3, (tp_file_time - file0) * 1e3, tp_file_bytes / 1024, tp_file_note[0] ? ": " : "", tp_file_note, M[0x1b14cc]);
     }
-    run0 = tp_dbg_run; pass0 = tp_dbg_passes; gov0 = tp_dbg_gov; lock0 = tp_dbg_lockwait; file0 = tp_file_time; ins0 = insns;
+    paused0 = tp_dbg_paused; run0 = tp_dbg_run; pass0 = tp_dbg_passes; gov0 = tp_dbg_gov; lock0 = tp_dbg_lockwait; file0 = tp_file_time; ins0 = insns;
     tp_file_note[0] = 0; tp_file_bytes = 0; screen0 = screen_paces;
 }
 void tp_view_hook(void) {
@@ -1459,9 +1468,9 @@ void tp_view_hook(void) {
 void tp_view_set_ui_scale(double k) { ui_scale = k < 0.5 ? 0.5 : k > 3 ? 3 : k; }
 double tp_view_ui_scale(void) { return ui_scale; }
 /* A layout point in the enlarged band: its point in the screen (sx, sy). 0 if outside it. */
-static int band_map(double lx, double ly, double lw, int sw, int sh, double k, double *sx, double *sy) {
+static int band_map(double lx, double ly, double lw, int sw, int sh, double k, int straddle, double *sx, double *sy) {
     if (fabs(k - 1) <= 0.001) return 0;                  /* (smaller as well as larger: the rest of its place shows park) */
-    if (pub_straddle) return 0;                           /* (a game window over the band: the panel at its own size) */
+    if (straddle) return 0;                           /* (a game window over the band: the panel at its own size) */
     double bh = band_rows(sh) + panel_rows(sh);           /* (the advisor's rows and the panel's) */
     double x0 = lw / 2 - sw * k / 2, y0 = sh - bh * k;
     if (lx < x0 || lx >= x0 + sw * k || ly < y0 || ly >= sh) return 0;
@@ -1491,7 +1500,7 @@ void tp_view_poll(void) {
         double lx = q[i].fx * lw, ly = q[i].fy * SH;      /* layout point */
         double cxs = lx - col;                            /* ... in the screen column */
         double ly_ui = ly, bsx, bsy, kk = ui_scale; if (kk * SW > lw) kk = lw / SW;
-        int in_band = on && band_map(lx, ly, lw, SW, SH, kk, &bsx, &bsy);
+        int in_band = on && band_map(lx, ly, lw, SW, SH, kk, pub_straddle, &bsx, &bsy);
         if (in_band) { cxs = bsx; ly_ui = bsy; }          /* (the enlarged panel: its point on the screen) */
         int incol = cxs >= 0 && cxs < SW, ui = incol && ly_ui >= WORLD_H;   /* the panel, or the game's interface: through */
         if (on && !in_band && fabs(kk - 1) > 0.001 && !pub_straddle && incol && ly >= SH - (BAND_H + panel_rows(SH))) incol = 0;   /* (its original place shows park) */
@@ -1610,7 +1619,7 @@ void tp_view_enable(int main_game) {
     memset(date_box, 0, sizeof date_box); date_fixed = 0; memset(prev_overlay, 0, sizeof prev_overlay);
     topbar = 0; drag_held = 0; restore = 0; G.s = 0;     /* (the top bar, a drag, a camera to put back; the geometry made again) */
     lim_cx = lim_cy = refused_cx = refused_cy = -1; set_cx = set_cy = -999;
-    pthread_mutex_lock(&lock); pub_cur_ok = 0; pub_straddle = 0; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); pub_cur_ok = 0; pub_straddle = 0; pub_extra++; pthread_mutex_unlock(&lock);
 }
 void tp_view_geometry(int *sw, int *sh, int *wh);
 int tp_view_set(int on, double cx, double cy, double zoom, double layout_w) {
@@ -1771,6 +1780,12 @@ void tp_view_count_game_frames(int on) { fps_game_hook = on; if (on) { tp_hook_p
 typedef struct { uint32_t *out; int ow, oh, smooth; Geo g; double z, vx, vy, lw, col, lpx, lpy, sx, sy; int ss; const uint32_t *pal; size_t stride; double k; } ComposeJob;
 static size_t compose_stride;                           /* pixels per output row (0: the width) */
 void tp_view_compose_stride(size_t px) { compose_stride = px; }
+/* The compose's own copy of what was published (taken under the lock once per published frame): it draws without
+ * holding the lock, so the game thread never waits on a picture being made (a big window's compose on a busy Mac took
+ * 50-100 ms, the game's thread waited on it at its next hook and the sound ran dry at the year's end). */
+static uint8_t c_canvas[MAX_CANVAS], c_panel[MAX_SCREEN], c_weather[MAX_SCREEN], c_weather_rep[MAX_SCREEN];
+static uint16_t c_overlay[MAX_SCREEN]; static int c_weather_n, c_straddle; static long c_serial = -1;
+static pthread_mutex_t compose_lock = PTHREAD_MUTEX_INITIALIZER;
 static void compose_band(void *ctx, size_t band) {
     const ComposeJob *j = ctx;
     uint32_t *out = j->out; int ow = j->ow, oh = j->oh, smooth = j->smooth, ss = j->ss; Geo g = j->g;
@@ -1785,33 +1800,33 @@ static void compose_band(void *ctx, size_t band) {
             double lx = (x + 0.5) * lpx; int ix = (int)floor(lx - col);
             double bsx, bsy;
             if (tp_view_park_only) goto park;
-            if (band_map(lx, ly, j->lw, g.sw, g.sh, j->k, &bsx, &bsy)) {   /* the enlarged panel and advisor */
+            if (band_map(lx, ly, j->lw, g.sw, g.sh, j->k, c_straddle, &bsx, &bsy)) {   /* the enlarged panel and advisor */
                 int bx = (int)bsx, by = (int)bsy;
                 if (bx >= 0 && bx < g.sw && by >= 0 && by < g.sh) {
-                    if (by >= g.wh) { o[x] = pal[pub_panel[(size_t)by * g.sw + bx]]; continue; }
-                    uint16_t u = pub_overlay[by * g.sw + bx];
+                    if (by >= g.wh) { o[x] = pal[c_panel[(size_t)by * g.sw + bx]]; continue; }
+                    uint16_t u = c_overlay[by * g.sw + bx];
                     if (u != 0xffff) { o[x] = pal[u]; continue; }
                 }
                 if (iy >= g.wh && j->k > 1) { o[x] = 0xff000000u; continue; }   /* (the panel's own rows beside it; a smaller one: park) */
                 goto park;
             }
-            if (j->k < 0.999 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - band_rows(g.sh) - panel_rows(g.sh)) goto park;   /* (a smaller panel: the rest of its place) */
+            if (j->k < 0.999 && !c_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - band_rows(g.sh) - panel_rows(g.sh)) goto park;   /* (a smaller panel: the rest of its place) */
             if (ix >= 0 && ix < g.sw) {                                /* the screen column: panel and interface */
-                if (panel_row) { o[x] = pal[pub_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
-                uint16_t u = pub_overlay[iy * g.sw + ix];
+                if (panel_row) { o[x] = pal[c_panel[(size_t)iy * g.sw + ix]]; continue; }   /* (frame, fw, fh: unused now) */
+                uint16_t u = c_overlay[iy * g.sw + ix];
                 if (u != 0xffff) { o[x] = pal[u]; continue; }
             }
-            if (fabs(j->k - 1) > 0.001 && !pub_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - band_rows(g.sh) - panel_rows(g.sh)) goto park;   /* (its original place: park) */
+            if (fabs(j->k - 1) > 0.001 && !c_straddle && ix >= 0 && ix < g.sw && iy >= g.sh - band_rows(g.sh) - panel_rows(g.sh)) goto park;   /* (its original place: park) */
           park:
             /* The weather the game drew (screen space): over the whole view, repeated beside the 4:3 column. */
-            if (pub_weather_n) {                                       /* (the panel and interface came first) */
+            if (c_weather_n) {                                       /* (the panel and interface came first) */
                 int wx = ((ix % g.sw) + g.sw) % g.sw, wy = iy % g.wh, in_col = ix >= 0 && ix < g.sw && iy < g.wh, k = wy * g.sw + wx;
-                if (pub_weather[k] && (in_col || pub_weather_rep[k])) { o[x] = pal[pub_weather[k]]; continue; }
+                if (c_weather[k] && (in_col || c_weather_rep[k])) { o[x] = pal[c_weather[k]]; continue; }
             }
             double px = vx + lx / z;
             if (ss == 1 && !smooth) {
                 int cx = (int)floor(px), cy = (int)floor(py);
-                o[x] = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
+                o[x] = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[c_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
                 continue;
             }
             /* 2x2 samples: an average when minifying, bilinear-ish when smooth */
@@ -1820,7 +1835,7 @@ static void compose_band(void *ctx, size_t band) {
                 double qx = ss == 2 ? px + ((k & 1) - 0.5) * sx * 0.5 : px - 0.5 + (k & 1);
                 double qy = ss == 2 ? py + ((k >> 1) - 0.5) * sy * 0.5 : py - 0.5 + (k >> 1);
                 int cx = (int)floor(qx), cy = (int)floor(qy);
-                uint32_t c = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[pub_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
+                uint32_t c = cx >= 0 && cy >= 0 && cx < g.cw && cy < g.ch ? pal[c_canvas[(size_t)cy * g.cw + cx]] : 0xff000000u;
                 r += c & 255; gg += (c >> 8) & 255; b += (c >> 16) & 255;
             }
             o[x] = 0xff000000u | ((b / 4) << 16) | ((gg / 4) << 8) | (r / 4);
@@ -1828,6 +1843,7 @@ static void compose_band(void *ctx, size_t band) {
     }
 }
 void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int fw, int fh, int smooth) {
+    pthread_mutex_lock(&compose_lock);                                 /* (one compose at a time: the copies are shared) */
     pthread_mutex_lock(&lock);
     Geo g = geo(pub_s);
     double z = vis_z, vx = vis_x, vy = vis_y, lw = vis_lw > g.sw ? vis_lw : g.sw, col = (lw - g.sw) / 2;
@@ -1838,9 +1854,20 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
     if (tp_view_out_bgra) { for (int i = 0; i < 256; i++) { uint32_t c = pub_pal[i]; pal_bgra[i] = (c & 0xff00ff00u) | ((c & 0xff) << 16) | ((c >> 16) & 0xff); } pal = pal_bgra; }
     size_t stride = compose_stride ? compose_stride : (size_t)ow;
     double kk = ui_scale; if (kk * g.sw > lw) kk = lw / g.sw;   /* (no wider than the view) */
+    static uint32_t pal_copy[256]; memcpy(pal_copy, pal, sizeof pal_copy); pal = pal_copy;
     ComposeJob job = {out, ow, oh, smooth, g, z, vx, vy, lw, col, lpx, lpy, sx, sy, ss, pal, stride, kk};
     dbg_stride = stride;
+    {   static long c_extra = -1;                                      /* the published frame, copied once */
+        if (c_serial != pub_serial || c_extra != pub_extra) {
+            size_t nc = (size_t)g.cw * g.ch; if (nc > MAX_CANVAS) nc = MAX_CANVAS;
+            memcpy(c_canvas, pub_canvas, nc); memcpy(c_panel, pub_panel, sizeof c_panel); memcpy(c_overlay, pub_overlay, sizeof c_overlay);
+            c_weather_n = pub_weather_n; if (pub_weather_n) { memcpy(c_weather, pub_weather, sizeof c_weather); memcpy(c_weather_rep, pub_weather_rep, sizeof c_weather_rep); }
+            c_straddle = pub_straddle; c_serial = pub_serial; c_extra = pub_extra;
+        }
+    }
+    pthread_mutex_unlock(&lock);                                       /* (the drawing: the copies only) */
     tp_plat_parallel_for((size_t)((oh + 31) / 32), &job, compose_band);   /* bands of 32 rows across the cores */
+    pthread_mutex_lock(&lock);
     st_comp++; stats_tick();
     if (getenv("TP_VIEW_FPS")) tp_view_debug_fps = 1;
     if (getenv("TP_VIEW_GRID")) tp_view_debug_grid = 1;
@@ -1881,6 +1908,7 @@ void tp_view_compose(uint32_t *out, int ow, int oh, const uint32_t *frame, int f
         }
     }
     pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&compose_lock);
 }
 
 /* ---- development (headless): TP_VIEW_TEST=<dir> renders the whole canvas once ---- */

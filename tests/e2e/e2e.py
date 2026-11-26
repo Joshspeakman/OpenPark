@@ -15,7 +15,26 @@ on the first run. Positions are the game's own (320x200; doubled in 640x480, the
 import os, re, sys, time, zlib, struct, subprocess, hashlib, shutil
 ROOT = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + '/../..')
 P = ROOT + '/work/e2e'; OUT = P + '/out'; LOG = P + '/data/theme-park.log'; CTL = os.path.dirname(os.path.abspath(__file__)) + '/ctl.py'
-APP = os.environ.get('E2E_APP') or ROOT + '/build/app/Theme Park Nightly.app'
+APP = os.path.realpath(os.environ.get('E2E_APP') or ROOT + '/build/app/Theme Park Nightly.app')   # (resolved: build/ may be a symlink,
+                                                    # and the running process's path, which pgrep matches, is the real one)
+def own_copy(src):
+    """The app under test, copied to work/e2e/app with its own bundle identifier (re-signed ad hoc): its user defaults
+    (window frame autosave, panel size, debug overlays, launcher choices) are the test's, never the player's. The
+    installed Nightly app and build/app share one identifier, so a run used to move the player's window. E2E_SHARED_DEFAULTS=1:
+    the built app as is."""
+    if os.environ.get('E2E_SHARED_DEFAULTS') or not os.path.isdir(src): return src
+    dst = P + '/app/Theme Park E2E.app'
+    if os.path.isdir(dst): shutil.move(dst, P + f'/app/old-{os.getpid()}-{time.time_ns()}.app')   # (a fresh copy each run)
+    for old in [x for x in (os.listdir(P + '/app') if os.path.isdir(P + '/app') else []) if x.startswith('old-')]:
+        shutil.rmtree(P + '/app/' + old, ignore_errors=True)   # (test output under work/: its own scratch)
+    os.makedirs(P + '/app', exist_ok=True)
+    subprocess.run(['cp', '-Rc', src, dst], check=True)
+    pl = dst + '/Contents/Info.plist'
+    subprocess.run(['/usr/libexec/PlistBuddy', '-c', 'Set :CFBundleIdentifier com.joshspeakman.themepark.e2e', pl], check=True)
+    subprocess.run(['codesign', '--force', '--deep', '-s', '-', dst], check=True, capture_output=True)
+    subprocess.run(['defaults', 'delete', 'com.joshspeakman.themepark.e2e'], capture_output=True)   # (each run from the defaults)
+    return os.path.realpath(dst)
+APP = own_copy(APP)
 os.environ['E2E_CONTROL'] = P + '/control.txt'
 GAME = os.environ.get('E2E_GAME') or os.path.expanduser('~/Games/ThemeParkNative/game')
 if not os.path.isdir(P + '/data/game'):
@@ -127,7 +146,7 @@ def run(name, fn):
     for l in text.splitlines():
         if FATAL.search(l): err = (err + '; ' if err else '') + 'log: ' + l.strip()
         elif l.startswith(('long frame', 'audio drop', 'gov: a sleep')): EVENTS.append(f'{name}: {l.strip()}')
-    if not alive() and name not in ('quit',): err = (err + '; ' if err else '') + 'the app is gone'
+    if not alive() and name not in ('quit', 'park_picture'): err = (err + '; ' if err else '') + 'the app is gone'
     if err: shutil.copy(LOG, f'{OUT}/{name}.log')        # (the next launch empties the log)
     RESULTS.append((name, err, time.time() - t0))
     print(f'{"FAIL" if err else "ok  "} {name} ({time.time() - t0:.0f} s){": " + err if err else ""}', flush=True)
@@ -316,6 +335,21 @@ def visitor_view():
     ctl('walkcmd 1', 'sleep 2', 'walkstop', 'sleep 2'); check(to_park(), 'not back in the park after the Visitor View')
 
 @step
+def controls_card():
+    """Help > Controls (⌘/): the card is drawn, the game waits under it (its frames stop changing), then goes on"""
+    check(to_park(), 'not in the park')
+    mark(); ctl('controls', 'sleep 1', f'controlsshot {OUT}/controls-card.png', 'sleep 0.5')
+    check('controls card: shown' in since(), 'the card did not show')
+    check(os.path.getsize(f'{OUT}/controls-card.png') > 20000, 'the card picture is empty')
+    a = frame('cc-up1').digest; ctl('sleep 2'); b = frame('cc-up2').digest
+    check(a == b, 'the game kept running under the card')
+    mark(); ctl('controls', 'sleep 0.5')
+    check('controls card: away' in since(), 'the card did not go away')
+    t = time.time(); moved = False
+    while time.time() - t < 10 and not moved: ctl('sleep 1'); moved = frame('cc-after').digest != b
+    check(moved, 'the game did not go on after the card')
+
+@step
 def monkey():
     """three minutes of random clicks and keys (seeded): panel buttons, windows, the park; no top bar"""
     wide(False); check(to_park(), 'not in the park'); rnd = random.Random(7); t = time.time(); n = 0
@@ -371,6 +405,26 @@ def close_window():
 
 # ---- separate runs (a fresh start each) ----
 @step
+def park_picture():
+    """quitting the app (as Cmd-Q does) with a park open saves the whole park's picture for the launch window: <data>/art/your-park.png,
+    a PNG at least 320x200 that isn't blank (a fresh start of its own, built on: a new park's empty lawn is not kept)"""
+    pic = P + '/data/art/your-park.png'
+    if os.path.exists(pic): os.remove(pic)
+    was = os.environ.get('E2E_ENV', ''); os.environ['E2E_ENV'] = (was + ' TP_PARK_ART_MIN=5.5').strip()   # (a test park's little
+    try: title(); new_game(); build()                   # building: above an empty park's ~5%) (a fresh start of its own: it quits the app)
+    finally: os.environ['E2E_ENV'] = was
+    wide(True); check(to_park(), 'not in the park')     # (the zoomable view: a 4:3 window at 1x has none, and keeps GOG's pictures)
+    mark(); subprocess.run([CTL, '--timeout=10', 'quit'])
+    t = time.time()
+    while alive() and time.time() - t < 15: time.sleep(0.5)
+    check(not alive(), 'the app did not quit')
+    check(os.path.exists(pic), 'no park picture was saved at quit')
+    d = open(pic, 'rb').read(); w, h = struct.unpack('>II', d[16:24])
+    check(d[:8] == b'\x89PNG\r\n\x1a\n' and w >= 320 and h >= 200, f'the park picture is not a PNG of a park ({w}x{h})')
+    check(len(d) > 20000, f'the park picture looks blank ({len(d)} bytes)')
+    check('your park:' in since(), 'no "your park" line in the log')
+
+@step
 def title_extras():
     """the title menu's credits (F5) and intro (F4: the DOS intro program is not there, so nothing runs)"""
     launch(args=['-FreeMapSize', '64']); ctl('size 1280 960', 'sleep 3', *key(0x1c0d, 2), 'type QA', *key(0x1c0d, 2))
@@ -391,6 +445,33 @@ def restart():
     text = since(); print('  restart log:', [l for l in text.splitlines() if 'restart' in l.lower() or 'exit' in l.lower() or 'new park' in l][:6], flush=True)
     check('bigmap: new park' in text, 'no new park after the restart'); check(to_park(), 'not in the park after the restart')
     check(abs(money() - 150000) < 2000, f'money after the restart {money()}')   # (the park begun again: its starting balance)
+
+@step
+def dos_restart():
+    """the game exiting with errorlevel 10 or more, which THEME.BAT reruns (the in-process restart, issue #6): from the Visitor View of a park"""
+    run('title', STEPS['title']); run('new_game', STEPS['new_game'])
+    mark(); ctl('walk -1 -1', 'sleep 3'); m = last(r'control: walk [-\d.,]+: (\d)'); check(m and m[1] == '1', 'the Visitor View did not start')
+    mark(); ctl('dosexit 10', 'sleep 8'); text = since()
+    check('game restarting: DOS exit 10' in text, 'the game did not restart'); check(alive(), 'gone after the restart')
+    f = frame('dos-restart-title'); check(f.w == 320 and f.h == 200, f'title frame after the restart {f.w}x{f.h}')
+    ctl('size 1280 960', 'sleep 1', *key(0x1c0d, 2), 'type QA', *key(0x1c0d, 2), *key(0x3b00, 2))
+    f = frame('dos-restart-details'); check(windowed(f), 'player details not shown after the restart')
+    run('new_game_again', STEPS['new_game']); check(to_park(), 'not in the park after the restart')
+    check(abs(money() - 150000) < 2000, f'money after the restart {money()}'); vshot('dos-restart-park')
+    mark(); ctl('walk -1 -1', 'sleep 3'); m = last(r'control: walk [-\d.,]+: (\d)'); check(m and m[1] == '1', 'no Visitor View in the new game')
+    ctl('walkstop', 'sleep 2'); check(to_park(), 'not back in the park')
+
+def irqs():
+    mark(); ctl('irqs'); m = last(r'control: irqs (\d+)'); check(m, 'no interrupt count'); return int(m[1])
+
+@step
+def key_wait():
+    """a blocking key wait (issue #26): timers carry on inside it, and a key ends it"""
+    run('title', STEPS['title']); run('new_game', STEPS['new_game'])
+    mark(); ctl('fakekbhit', 'sleep 2'); check('the game waits for a key' in since(), 'the game did not block on a key')
+    a = irqs(); ctl('sleep 2'); b = irqs(); check(b - a > 20, f'{b - a} timer interrupts in 2 s of waiting')
+    p = frame('key-wait'); ctl('sleep 1'); q = frame('key-wait-2'); check(changed(p, q) < 0.02, 'the park moved on during the wait: not blocked')
+    ctl(*key(0x1c0d, 2)); ctl('sleep 3'); r = frame('key-wait-after'); check(alive(), 'gone after the key'); check(changed(q, r) > 0.002, 'the park did not move on after the key')
 
 @step
 def year_watch():

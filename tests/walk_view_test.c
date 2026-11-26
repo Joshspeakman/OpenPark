@@ -24,7 +24,7 @@ uint32_t tp_map_w = 64, tp_map_ext = 64;   /* (the game's park size; bigmap.c) *
 void tp_bigmap_setup_done(void) {}
 void tp_free_park_shown(void) {} int tp_free_waiting(void) { return 0; }
 void sb16_pump(double t) { (void)t; }
-double tp_dbg_run, tp_dbg_gov; int tp_host_timer_behind(void) { return 0; }
+double tp_dbg_run, tp_dbg_gov, tp_dbg_paused; int tp_host_timer_behind(void) { return 0; }
 void tp_hooks_changed(void) {}
 volatile double tp_frame_paced_at; double tp_host_cycles(void) { return 10000; }   /* (nightly's pacing) */
 double tp_host_card_clock(void) { return 0; } volatile int tp_frame_paced_park;   /* (the card's clock; long park passes) */

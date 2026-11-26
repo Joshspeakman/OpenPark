@@ -60,6 +60,9 @@ def main():
     ap.add_argument('--per-file', type=int, default=1500)
     ap.add_argument('--opt', default='-O1')
     ap.add_argument('--prefix', default='', help='symbol prefix for a second image in one binary (e.g. intro_)')
+    ap.add_argument('--no-link', action='store_true',
+                    help='compile the objects only and list them in objects.txt (the drag-and-drop app links them itself, '
+                         'with no Xcode tools): no runtime.o, game.dylib, game.a or build.json')
     args = ap.parse_args()
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
@@ -214,6 +217,17 @@ def main():
                     todo.append(t)
                 elif not inside:
                     outside.add(t)
+
+    # Each keyboard or DOS interrupt is also an entry of its own: a blocking key wait runs its INT again until a key
+    # comes (runtime/host.c key_wait_retry, issue #26). Extra entries only: the blocks that contain these INTs keep
+    # their extents, so block counts still match the oracle.
+    for a in list(blocks):
+        for _, decoded in blocks[a]:
+            for pc, i in (decoded or {}).items():
+                if pc != a and pc not in blocks and i.mnemonic == 'int' and i.op_str in ('0x16', '0x21'):
+                    variants = block_at(pc)
+                    if variants and all(d for _, d in variants):
+                        blocks[pc] = variants
 
     # Generate C.
     names, sources = {}, []
@@ -449,6 +463,22 @@ int tp_dispatch(Ctx *c) {
     with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as pool:
         objects = list(pool.map(compile_one, files))
     stamp_path.write_text(stamp)
+    if args.no_link:
+        (out / 'objects.txt').write_text(''.join('%s\n' % o for o in objects))
+    else:
+        link_game(args, out, objects, inc, image)
+    report = {'blocks': len(blocks), 'functions': len(sources), 'seeds': len(seeds),
+              'traced_blocks': len(observed), 'guarded': len(guarded),
+              'targets_outside_code': sorted(hex(t) for t in outside)[:50], 'outside_count': len(outside),
+              'unsupported': dict(lifter.unsup.most_common()), 'internal_errors': lifter.internal[:20]}
+    # Block extents (bytes per variant) for tools/spotcheck.py synchronisation.
+    (out / 'blocks.json').write_text(json.dumps({str(a): sorted({max(d) + d[max(d)].size - a for _, d in v if d})
+                                                 for a, v in blocks.items()}) + '\n')
+    (out / 'lift.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps({k: v for k, v in report.items() if k != 'targets_outside_code'}, indent=2))
+
+
+def link_game(args, out, objects, inc, image):
     runtime = out / 'runtime.o'
     subprocess.run([*toolchain.cc(), args.opt, '-c', '-fPIC', '-w', '-I', inc, str(ROOT / 'runtime/verify.c'), '-o', str(runtime)], check=True)
     library = out / 'game.dylib'
@@ -460,15 +490,6 @@ int tp_dispatch(Ctx *c) {
     if not args.prefix:
         (out / 'build.json').write_text(json.dumps({'image_sha256': image.sha256,
             'library_sha256': hashlib.sha256(library.read_bytes()).hexdigest(), 'architecture': toolchain.arch()}, indent=2) + '\n')
-    report = {'blocks': len(blocks), 'functions': len(sources), 'seeds': len(seeds),
-              'traced_blocks': len(observed), 'guarded': len(guarded),
-              'targets_outside_code': sorted(hex(t) for t in outside)[:50], 'outside_count': len(outside),
-              'unsupported': dict(lifter.unsup.most_common()), 'internal_errors': lifter.internal[:20]}
-    # Block extents (bytes per variant) for tools/spotcheck.py synchronisation.
-    (out / 'blocks.json').write_text(json.dumps({str(a): sorted({max(d) + d[max(d)].size - a for _, d in v if d})
-                                                 for a, v in blocks.items()}) + '\n')
-    (out / 'lift.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(json.dumps({k: v for k, v in report.items() if k != 'targets_outside_code'}, indent=2))
 
 
 if __name__ == '__main__':

@@ -21,6 +21,7 @@ void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
 int tp_audio_cd_play(const char *path, int loop); void tp_audio_cd_stop(void);
 BOOL tp_launcher_run(void);
+#include "app_spec.h"
 struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
@@ -941,6 +942,51 @@ static int ride_video_3do(int ride) {
 }
 
 /* A window that can be key without a title bar (the borderless full screen). */
+/* The controls card in the game (⌘/, Help > Controls, or the control file's "controls"): launcher.m's table over the
+ * dimmed game, which waits while it is up (AppDelegate refreshHold). Any key or click puts it away. */
+NSArray<NSArray<NSString *> *> *tp_controls_rows(void);
+@interface TPControlsCard : NSView
+@property (copy) void (^dismiss)(void);
+@end
+@implementation TPControlsCard
+- (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)isFlipped { return YES; }
+- (void)mouseDown:(NSEvent *)e { if (self.dismiss) self.dismiss(); }
+- (void)rightMouseDown:(NSEvent *)e { if (self.dismiss) self.dismiss(); }
+- (void)keyDown:(NSEvent *)e { if (self.dismiss) self.dismiss(); }
+- (BOOL)performKeyEquivalent:(NSEvent *)e {           /* (⌘/ again: the menu's own item closes it; ⌘Q etc. go on) */
+    return [super performKeyEquivalent:e];
+}
+- (void)drawRect:(NSRect)dirty {
+    [[NSColor colorWithWhite:0 alpha:0.62] setFill]; NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+    NSArray *rows = tp_controls_rows();
+    CGFloat W = MIN(self.bounds.size.width - 40, 760), rowH = 30, H = 96 + rowH * rows.count + 44;
+    CGFloat k = MIN(1, (self.bounds.size.height - 40) / H);   /* (a small window: the card smaller) */
+    NSAffineTransform *t = [NSAffineTransform transform];
+    [t translateXBy:self.bounds.size.width / 2 yBy:self.bounds.size.height / 2]; [t scaleBy:k]; [t translateXBy:-W / 2 yBy:-H / 2];
+    [NSGraphicsContext saveGraphicsState]; [t concat];
+    NSRect card = NSMakeRect(0, 0, W, H);
+    NSBezierPath *bp = [NSBezierPath bezierPathWithRoundedRect:card xRadius:18 yRadius:18];
+    [[NSColor colorWithSRGBRed:0.20 green:0.11 blue:0.05 alpha:0.96] setFill]; [bp fill];
+    [[NSColor colorWithSRGBRed:0.93 green:0.70 blue:0.25 alpha:1] setStroke]; bp.lineWidth = 3; [bp stroke];
+    NSColor *gold = [NSColor colorWithSRGBRed:1 green:0.80 blue:0.30 alpha:1], *cream = [NSColor colorWithSRGBRed:1 green:0.96 blue:0.86 alpha:1];
+    NSMutableParagraphStyle *mid = [NSMutableParagraphStyle new]; mid.alignment = NSTextAlignmentCenter;
+    [@"CONTROLS" drawInRect:NSMakeRect(0, 24, W, 40) withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:28 weight:NSFontWeightHeavy],
+        NSForegroundColorAttributeName: gold, NSParagraphStyleAttributeName: mid, NSKernAttributeName: @3}];
+    NSDictionary *ka = @{NSFontAttributeName: [NSFont systemFontOfSize:15 weight:NSFontWeightHeavy], NSForegroundColorAttributeName: gold, NSKernAttributeName: @1};
+    NSDictionary *va = @{NSFontAttributeName: [NSFont systemFontOfSize:16], NSForegroundColorAttributeName: cream};
+    CGFloat split = W * 0.42;
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        CGFloat y = 84 + rowH * i;
+        [[rows[i][0] uppercaseString] drawInRect:NSMakeRect(36, y + 4, split - 44, rowH) withAttributes:ka];
+        [rows[i][1] drawInRect:NSMakeRect(split, y + 3, W - split - 30, rowH) withAttributes:va];
+    }
+    [@"Any key or click goes back to the game" drawInRect:NSMakeRect(0, H - 38, W, 22) withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:13],
+        NSForegroundColorAttributeName: [cream colorWithAlphaComponent:0.6], NSParagraphStyleAttributeName: mid}];
+    [NSGraphicsContext restoreGraphicsState];
+}
+@end
+
 @interface GameWindow : NSWindow
 @end
 @implementation GameWindow
@@ -955,6 +1001,7 @@ static int ride_video_3do(int ride) {
     NSWindow *_window;
     GameView *_view;
     NSView *_container;                  /* black, holds the view (full screen: below the notch) */
+    TPControlsCard *_card;               /* the controls card while it is up (⌘/) */
     BOOL _full; NSRect _windowedFrame;   /* the borderless full screen, and the window's frame before it */
     NSTimer *_timer;
     id _link;                            /* CADisplayLink (macOS 14+) */
@@ -1042,7 +1089,7 @@ static void *game_thread(void *arg) {
         main_running = 0;
         game_result = r;
         /* THEME.BAT restarts the game when it exits with errorlevel >= 10. */
-        if (r == 1 && tp_host_exit_code() >= 10) { tp_walk_stop(); continue; }   /* (Visitor View does not outlive its game, issue #6) */
+        if (r == 1 && tp_host_exit_code() >= 10) { fprintf(stderr, "game restarting: DOS exit %d, as THEME.BAT does\n", tp_host_exit_code()); tp_walk_stop(); continue; }   /* (Visitor View does not outlive its game, issue #6) */
         break;
     }
     game_done = 1;
@@ -1060,18 +1107,21 @@ static void *game_thread(void *arg) {
 - (void)applicationDidFinishLaunching:(NSNotification *)n {
     app = self;
     NSString *root = dataRoot();
-    _game = [root stringByAppendingPathComponent:@"game"];
+    _game = getenv("TP_GAME_DIR") ? @(getenv("TP_GAME_DIR")) : [root stringByAppendingPathComponent:@"game"];   /* (the downloaded app's own) */
     _saves = [root stringByAppendingPathComponent:@"saves"];
-    _image = [NSBundle.mainBundle pathForResource:@"MAIN" ofType:@"TPIMG"];
+    _image = getenv("TP_IMAGE_DIR") ? [@(getenv("TP_IMAGE_DIR")) stringByAppendingPathComponent:@"MAIN.TPIMG"] : [NSBundle.mainBundle pathForResource:@"MAIN" ofType:@"TPIMG"];
     if (![NSFileManager.defaultManager fileExistsAtPath:[_game stringByAppendingPathComponent:@"DATA"]] || !_image) {
         [self fail:[NSString stringWithFormat:@"The game files were not found in %@. Run tools/build_app.sh with your Theme Park package to install them.", root]];
         return;
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"RideVideos": @1, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
-                          @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
+    {   /* the settings' defaults: runtime/app_spec.c (shared with platform/sdl) */
+        const TpAppSpec *sp = tp_app_spec(); NSMutableDictionary *d = [NSMutableDictionary dictionary];
+        for (int i = 0; i < sp->ndefaults; i++) { const TpDefault *x = &sp->defaults[i];
+            d[@(x->key)] = x->is_bool ? @(x->value != 0) : x->value == floor(x->value) ? @((long long)x->value) : @(x->value); }
+        [u registerDefaults:d];
+    }
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */
@@ -1083,7 +1133,7 @@ static void *game_thread(void *arg) {
     if (NSProcessInfo.processInfo.environment[@"TP_LAUNCHER_SHOT"]) { tp_launcher_run(); [NSApp terminate:nil]; return; }
     if (!selfTest && !tp_launcher_run()) { [NSApp terminate:nil]; return; }
     if (!getenv("TP_CYCLES")) tp_host_set_cycles([u doubleForKey:@"Cycles"]);
-    if ([u boolForKey:@"PlayIntro"] && !getenv("TP_SKIP_INTRO")) _intro = [NSBundle.mainBundle pathForResource:@"INTRO" ofType:@"TPIMG"];
+    if ([u boolForKey:@"PlayIntro"] && !getenv("TP_SKIP_INTRO")) _intro = getenv("TP_IMAGE_DIR") ? [@(getenv("TP_IMAGE_DIR")) stringByAppendingPathComponent:@"INTRO.TPIMG"] : [NSBundle.mainBundle pathForResource:@"INTRO" ofType:@"TPIMG"];
     [NSFileManager.defaultManager createDirectoryAtPath:_saves withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *logPath = [root stringByAppendingPathComponent:@"theme-park.log"];
     freopen(logPath.fileSystemRepresentation, "a", stderr);
@@ -1197,6 +1247,19 @@ static void *game_thread(void *arg) {
 - (void)pollController {
     GCExtendedGamepad *g = GCController.controllers.firstObject.extendedGamepad;
     if (!g) return;
+    {   /* quick exit from the couch: hold View (Options) and Menu together for a second */
+        static double held_since;
+        BOOL both = g.buttonOptions.pressed && g.buttonMenu.pressed;
+        if (!both) held_since = 0;
+        else if (!held_since) held_since = CACurrentMediaTime();
+        else if (CACurrentMediaTime() - held_since > 1.0) { fprintf(stderr, "controller: View + Menu held: quit\n"); held_since = 0; [NSApp terminate:nil]; return; }
+        if (g.buttonOptions.pressed) return;            /* (View held: Menu is not Escape, nothing else moves) */
+    }
+    {   static BOOL after_card;                         /* the card: A, B or Menu puts it away; then nothing until they are let go */
+        BOOL any = g.buttonA.pressed || g.buttonB.pressed || g.buttonMenu.pressed;
+        if (_card) { if (any) { [self hideControls]; after_card = YES; } return; }
+        if (after_card) { if (any) return; after_card = NO; }
+    }
     if (tp_walk_active()) {                             /* Visitor View: left stick walks, right stick looks, A follow, X hop, Y ride, Menu leaves */
         static BOOL a0, x0, y0, m0;
         float lx = g.leftThumbstick.xAxis.value, ly = g.leftThumbstick.yAxis.value, rx = g.rightThumbstick.xAxis.value, ry = g.rightThumbstick.yAxis.value;
@@ -1230,7 +1293,7 @@ static void *game_thread(void *arg) {
 
 /* Development: live control for playtests (TP_CONTROL=<file>). Lines appended to the file run in
  * order, one batch per tick: key HEX | type TEXT | mouse X Y B | click X Y [B] | vmouse X Y B |
- * vclick X Y [B] | raw SCAN 1|0 | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
+ * dosexit N | fakekbhit | irqs | vclick X Y [B] | raw SCAN 1|0 | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
  * sleep S | ack TAG | show (the window, which control runs keep hidden) | quit. mouse/click are in the game frame's pixels (320x200 or 640x480);
  * vmouse/vclick in a vshot's pixels (what the window shows, 960 rows high). ack appends TAG to
  * <file>.ack once everything before it has run. */
@@ -1372,6 +1435,9 @@ static uint32_t key_of_char(unichar c) {
             if (x < 0 && !tp_view_point_to_world(0.5, 0.45, &x, &y)) x = y = 32;
             fprintf(stderr, "control: walk %.2f,%.2f: %d\n", x, y, [_view walkStartAt:x :y]);
         }
+        else if ([op isEqual:@"dosexit"]) tp_host_test_exit((int)a1);      /* dosexit N: as if the game exited with errorlevel N (10 up: THEME.BAT restarts it) */
+        else if ([op isEqual:@"fakekbhit"]) tp_host_test_kbhit();          /* the game's next "key waiting?" is told yes, so it blocks on a key */
+        else if ([op isEqual:@"irqs"]) fprintf(stderr, "control: irqs %u\n", tp_host_test_irqs());
         else if ([op isEqual:@"walkcmd"]) tp_walk_command((int)a1);   /* 1 follow, 2 hop, 3 ride along, 4 view, 5 noclip */
         else if ([op isEqual:@"walkhold"]) [_view walkHold:a1 :a2 :p.count > 3 ? [p[3] doubleValue] : 0 :p.count > 4 ? [p[4] doubleValue] : 1];   /* walkhold FWD STRAFE TURN SECONDS */
         else if ([op isEqual:@"walkteleport"]) tp_walk_teleport(a1, a2, p.count > 3 ? [p[3] doubleValue] * M_PI / 180 : NAN);   /* X Y YAW(degrees) */
@@ -1383,6 +1449,13 @@ static uint32_t key_of_char(unichar c) {
             fprintf(stderr, "walkshot %s drawn=%d | %s\n", [line substringFromIndex:9].UTF8String, ok, st);
         }
         else if ([op isEqual:@"show"]) { [_window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; }   /* a run to watch */
+        else if ([op isEqual:@"controls"]) [self showControls:nil];   /* the controls card, on or off */
+        else if ([op isEqual:@"controlsshot"] && p.count > 1) {        /* controlsshot PATH: the card as drawn (a test) */
+            NSView *c = _card ?: [[TPControlsCard alloc] initWithFrame:_container.bounds];
+            NSBitmapImageRep *r = [c bitmapImageRepForCachingDisplayInRect:c.bounds]; [c cacheDisplayInRect:c.bounds toBitmapImageRep:r];
+            [[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[line substringFromIndex:13] atomically:YES];
+            fprintf(stderr, "controlsshot %s up=%d paused=%d\n", [line substringFromIndex:13].UTF8String, _card != nil, _card != nil);
+        }
         else if ([op isEqual:@"quit"]) [NSApp terminate:nil];
         else fprintf(stderr, "control: unknown %s\n", line.UTF8String);
     }
@@ -1457,12 +1530,32 @@ static uint32_t key_of_char(unichar c) {
     }
 }
 
+/* Help > Controls (⌘/): the controls card over the game, which waits meanwhile; again, any key or a click: away. */
+- (void)showControls:(id)sender {
+    if (_card) { [self hideControls]; return; }
+    if (!_container) return;
+    [_view releaseInput];
+    _card = [[TPControlsCard alloc] initWithFrame:_container.bounds];
+    _card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    __weak AppDelegate *me = self; _card.dismiss = ^{ [me hideControls]; };
+    [_container addSubview:_card];
+    [_window makeFirstResponder:_card];
+    [self refreshHold];
+    fprintf(stderr, "controls card: shown\n");
+}
+- (void)hideControls {
+    if (!_card) return;
+    [_card removeFromSuperview]; _card = nil;
+    [_window makeFirstResponder:_view];
+    [self refreshHold];
+    fprintf(stderr, "controls card: away\n");
+}
 /* Hidden or minimised, the park waits (and is silent) until it is back; under a 3DO ride video it waits too (the
  * video's sound plays). Worked out from all three each time: one event alone resumed a game still minimised, or
  * under a video. */
 - (void)refreshHold {
     BOOL away = NSApp.isHidden || _window.miniaturized;
-    tp_host_pause(away || [_view playing3DO]);
+    tp_host_pause(away || [_view playing3DO] || _card != nil);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
     if (away) tp_audio_set_volumes(0, 0);
     else tp_audio_set_volumes([u floatForKey:@"SoundVolume"], [u floatForKey:@"MusicVolume"]);
@@ -1479,7 +1572,40 @@ static uint32_t key_of_char(unichar c) {
 - (void)windowDidResignKey:(NSNotification *)n { [_view releaseInput]; }
 - (void)applicationDidResignActive:(NSNotification *)n { [_view releaseInput]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a { return YES; }
+/* At quit, with a park open: the whole park's picture into <data>/art/your-park.png, for the launch window's backdrop (the
+ * player's own park, drawn pixel-sharp). Made only here: it renders every pass, a hitch the player would see mid-game. */
+static void save_your_park(void) {
+    if (!game_started || game_done || !tp_view_live() || NSProcessInfo.processInfo.environment[@"TP_NO_PARK_ART"]) return;
+    tp_view_request_poster();
+    double t0 = CACurrentMediaTime(); uint32_t *px = NULL; int w = 0, h = 0;
+    while (!tp_view_take_poster(&px, &w, &h) && CACurrentMediaTime() - t0 < 2.0) usleep(20000);
+    if (!px) return;
+    if (w < 320 || h < 200) { free(px); return; }
+    {   /* a park worth showing: built on (not a new park's empty lawn). The share of pixels off the commonest colours:
+         * grass is a few shades; paths, rides, shops and people bring many */
+        uint32_t cnt[64] = {0}; size_t n = 0, other = 0;
+        for (int y = 0; y < h; y += 4) for (int x = 0; x < w; x += 4) { uint32_t c = px[(size_t)y * w + x]; if (!(c >> 24)) continue; cnt[(c ^ (c >> 7) ^ (c >> 13)) & 63]++; n++; }
+        uint32_t top4 = 0; for (int k = 0; k < 4; k++) { int b = 0; for (int i = 1; i < 64; i++) if (cnt[i] > cnt[b]) b = i; top4 += cnt[b]; cnt[b] = 0; }
+        other = n - top4;
+        const char *me = getenv("TP_PARK_ART_MIN"); double min = me ? atof(me) : 10;   /* (percent; tests lower it) */
+        if (n == 0 || other * 100.0 < n * min) { free(px); fprintf(stderr, "your park: not built on yet (%.0f%% detail): the launch window keeps its picture\n", n ? 100.0 * other / n : 0); return; }
+    }
+    NSString *dir = [dataRoot() stringByAppendingPathComponent:@"art"], *path = [dir stringByAppendingPathComponent:@"your-park.png"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *part = [path stringByAppendingString:@".part"];
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(px, (size_t)w, (size_t)h, 8, (size_t)w * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGImageRef img = ctx ? CGBitmapContextCreateImage(ctx) : NULL;
+    CGImageDestinationRef d = img ? CGImageDestinationCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:part], (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL) : NULL;
+    BOOL ok = NO; if (d) { CGImageDestinationAddImage(d, img, NULL); ok = CGImageDestinationFinalize(d); CFRelease(d); }
+    if (img) CGImageRelease(img); if (ctx) CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
+    if (ok) { [NSFileManager.defaultManager removeItemAtPath:path error:nil]; [NSFileManager.defaultManager moveItemAtPath:part toPath:path error:nil];
+              fprintf(stderr, "your park: %dx%d picture for the launch window\n", w, h); }
+}
 - (void)applicationWillTerminate:(NSNotification *)n {
+    if (game_started && !game_done) { tp_audio_set_volumes(0, 0); tp_host_pause(0); }   /* (paused: under the card, hidden or
+                                                        * minimised, the game thread could not make the park's picture; silent now) */
+    save_your_park();
     tp_host_quit();
     if (game_started) for (int i = 0; i < 100 && !game_done; i++) usleep(10000);   /* (the game thread out first: it sends the synth MIDI) */
     tp_audio_stop();
@@ -1566,6 +1692,37 @@ static uint32_t key_of_char(unichar c) {
     CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
     fprintf(stderr, "park picture %dx%d -> %s\n", w, h, path.fileSystemRepresentation);
 }
+/* The downloaded app: another release's disc dropped on the app (the Amiga CD32's or 3DO's .cue, a mounted disc or a folder)
+ * goes through tools/extras.py, as in a checkout, with the Python the app sets the game up with (unpacked once into
+ * <data>/.python): the extras appear in the launch window (Music Type, Ride Videos). */
+- (void)application:(NSApplication *)sender openFiles:(NSArray<NSString *> *)paths {
+    NSString *res = NSBundle.mainBundle.resourcePath, *tk = [res stringByAppendingPathComponent:@"setup/toolkit.tar.xz"];
+    NSString *tool = [res stringByAppendingPathComponent:@"setup/openpark/tools/extras.py"];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if (![fm fileExistsAtPath:tk] || ![fm fileExistsAtPath:tool]) { [sender replyToOpenOrPrint:NSApplicationDelegateReplyFailure]; return; }
+    NSString *data = dataRoot(), *dir = [data stringByAppendingPathComponent:@".python"];
+    for (NSString *disc in paths) {
+        NSTask *t = [NSTask new]; t.executableURL = [NSURL fileURLWithPath:@"/bin/bash"];
+        NSString *script = @"[ -x \"$TP_PY_DIR/python/bin/python3\" ] || { mkdir -p \"$TP_PY_DIR\" && /usr/bin/tar -xf \"$TP_TOOLKIT\" -C \"$TP_PY_DIR\" python && "
+                            "/usr/bin/xattr -r -d com.apple.quarantine \"$TP_PY_DIR\" 2>/dev/null; true; } && exec \"$TP_PY_DIR/python/bin/python3\" -I \"$@\"";
+        t.arguments = @[@"-c", script, @"extras", tool, disc, @"--data", data];
+        NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy]; env[@"TP_PY_DIR"] = dir; env[@"TP_TOOLKIT"] = tk; t.environment = env;
+        NSPipe *pipe = [NSPipe pipe]; t.standardOutput = pipe; t.standardError = pipe;
+        t.terminationHandler = ^(NSTask *task) {
+            NSString *out = [[NSString alloc] initWithData:[pipe.fileHandleForReading readDataToEndOfFile] encoding:NSUTF8StringEncoding] ?: @"";
+            NSString *last = [[out stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsSeparatedByString:@"\n"].lastObject ?: @"";
+            int code = task.terminationStatus;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSAlert *a = [NSAlert new];
+                a.messageText = code ? @"That disc couldn't be imported" : @"Imported from your disc";
+                a.informativeText = code ? last : [last stringByAppendingString:@"\n\nChoose it in the launch window: Sound > Music Type, Display > Ride Videos."];
+                [a runModal];
+            });
+        };
+        if (![t launchAndReturnError:nil]) [sender replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+    }
+    [sender replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
+}
 @end
 
 /* The game's code (27 MB of it) read into memory at the start, in the background: otherwise each part runs from the
@@ -1584,6 +1741,17 @@ static void prefault_code(void) {
 }
 int main(int argc, const char **argv) {
     @autoreleasepool {
+#ifdef DS_EASY_INSTALL
+        if (!getenv("TP_DATA")) {   /* the downloaded app (tools/make_dropin.sh): setup builds the game from the player's copy first */
+            int ds_easy_install(const char **, const char **, const char **);   /* recomp/setup/setup_ui.m: returns when it's ready */
+            const char *exe = 0, *game = 0, *data = 0;
+            if (ds_easy_install(&exe, &game, &data) > 0) {
+                setenv("TP_DATA", data, 1);                                                      /* saves, extras, ride videos */
+                setenv("TP_GAME_DIR", [@(game) stringByAppendingPathComponent:@"GAME"].fileSystemRepresentation, 1);
+                setenv("TP_IMAGE_DIR", [@(exe) stringByDeletingLastPathComponent].fileSystemRepresentation, 1);   /* MAIN.TPIMG, INTRO.TPIMG */
+            }
+        }
+#endif
         prefault_code();
         NSApplication *a = NSApplication.sharedApplication;
         a.activationPolicy = NSApplicationActivationPolicyRegular;
@@ -1617,6 +1785,10 @@ int main(int argc, const char **argv) {
         dbg.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
         [viewMenu addItemWithTitle:@"Visitor View" action:@selector(visitorView:) keyEquivalent:@"V"];   /* ⇧⌘V (experimental) */
         viewItem.submenu = viewMenu;
+        NSMenuItem *helpItem = [NSMenuItem new]; [bar addItem:helpItem];
+        NSMenu *helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
+        [helpMenu addItemWithTitle:@"Controls" action:@selector(showControls:) keyEquivalent:@"/"];
+        helpItem.submenu = helpMenu;
         a.mainMenu = bar;
         AppDelegate *d = [AppDelegate new];
         a.delegate = d;
