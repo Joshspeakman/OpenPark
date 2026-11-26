@@ -205,7 +205,10 @@ int tp_audio_start(void) {
 #ifdef _WIN32
     if (!synth_on && strcmp(how, "FluidSynth")) {
         for (int ch = 0; ch < 16; ch++) cc7[ch] = 100;
-        if (midiOutOpen(&winmm, MIDI_MAPPER, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR) { how = "Windows (winmm)"; winmm_volume(); }
+        /* Windows' synth plays on its own device, past the output a muted run silences: a muted run parses the music as
+         * ever (synth_on) but never opens it. */
+        if (muted) { winmm = NULL; how = "Windows (winmm), muted"; }
+        else if (midiOutOpen(&winmm, MIDI_MAPPER, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR) { how = "Windows (winmm)"; winmm_volume(); }
         else winmm = NULL;
     }
 #endif

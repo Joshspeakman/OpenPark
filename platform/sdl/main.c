@@ -197,12 +197,13 @@ static void update_game_cursor(void) {
         if (game_cursor) { use_cursor(SDL_SYSTEM_CURSOR_ARROW); SDL_FreeCursor(game_cursor); game_cursor = NULL; cur_serial = 0; }
         return;
     }
-    static uint32_t px[64 * 64]; int w = 0, h = 0, ox = 0, oy = 0;
+    static uint32_t px[TP_VIEW_CUR * TP_VIEW_CUR]; int w = 0, h = 0, ox = 0, oy = 0;   /* (view.c fills TP_VIEW_CUR rows of TP_VIEW_CUR) */
     int serial = tp_view_cursor_rgba(px, &w, &h, &ox, &oy);
     Rect vr = view_rect();
     double kx = vr.w / layout_w(), ky = vr.h / sh;   /* points per game pixel */
     /* (its colours too: a new game fades the palette in from black) */
-    uint32_t hash = 2166136261u; for (int y = 0; y < h && y < 64; y++) for (int x = 0; x < w && x < 64; x++) hash = (hash ^ px[y * 64 + x]) * 16777619u;
+    uint32_t hash = 2166136261u;
+    for (int y = 0; y < h && y < TP_VIEW_CUR; y++) for (int x = 0; x < w && x < TP_VIEW_CUR; x++) hash = (hash ^ px[y * TP_VIEW_CUR + x]) * 16777619u;
     if (serial == cur_serial && hash == cur_hash && fabs(kx - cur_kx) < 0.01 && fabs(ky - cur_ky) < 0.01 && (game_cursor || !serial)) return;
     cur_serial = serial; cur_hash = hash; cur_kx = kx; cur_ky = ky;
     if (game_cursor) { use_cursor(SDL_SYSTEM_CURSOR_ARROW); SDL_FreeCursor(game_cursor); game_cursor = NULL; }
@@ -215,7 +216,7 @@ static void update_game_cursor(void) {
     SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, pw, ph, 32, SDL_PIXELFORMAT_RGBA32);
     if (!s) return;
     for (int y = 0; y < ph; y++) for (int x = 0; x < pw; x++) {
-        uint32_t c = px[(y * h / ph) * 64 + x * w / pw];
+        uint32_t c = px[(y * h / ph) * TP_VIEW_CUR + x * w / pw];
         uint8_t *o = (uint8_t *)s->pixels + (size_t)y * s->pitch + x * 4;
         if (!c) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
         o[0] = c & 255; o[1] = (c >> 8) & 255; o[2] = (c >> 16) & 255; o[3] = 255;
