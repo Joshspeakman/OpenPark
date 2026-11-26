@@ -1,5 +1,7 @@
 # OpenPark
 
+[![Buy me a Continue on Ko-fi](https://img.shields.io/badge/Buy_me_a_Continue_%7C_%245-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/speakerjosh)
+
 **Theme Park, natively.** Bullfrog's Theme Park (1994) running as native code. The DOS game's own code is statically recompiled to C and
 compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU emulator at run time. macOS on Apple
 Silicon is the first platform; Windows and Linux are next ([docs/PORTING.md](docs/PORTING.md)). You
@@ -135,3 +137,9 @@ buying land and entering the first park. The native-only runner then reproduces 
 Theme Park is © Bullfrog Productions / Electronic Arts. This is an unofficial fan project, not affiliated with or
 endorsed by them. It distributes no game code, data or art: you need your own copy, and the build reads it on
 your Mac. The project's own source is under the [MIT License](LICENSE).
+
+## Insert Coin
+
+If this got an old favorite running again, you can buy me a Continue on Ko-fi. It's $5 and it keeps me bringing more of them back.
+
+[![Buy me a Continue on Ko-fi](https://img.shields.io/badge/Buy_me_a_Continue_%7C_%245-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/speakerjosh)
