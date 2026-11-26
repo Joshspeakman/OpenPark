@@ -168,8 +168,11 @@ void cv_shadow(Canvas *c, Box b, float r, float blur, Col k) {
     Span s = span_of(c, b.x - reach, b.y - reach, b.x + b.w + reach, b.y + b.h + reach);
     for (int j = s.y0; j < s.y1; j++) {
         uint8_t *p = c->px + ((size_t)j * c->w + s.x0) * 4;
-        for (int i = s.x0; i < s.x1; i++, p += 4)
-            blend(p, k, 0.5f * erfcf(rrect_d(i + 0.5f, j + 0.5f, b, r) / (sigma * 1.41421356f)));
+        for (int i = s.x0; i < s.x1; i++, p += 4) {
+            float d = rrect_d(i + 0.5f, j + 0.5f, b, r);
+            if (d >= reach) continue;                     /* (beyond 3 sigma: nothing; well inside: all of it) */
+            blend(p, k, d <= -reach ? 1 : 0.5f * erfcf(d / (sigma * 1.41421356f)));
+        }
     }
 }
 void cv_stripes(Canvas *c, Box b, float r, float period, float width, float angle_deg, Col k) {

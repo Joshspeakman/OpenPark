@@ -49,6 +49,7 @@ static struct {
     float s;                                         /* device pixels per point */
     Font *poster, *caps, *print, *plain, *ital;
     Canvas *cv;                                      /* the settings view, 1000 x 700 points at s */
+    float ox, oy;                                    /* where cv's pixel (0, 0) is in the view (a layer: its corner) */
     int page, focus, hover, drag_row, dirty;
     int result, done;
     Image *logo, *keyart, *poster_img;               /* poster_img: the riders, cut and sized for the well */
@@ -73,25 +74,34 @@ static float width_of(Face f, const char *t) {
     return text_width(f.f, f.size * L.s, f.kern / f.size, t) / L.s + f.kern;
 }
 static float line_h(Face f) { return f.f ? (font_ascent(f.f, f.size * L.s) + font_descent(f.f, f.size * L.s)) / L.s : f.size; }
+/* A partial repaint (repaint()): the region being drawn, in points; pieces wholly outside it are skipped. */
+static Box clip_pts; static int clipping;
+static int visible(Box b, float margin) {
+    if (!clipping) return 1;
+    return b.x - margin < clip_pts.x + clip_pts.w && b.x + b.w + margin > clip_pts.x && b.y - margin < clip_pts.y + clip_pts.h
+        && b.y + b.h + margin > clip_pts.y;
+}
 /* Text drawn at (x, top of its line box) in points, with an optional shadow (alpha, offset down, AppKit blur). */
 static void text_at(Face f, float x, float top, Col k, const char *t, float sh_a, float sh_dy, float sh_blur) {
     if (!f.f || !t || !*t) return;
     top += f.dy * f.size;
+    if (clipping && !visible(box(x, top, width_of(f, t), line_h(f)), 8)) return;
     float s = L.s, asc = font_ascent(f.f, f.size * s), desc = font_descent(f.f, f.size * s);
     if (sh_a > 0) {
         float w = text_width(f.f, f.size * s, f.kern / f.size, t);
         int m = 2;
         Canvas *layer = cv_new((int)ceilf(w) + 2 * m + 2, (int)ceilf(asc + desc) + 2 * m + 2);
         if (layer) {
-            cv_text(layer, f.f, f.size * s, m + (x * s - floorf(x * s)), m + asc, f.kern / f.size, k, t);
-            float lx = floorf(x * s) - m, ly = floorf(top * s) - m;
+            float px = x * s - L.ox, py = top * s - L.oy;
+            cv_text(layer, f.f, f.size * s, m + (px - floorf(px)), m + asc, f.kern / f.size, k, t);
+            float lx = floorf(px) - m, ly = floorf(py) - m;
             cv_shadow_of(L.cv, layer, lx, ly, 0, sh_dy * s, sh_blur * s, BLACK(sh_a));
             cv_over(L.cv, layer, lx, ly, 1);
             cv_free(layer);
             return;
         }
     }
-    cv_text(L.cv, f.f, f.size * s, x * s, top * s + asc, f.kern / f.size, k, t);
+    cv_text(L.cv, f.f, f.size * s, x * s - L.ox, top * s - L.oy + asc, f.kern / f.size, k, t);
 }
 enum { LEFT, CENTRE, RIGHT };
 /* launcher.m label(): one line, vertically centred in r, cut with "…" at its tail if too wide. */
@@ -138,7 +148,10 @@ static void upper(const char *in, char *out, size_t n) {
 }
 
 /* ---- shapes in points ---- */
-static Box P(Box b) { return box(b.x * L.s, b.y * L.s, b.w * L.s, b.h * L.s); }
+/* Points to the canvas's pixels (its offset: a layer's corner). */
+static float X(float x) { return x * L.s - L.ox; }
+static float Y(float y) { return y * L.s - L.oy; }
+static Box P(Box b) { return box(X(b.x), Y(b.y), b.w * L.s, b.h * L.s); }
 static void rrect(Box b, float r, Col k) { cv_rrect(L.cv, P(b), r * L.s, k); }
 /* An NSBezierPath stroke: `width` centred on the rounded path b (radius r). */
 static void stroke(Box b, float r, float width, Col k) { cv_rrect_line(L.cv, P(inset(b, -width / 2)), (r + width / 2) * L.s, width * L.s, k); }
@@ -146,14 +159,16 @@ static void grad(Box b, float r, const Col *c, const float *pos, int n, float an
 static void grad2(Box b, float r, Col a, Col z, float angle) { Col c[2] = {a, z}; float p[2] = {0, 1}; grad(b, r, c, p, 2, angle); }
 /* shadow(α, dy, blur) under a rounded rect (AppKit's blur radius: sigma = blur / 2). */
 static void shadow(Box b, float r, float a, float dy, float blur) { cv_shadow(L.cv, P(box(b.x, b.y + dy, b.w, b.h)), r * L.s, blur * L.s, BLACK(a)); }
-static void circle(float x, float y, float rad, Col k) { cv_circle(L.cv, x * L.s, y * L.s, rad * L.s, k); }
-static void line(float x0, float y0, float x1, float y1, float w, Col k) { cv_line(L.cv, x0 * L.s, y0 * L.s, x1 * L.s, y1 * L.s, w * L.s, k); }
+static void circle(float x, float y, float rad, Col k) { cv_circle(L.cv, X(x), Y(y), rad * L.s, k); }
+static void ring(float x, float y, float rad, float w, Col k) { cv_ring(L.cv, X(x), Y(y), rad * L.s, w * L.s, k); }
+static void erase(float x, float y, float rad) { cv_erase_circle(L.cv, X(x), Y(y), rad * L.s); }
+static void line(float x0, float y0, float x1, float y1, float w, Col k) { cv_line(L.cv, X(x0), Y(y0), X(x1), Y(y1), w * L.s, k); }
 static void poly(const float *xy, int n, Col k) {
-    float t[64]; for (int i = 0; i < 2 * n && i < 64; i++) t[i] = xy[i] * L.s;
+    float t[64]; for (int i = 0; i < 2 * n && i < 64; i++) t[i] = i % 2 ? Y(xy[i]) : X(xy[i]);
     cv_poly(L.cv, t, n, k);
 }
 static void polyline(const float *xy, int n, float w, int closed, Col k) {
-    float t[200]; for (int i = 0; i < 2 * n && i < 200; i++) t[i] = xy[i] * L.s;
+    float t[200]; for (int i = 0; i < 2 * n && i < 200; i++) t[i] = i % 2 ? Y(xy[i]) : X(xy[i]);
     cv_polyline(L.cv, t, n, w * L.s, closed, k);
 }
 /* A five-point star, first point up (launcher.m:516-521). */
@@ -165,20 +180,25 @@ static void star(float cx, float cy, float r, Col k) {
     }
     poly(xy, 10, k);
 }
-/* Drawing into a layer of its own (its shadow, its cut-outs), then over the view: `into` swaps the canvas. */
-static Canvas *saved_cv;
-static Canvas *layer_begin(void) {
-    Canvas *c = cv_new(L.cv->w, L.cv->h);
+/* Drawing into a layer of its own (its shadow, its cut-outs), then over the view: the canvas swapped for one just the
+ * size of b (points, with room for its edge), the offset moved to its corner. Not nested. */
+static Canvas *saved_cv; static float saved_ox, saved_oy, layer_x, layer_y;
+static Canvas *layer_begin(Box b) {
+    if (!visible(b, 32)) return NULL;
+    b = inset(b, -2);
+    float x0 = floorf(X(b.x)), y0 = floorf(Y(b.y)), x1 = ceilf(X(b.x + b.w)), y1 = ceilf(Y(b.y + b.h));
+    Canvas *c = cv_new((int)(x1 - x0), (int)(y1 - y0));
     if (!c) return NULL;
-    saved_cv = L.cv; L.cv = c;
+    saved_cv = L.cv; saved_ox = L.ox; saved_oy = L.oy; layer_x = x0; layer_y = y0;
+    L.cv = c; L.ox += x0; L.oy += y0;
     return c;
 }
 static void layer_end(Canvas *c, float sh_a, float sh_dy, float sh_blur, Col glow_k, float glow_blur) {
     if (!c) return;
-    L.cv = saved_cv;
-    if (glow_blur > 0) cv_shadow_of(L.cv, c, 0, 0, 0, 0, glow_blur * L.s, glow_k);
-    if (sh_a > 0) cv_shadow_of(L.cv, c, 0, 0, 0, sh_dy * L.s, sh_blur * L.s, BLACK(sh_a));
-    cv_over(L.cv, c, 0, 0, 1);
+    L.cv = saved_cv; L.ox = saved_ox; L.oy = saved_oy;
+    if (glow_blur > 0) cv_shadow_of(L.cv, c, layer_x, layer_y, 0, 0, glow_blur * L.s, glow_k);
+    if (sh_a > 0) cv_shadow_of(L.cv, c, layer_x, layer_y, 0, sh_dy * L.s, sh_blur * L.s, BLACK(sh_a));
+    cv_over(L.cv, c, layer_x, layer_y, 1);
     cv_free(c);
 }
 
@@ -309,6 +329,7 @@ static void plate(Box r, float rad, int lit) {
 static const Col SIGN_GOLD[3] = {{255 / 255.f, 228 / 255.f, 140 / 255.f, 1}, {232 / 255.f, 172 / 255.f, 54 / 255.f, 1}, {150 / 255.f, 94 / 255.f, 22 / 255.f, 1}};
 static const float SIGN_GOLD_AT[3] = {0, 0.45f, 1};
 static void draw_sign(void) {
+    if (!visible(SIGN, 32)) return;
     shadow(SIGN, 18, 0.75f, 6, 18);
     rrect(SIGN, 18, col(46, 8, 16));
     grad(inset(SIGN, 2), 16, SIGN_GOLD, SIGN_GOLD_AT, 3, -90);
@@ -316,7 +337,7 @@ static void draw_sign(void) {
     Col lac[3] = {col(214, 38, 46), col(168, 20, 32), col(104, 10, 22)}; float lac_at[3] = {0, 0.55f, 1};
     grad(in, 8, lac, lac_at, 3, -90);
     /* candy stripes and the sheen, inside the panel's rounded corners */
-    Canvas *c = layer_begin();
+    Canvas *c = layer_begin(in);
     if (c) {
         for (float x = in.x - in.h; x < in.x + in.w; x += 26) {
             float xy[8] = {x, in.y + in.h, x + 12, in.y + in.h, x + 12 + in.h, in.y, x + in.h, in.y};
@@ -341,13 +362,14 @@ static void draw_sign(void) {
         Image *m = img_scaled(L.logo, box(0, 0, (float)L.logo->w, (float)L.logo->h), (int)lroundf(lb.w * L.s), (int)lroundf(lb.h * L.s));
         if (m) {
             Canvas lay = {m->w, m->h, m->px};
-            cv_shadow_of(L.cv, &lay, lb.x * L.s, lb.y * L.s, 0, 4 * L.s, 9 * L.s, BLACK(0.6f));
-            cv_image(L.cv, m, lb.x * L.s, lb.y * L.s, 1);
+            cv_shadow_of(L.cv, &lay, X(lb.x), Y(lb.y), 0, 4 * L.s, 9 * L.s, BLACK(0.6f));
+            cv_image(L.cv, m, X(lb.x), Y(lb.y), 1);
             img_free(m);
         }
     } else label("THEME PARK", kern(poster(64), 3), CREAM, LOGO_AREA, CENTRE, 1);
 }
 static void draw_poster(void) {
+    if (!visible(POSTER, 40)) return;
     shadow(POSTER, 0, 0.8f, 8, 20);
     rrect(POSTER, 0, col(36, 18, 10));
     Col gilt[4] = {col(255, 232, 150), col(214, 156, 46), col(255, 214, 110), col(140, 86, 20)}; float gilt_at[4] = {0, 0.35f, 0.6f, 1};
@@ -355,7 +377,7 @@ static void draw_poster(void) {
     cv_rrect_line(L.cv, P(box(675.5f, 41.5f, 269, 389)), 0, 1.5f * L.s, col(80, 46, 12));
     Box well = {678, 44, 264, 326}, plaque = {678, 370, 264, 56};
     rrect(well, 0, BLACK(1)); rrect(plaque, 0, BLACK(1));
-    if (L.poster_img) cv_image(L.cv, L.poster_img, well.x * L.s, well.y * L.s, 1);
+    if (L.poster_img) cv_image(L.cv, L.poster_img, X(well.x), Y(well.y), 1);
     else grad2(well, 0, col(40, 140, 220), col(230, 120, 60), -70);
     grad2(box(678, 300, 264, 70), 0, BLACK(0), BLACK(0.75f), 90);
     /* NOW OPEN: a band turned 45° up to the right about (718, 84), inside the picture */
@@ -363,7 +385,7 @@ static void draw_poster(void) {
     int bw = (int)ceilf(200 * s), bh = (int)ceilf(48 * s);
     Canvas *band = cv_new(bw, bh);
     if (band) {
-        Canvas *keep = L.cv; L.cv = band;
+        Canvas *keep = L.cv; float kx = L.ox, ky = L.oy; L.cv = band; L.ox = L.oy = 0;
         /* (local origin at (100, 24) points in the band's canvas) */
         Box b = box(100 - 90, 24 - 14, 180, 28);
         shadow(b, 0, 0.6f, 2, 5);
@@ -371,9 +393,9 @@ static void draw_poster(void) {
         rrect(box(10, 24 - 12 - 0.5f, 180, 1), 0, cola(255, 220, 120, 0.9f));
         rrect(box(10, 24 + 11 - 0.5f, 180, 1), 0, cola(255, 220, 120, 0.9f));
         label(L.spec->sash, kern(caps(11), 3.5f), CREAM, box(10, 24 - 10, 180, 20), CENTRE, 0);
-        L.cv = keep;
+        L.cv = keep; L.ox = kx; L.oy = ky;
         cv_clip(L.cv, P(well));
-        cv_over_turned(L.cv, band, 100 * s, 24 * s, 718 * s, 84 * s, -3.14159265f / 4, 1);
+        cv_over_turned(L.cv, band, 100 * s, 24 * s, X(718), Y(84), -3.14159265f / 4, 1);
         cv_unclip(L.cv);
         cv_free(band);
     }
@@ -439,7 +461,7 @@ static void draw_ticket(int g, int state) {
     if (state) r.y -= 4;
     float x = r.x, y = r.y, w = r.w, ny = y + 92;
     Col base = col(t->rgb[0], t->rgb[1], t->rgb[2]), white = col(255, 255, 255), black = col(0, 0, 0);
-    Canvas *c = layer_begin();
+    Canvas *c = layer_begin(r);
     if (c) {
         rrect(r, 9, base);
         grad2(r, 9, shade(base, white, state ? 0.38f : 0.25f), shade(base, black, 0.30f), -90);
@@ -456,13 +478,13 @@ static void draw_ticket(int g, int state) {
             cv_free(mask);
         }
         stroke(box(x + 5.5f, y + 5.5f, w - 11, 92 - 11), 5, 1, cola(255, 247, 226, 0.55f));
-        cv_erase_circle(c, x * L.s, ny * L.s, 7 * L.s);
-        cv_erase_circle(c, (x + w) * L.s, ny * L.s, 7 * L.s);
+        erase(x, ny, 7);
+        erase(x + w, ny, 7);
         if (state) layer_end(c, 0, 0, 0, cola(255, 214, 110, 0.85f), 16);
         else layer_end(c, 0.7f, 4, 6, (Col){0, 0, 0, 0}, 0);
     }
     dots_line(x + 8, ny, x + w - 8, ny, 2.6f, cola(255, 247, 226, 0.7f));
-    Canvas *ic = layer_begin();
+    Canvas *ic = layer_begin(box(x + w / 2 - 26, y + 8, 52, 52));
     if (ic) { icon(g, x + w / 2, y + 12 + 22, CREAM); layer_end(ic, 0.55f, 1.5f, 2, (Col){0, 0, 0, 0}, 0); }
     char title[32]; upper(t->title, title, sizeof title);
     label(title, kern(poster(g == 3 ? 17 : 19), 1.2f), CREAM, box(x + 4, y + 62, w - 8, 24), CENTRE, 1);
@@ -504,7 +526,7 @@ static void draw_button(Box r, const char *title, const char *sub, Col dot, int 
 static void draw_play(int lit, int focused) {
     Box r = PLAY;
     float nx = 790;
-    Canvas *c = layer_begin();
+    Canvas *c = layer_begin(r);
     if (c) {
         rrect(r, 8, col(150, 16, 22));
         Col g1[3] = {col(236, 58, 52), col(186, 24, 32), col(120, 10, 20)}, g2[3] = {col(255, 92, 72), col(210, 34, 38), col(120, 10, 20)};
@@ -524,8 +546,8 @@ static void draw_play(int lit, int focused) {
             cv_free(m);
         }
         stroke(inset(r, 5), 5, 1.5f, cola(255, 214, 110, 0.9f));
-        cv_erase_circle(c, nx * L.s, r.y * L.s, 8 * L.s);
-        cv_erase_circle(c, nx * L.s, (r.y + r.h) * L.s, 8 * L.s);
+        erase(nx, r.y, 8);
+        erase(nx, r.y + r.h, 8);
         if (lit) layer_end(c, 0, 0, 0, cola(255, 120, 90, 0.9f), 18);
         else layer_end(c, 0.8f, 5, 14, (Col){0, 0, 0, 0}, 0);
     }
@@ -534,7 +556,7 @@ static void draw_play(int lit, int focused) {
     label("ONE", kern(print_f(10), 1.4f), col(255, 226, 150), box(738, 621, 48, 14), CENTRE, 0);
     Face f = kern(poster(36), 6);
     float pw = width_of(f, "PLAY"), x = 873 - (pw + 26) / 2, cy = 620;
-    Canvas *tri = layer_begin();
+    Canvas *tri = layer_begin(box(x - 1, cy - 12, 18, 24));
     if (tri) { float xy[6] = {x, cy - 11, x + 16, cy, x, cy + 11}; poly(xy, 3, col(255, 222, 110)); layer_end(tri, 0.8f, 2, 4, (Col){0, 0, 0, 0}, 0); }
     text_at(f, x + 26, cy - line_h(f) / 2 - 1, col(255, 222, 110), "PLAY", 0.8f, 2, 4);
     if (focused) stroke(inset(r, -4), 11, 2, cola(255, 247, 226, 0.9f));
@@ -542,7 +564,7 @@ static void draw_play(int lit, int focused) {
 /* The pennant arrows beside a row's value. */
 static void arrow(Box b, int d, int lit) {
     float cx = b.x + b.w / 2, cy = b.y + b.h / 2, xy[6] = {cx + 10 * d, cy, cx - 8 * d, cy - 10, cx - 8 * d, cy + 10};
-    Canvas *c = layer_begin();
+    Canvas *c = layer_begin(box(cx - 12, cy - 12, 24, 24));
     if (!c) return;
     poly(xy, 3, lit ? col(255, 236, 160) : col(236, 180, 64));
     polyline(xy, 3, 1.1f, 1, col(110, 50, 14));
@@ -572,10 +594,10 @@ static void draw_row(int k) {
         if (kx > tb.x) grad2(box(tb.x, tb.y, kx - tb.x, tb.h), 4.5f, col(255, 228, 140), col(214, 150, 40), -90);
         stroke(tb, 4.5f, 1, with_alpha(GOLD, 0.6f));
         for (int j = 0; j < n; j++) { float tx = tb.x + tb.w * (n > 1 ? (float)j / (n - 1) : 0); rrect(box(tx - 0.5f, tb.y + 2, 1, 5), 0, cola(20, 16, 40, 0.8f)); }
-        Canvas *c = layer_begin();
+        Canvas *c = layer_begin(box(kx - 11, tb.y + tb.h / 2 - 11, 22, 22));
         if (c) {
             circle(kx, tb.y + tb.h / 2, 9, CREAM);
-            cv_ring(L.cv, kx * L.s, (tb.y + tb.h / 2) * L.s, 8 * L.s, 2 * L.s, GOLD_DK);
+            ring(kx, tb.y + tb.h / 2, 8, 2, GOLD_DK);
             layer_end(c, 0.7f, 1.5f, 3, (Col){0, 0, 0, 0}, 0);
         }
     } else label(note, kern(plain(13), 0.3f), MUTED, box(470, r.y + (compact() ? 30 : 40), 474, 18), CENTRE, 1);
@@ -617,8 +639,7 @@ static void draw_board(void) {
             label(pg->footnote[i], kern(ital(14.5f), 0.2f), MUTED, box(94, y0 + 22 * i, 812, 20), CENTRE, 1);
     }
 }
-static void draw_view(void) {
-    memset(L.cv->px, 0, (size_t)L.cv->w * L.cv->h * 4);
+static void draw_body(void) {
     const TpAppSpec *s = L.spec;
     if (L.page < 0) {
         draw_sign();
@@ -657,7 +678,26 @@ static void draw_view(void) {
     char v[96]; upper(L.version[0] ? L.version : "dev", v, sizeof v);
     char vv[128]; snprintf(vv, sizeof vv, "NIGHTLY %s", v);
     label(vv, kern(caps(9.5f), 3), with_alpha(GOLD, 0.6f), box(700, 673, 256, 14), RIGHT, 0);
+}
+static void draw_view(void) {
+    memset(L.cv->px, 0, (size_t)L.cv->w * L.cv->h * 4);
+    draw_body();
     L.dirty = 0;
+}
+/* Only the region r (points) drawn again: cleared, then everything that reaches into it, clipped to it. */
+static void repaint(Box r) {
+    clip_pts = r; clipping = 1;
+    Box pb = P(r);
+    int x0 = (int)floorf(pb.x), y0 = (int)floorf(pb.y), x1 = (int)ceilf(pb.x + pb.w), y1 = (int)ceilf(pb.y + pb.h);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > L.cv->w) x1 = L.cv->w;
+    if (y1 > L.cv->h) y1 = L.cv->h;
+    for (int y = y0; y < y1 && x1 > x0; y++) memset(L.cv->px + ((size_t)y * L.cv->w + x0) * 4, 0, (size_t)(x1 - x0) * 4);
+    cv_clip(L.cv, box((float)x0, (float)y0, (float)(x1 - x0), (float)(y1 - y0)));
+    draw_body();
+    cv_unclip(L.cv);
+    clipping = 0;
 }
 
 /* ---- art ---- */
@@ -727,6 +767,28 @@ static int hit(float x, float y) {
     }
     return -1;
 }
+/* What a hover or focus on hit h repaints (points): the piece with its lift, glow, shadow or ring. */
+static Box hit_box(int h) {
+    if (h == HIT_PLAY) return inset(PLAY, -32);
+    if (h == HIT_QUIT || h == HIT_BACK) return inset(QUIT, -24);
+    if (h == HIT_SAVES) return inset(SAVES, -24);
+    if (h == HIT_UPDATES) return inset(UPDATES, -24);
+    if (h >= 300 && h < 400) { Box b = ticket_box(h - 300); b.y -= 4; b.h += 4; return inset(b, -32); }
+    if (h >= 500 && h < 600) return inset(tile_box(h - 500), -24);
+    if (h >= 100 && h < 500) { Box r = row_box(h % 100); return box(60, r.y - 4, 880, pitch() + 8); }
+    return box(0, 0, 0, 0);
+}
+static Box dirty_box; static int has_dirty;
+static void dirty_region(Box b) {
+    if (b.w <= 0 || b.h <= 0) return;
+    if (!has_dirty) { dirty_box = b; has_dirty = 1; return; }
+    float x0 = fminf(dirty_box.x, b.x), y0 = fminf(dirty_box.y, b.y), x1 = fmaxf(dirty_box.x + dirty_box.w, b.x + b.w), y1 = fmaxf(dirty_box.y + dirty_box.h, b.y + b.h);
+    dirty_box = box(x0, y0, x1 - x0, y1 - y0);
+}
+static void dirty_row(int k) { dirty_region(hit_box(200 + k)); }
+static int hit_of_item(int f);
+/* What a focus on item f repaints: a main-screen item's piece, a page's row; nothing for none. */
+static Box focus_box(int f) { return f < 0 ? box(0, 0, 0, 0) : L.page < 0 ? hit_box(hit_of_item(f)) : hit_box(200 + f); }
 static void open_saves(void) {
     char p[1300]; snprintf(p, sizeof p, "%s/saves", L.data_root); tp_mkdir(p);
     snprintf(p, sizeof p, "%s/saves/save", L.data_root); tp_mkdir(p);
@@ -746,20 +808,23 @@ static void step(int k, int d) {
     switch (r->kind) {
     case TP_ROW_PAGE: if (d > 0) open_page(r->page); return;
     case TP_ROW_FILES: if (d > 0) open_saves(); return;
-    case TP_ROW_RIDETUNES: if (d < 0) settings_sets("RideTunes", ""); L.dirty = 1; return;   /* (→: the chooser, platform/sdl's own page: to come) */
-    case TP_ROW_SOUNDBANK: if (d < 0) settings_sets("SoundBank", ""); L.dirty = 1; return;   /* (→: a file dialog: to come) */
+    case TP_ROW_RIDETUNES: if (d < 0) settings_sets("RideTunes", ""); dirty_row(k); return;   /* (→: the chooser, platform/sdl's own page: to come) */
+    case TP_ROW_SOUNDBANK: if (d < 0) settings_sets("SoundBank", ""); dirty_row(k); return;   /* (→: a file dialog: to come) */
     default: break;
     }
     if (!r->n) return;
     store(r, (index_of(r) + d + r->n) % r->n);
-    L.dirty = 1;
+    dirty_row(k);
 }
-static void step_tile(int k, int d) { const TpRow *r = L.spec->tiles[k]; store(r, (index_of(r) + d + r->n) % r->n); L.dirty = 1; }
+static void step_tile(int k, int d) {                /* (the tickets too: their summaries follow the tiles) */
+    const TpRow *r = L.spec->tiles[k]; store(r, (index_of(r) + d + r->n) % r->n);
+    dirty_region(box(10, 270, 980, 320));
+}
 static void slider_to(int k, float x) {
     const TpRow *r = row_of(L.page, k);
     Box t = track_box(k);
     int i = (int)lroundf(fminf(1, fmaxf(0, (x - t.x) / t.w)) * (r->n - 1));
-    if (i != index_of(r)) { store(r, i); L.dirty = 1; }
+    if (i != index_of(r)) { store(r, i); dirty_row(k); }
 }
 static void finish(int play) { L.result = play; L.done = 1; }
 static void press(int h, float x, int shift) {
@@ -770,9 +835,9 @@ static void press(int h, float x, int shift) {
     if (h == HIT_UPDATES) return;                                   /* (the updater: to come, docs/PC-HANDOFF.md T4) */
     if (h >= 300 && h < 400) { open_page(L.spec->tickets[h - 300].page); return; }
     if (h >= 500 && h < 600) { int k = h - 500; L.focus = 5 + k; step_tile(k, shift || x < tile_box(k).x + 44 ? -1 : 1); return; }
-    if (h >= 400 && h < 500) { L.focus = h - 400; L.drag_row = h - 400; slider_to(h - 400, x); L.dirty = 1; return; }
-    if (h >= 100 && h < 200) { L.focus = h - 100; step(h - 100, -1); L.dirty = 1; return; }
-    if (h >= 200 && h < 300) { L.focus = h - 200; step(h - 200, 1); L.dirty = 1; return; }
+    if (h >= 400 && h < 500) { L.focus = h - 400; L.drag_row = h - 400; slider_to(h - 400, x); return; }
+    if (h >= 100 && h < 200) { L.focus = h - 100; step(h - 100, -1); return; }
+    if (h >= 200 && h < 300) { L.focus = h - 200; step(h - 200, 1); return; }
 }
 /* Main screen focus: 0-4 tickets, 5-8 tiles, 9 Saved Parks, 10 Updates, 11 Quit, 12 Play; rows of 5, 4, 4. */
 static void focus_row_of(int f, int *start, int *count) {
@@ -786,8 +851,8 @@ static void key_down(SDL_Keysym ks) {
         switch (k) {
         case SDLK_RETURN: case SDLK_KP_ENTER: finish(1); return;
         case SDLK_ESCAPE: press(HIT_BACK, 0, 0); return;
-        case SDLK_UP: if (n) L.focus = L.focus < 0 ? n - 1 : (L.focus + n - 1) % n; L.dirty = 1; return;
-        case SDLK_DOWN: if (n) L.focus = L.focus < 0 ? 0 : (L.focus + 1) % n; L.dirty = 1; return;
+        case SDLK_UP: if (n) L.focus = L.focus < 0 ? n - 1 : (L.focus + n - 1) % n; return;
+        case SDLK_DOWN: if (n) L.focus = L.focus < 0 ? 0 : (L.focus + 1) % n; return;
         case SDLK_LEFT: if (L.focus >= 0 && L.focus < n) step(L.focus, -1); return;
         case SDLK_RIGHT: case SDLK_SPACE: if (L.focus >= 0 && L.focus < n) step(L.focus, 1); return;
         default: return;
@@ -802,15 +867,15 @@ static void key_down(SDL_Keysym ks) {
         if (alt && f >= 5 && f < 9) { step_tile(f - 5, d); return; }
         if (f < 0) L.focus = d > 0 ? 0 : 12;
         else { focus_row_of(f, &start, &count); L.focus = start + (f - start + d + count) % count; }
-        L.dirty = 1; return;
+        return;
     }
     case SDLK_DOWN: case SDLK_UP: {
         int d = k == SDLK_DOWN ? 1 : -1;
-        if (f < 0) { L.focus = d > 0 ? 0 : 12; L.dirty = 1; return; }
+        if (f < 0) { L.focus = d > 0 ? 0 : 12; return; }
         focus_row_of(f, &start, &count);
         int row = start == 0 ? 0 : start == 5 ? 1 : 2, nrow = (row + d + 3) % 3, ns = nrow == 0 ? 0 : nrow == 1 ? 5 : 9, nc = nrow == 0 ? 5 : 4;
         int rel = f - start, idx = rel * nc / count; if (idx > nc - 1) idx = nc - 1;
-        L.focus = ns + idx; L.dirty = 1; return;
+        L.focus = ns + idx; return;
     }
     default: return;
     }
@@ -916,7 +981,29 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
     int still = midway_reduce_motion();
 
     if (shot) {
+        double d0 = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
         draw_view(); view = upload(mid, view);
+        fprintf(stderr, "launcher: view drawn in %.1f ms\n", 1000 * ((double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - d0));
+        if (G("TP_LAUNCHER_REPAINT_CHECK")) {
+            /* (a test: the pointer moves to hit h; the region repainted must equal the whole view drawn afresh) */
+            int h = atoi(G("TP_LAUNCHER_REPAINT_CHECK"));
+            dirty_region(hit_box(L.hover)); L.hover = h; dirty_region(hit_box(h));
+            double r0 = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
+            repaint(dirty_box); has_dirty = 0;
+            double r1 = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
+            size_t n = (size_t)L.cv->w * L.cv->h * 4;
+            uint8_t *part = malloc(n);
+            if (part) {
+                memcpy(part, L.cv->px, n);
+                draw_view();
+                int worst = 0; size_t differ = 0;
+                for (size_t i = 0; i < n; i++) { int d = abs((int)part[i] - (int)L.cv->px[i]); if (d > worst) worst = d; if (d > 2) differ++; }
+                fprintf(stderr, "launcher: repaint for hit %d: %.0f x %.0f pt in %.1f ms; against a whole drawing: %zu bytes differ by more than 2, worst %d\n",
+                        h, dirty_box.w, dirty_box.h, 1000 * (r1 - r0), differ, worst);
+                free(part);
+            }
+            view = upload(mid, view);
+        }
         compose(ren, view, mid, t0);
         uint8_t *px = malloc((size_t)cw * ch * 4);
         int rc = 1;
@@ -932,6 +1019,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
         SDL_ShowWindow(win); SDL_RaiseWindow(win);
         double start = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
         double profile = G("TP_LAUNCHER_PROFILE") ? atof(G("TP_LAUNCHER_PROFILE")) : 0, longest = 0, total = 0; int ticks = 0;
+        int drawn_page = L.page, drawn_hover = L.hover, drawn_focus = L.focus;
         while (!L.done) {
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
@@ -942,7 +1030,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
                 case SDL_MOUSEMOTION:
                     x = e.motion.x * 1000.f / w; y = e.motion.y * 700.f / h;
                     if (L.drag_row >= 0) slider_to(L.drag_row, x);
-                    { int hh = hit(x, y); if (hh != L.hover) { L.hover = hh; L.dirty = 1; } }
+                    L.hover = hit(x, y);
                     break;
                 case SDL_MOUSEBUTTONDOWN:
                     x = e.button.x * 1000.f / w; y = e.button.y * 700.f / h;
@@ -957,7 +1045,28 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
                 }
             }
             double now = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), t = still ? t0 : t0 + now - start;
-            if (L.dirty) { draw_view(); view = upload(mid, view); }
+            /* what changed since the view was drawn: a page (all of it), else the hover's and focus's pieces, old and new */
+            if (L.page != drawn_page) L.dirty = 1;
+            if (!L.dirty) {
+                if (L.hover != drawn_hover) { dirty_region(hit_box(drawn_hover)); dirty_region(hit_box(L.hover)); }
+                if (L.focus != drawn_focus) {
+                    dirty_region(focus_box(drawn_focus));
+                    dirty_region(focus_box(L.focus));
+                }
+            }
+            drawn_page = L.page; drawn_hover = L.hover; drawn_focus = L.focus;
+            if (!L.dirty && has_dirty) {
+                double d0 = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
+                repaint(dirty_box); has_dirty = 0; view = upload(mid, view);
+                if (profile > 0) fprintf(stderr, "launcher: %.0f x %.0f pt drawn again in %.1f ms\n", dirty_box.w, dirty_box.h,
+                                         1000 * ((double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - d0));
+            }
+            if (L.dirty) {
+                has_dirty = 0;
+                double d0 = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
+                draw_view(); view = upload(mid, view);
+                if (profile > 0) fprintf(stderr, "launcher: view drawn in %.1f ms\n", 1000 * ((double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - d0));
+            }
             compose(ren, view, mid, t);
             SDL_RenderPresent(ren);
             double spent = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - now;
