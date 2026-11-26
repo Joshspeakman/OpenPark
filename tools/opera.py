@@ -17,7 +17,7 @@ RAW = 2352
 
 class Disc:
     def __init__(self, path):
-        self.f = open(path, 'rb')
+        self.f = path if hasattr(path, 'read') else open(path, 'rb')   # (or a file: tools/extras.py's data track in memory)
         v = self.sector(0)
         if v[0] != 1 or v[1:6] != b'\x5a' * 5:
             raise ValueError('not a 3DO Opera volume')
