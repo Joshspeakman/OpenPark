@@ -238,9 +238,10 @@ static void clamp_center(void) {
 static void update_geometry(void) {
     int nsw, nsh, nwh; tp_view_geometry(&nsw, &nsh, &nwh);
     if (nsw == sw) return;
-    double k = sw ? (double)nsw / sw : 1;
     sw = nsw; sh = nsh; wh = nwh;
-    if (view_on) { cx *= k; cy *= k; clamp_center(); last_lw = layout_w(); tp_view_set(1, cx, cy, zoom, last_lw); }
+    /* (the canvas is the same in both modes, the art the same size: the view stays where it was. Scaling it by the
+     * screens' ratio put a switch to 640x480 twice as far from the park's corner, as the Mac's f71ccf9 found) */
+    if (view_on) { clamp_center(); last_lw = layout_w(); tp_view_set(1, cx, cy, zoom, last_lw); }
 }
 static double min_zoom(void) { double w, h; tp_view_canvas_size(&w, &h); return fmax(0.1, fmin(layout_w() / w, wh / h)); }
 /* Turns the park view on or off as zoom and the window's shape ask, and tells view.c where it looks. */
@@ -291,7 +292,7 @@ static void center_on(double ncx, double ncy) {     /* canvas point (development
 }
 static void edge_pan(void) {                        /* the pointer at the window's edge scrolls, as in the game */
     if (!mouse_in || !focused || !live) return;
-    Rect r = view_rect(); double x = mouse_x, y = mouse_y, m = 6, v = 9;
+    Rect r = view_rect(); double x = mouse_x, y = mouse_y, m = 6, v = 9.0 * 320 / (sw > 0 ? sw : 320);   /* (the same park pixels in both modes) */
     double fx = (x - r.x) / r.w, fy = (y - r.y) / r.h;
     double lw = layout_w(), col = (lw - sw) / 2 / lw;
     int panel = fy > (double)wh / sh && fx >= col && fx < 1 - col;   /* over the panel: only its outer edge scrolls */
@@ -466,6 +467,20 @@ static void present_walk(void) {
 
 /* ---- the game ---- */
 static volatile int game_done, game_result;
+/* Whether a <save>.big marker is anywhere under `dir` (the game writes its saves in save/). */
+static int has_big_save(const char *dir, int depth) {
+    DIR *d = opendir(dir); struct dirent *e; int found = 0;
+    while (d && !found && (e = readdir(d))) {
+        size_t n = strlen(e->d_name);
+        if (e->d_name[0] == '.') continue;
+        char p[1400]; snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (n > 4 && !strcmp(e->d_name + n - 4, ".big")) found = 1;
+        else if (depth < 4 && stat(p, &st) == 0 && S_ISDIR(st.st_mode)) found = has_big_save(p, depth + 1);
+    }
+    if (d) closedir(d);
+    return found;
+}
 static void env_default(const char *name, long value) {
     if (getenv(name)) return;
     char v[32]; snprintf(v, sizeof v, "%ld", value); setenv(name, v, 1);
@@ -487,18 +502,15 @@ static void settings_to_env(void) {
     env_default("TP_FREE_RULES", settings_get("FreeRules"));   /* (freemode.c: 0 sandbox, 1 endless, 2 true freeplay) */
     env_default("TP_FREE_RAMP", settings_get("FreeRamp"));
     env_default("TP_BIG_MAPS", settings_get("FreeMapSize") == 128);   /* (bigmap.c: room for 128x128 sandbox parks) */
-    {   /* a saved 128x128 park (its marker, <save>.big): room to load it whatever the setting */
-        int found = 0; DIR *d = opendir(saves_dir); struct dirent *e;
-        while (d && (e = readdir(d))) { size_t n = strlen(e->d_name); if (n > 4 && !strcmp(e->d_name + n - 4, ".big")) found = 1; }
-        if (d) closedir(d);
-        env_default("TP_BIG_ROOM", found);
-    }
+    /* a saved 128x128 park (its marker, <save>.big, beside the save in save/): room to load it whatever the setting */
+    env_default("TP_BIG_ROOM", has_big_save(saves_dir, 0));
     if (!settings_get("SteadyPacing") && !getenv("TP_PACING")) setenv("TP_PACING", "dosbox", 1);
     char tunes[464]; settings_gets("RideTunes", tunes, sizeof tunes);
     if (*tunes && !getenv("TP_RIDE_TUNES")) setenv("TP_RIDE_TUNES", tunes, 1);
 }
 static int game_thread(void *arg) {
     (void)arg;
+    tp_plat_game_thread();                               /* (Windows: above normal, as the Mac's user-interactive thread) */
     /* THEME.BAT runs INTRO.EXE, then MAIN.EXE. */
     if (*intro_path) {
         tp_host_set_image(intro_path);
@@ -833,7 +845,7 @@ static void key_down(const SDL_KeyboardEvent *k) {
     if (walk_drop && s == SDL_SCANCODE_ESCAPE) { end_drop(); return; }   /* no Visitor View after all */
     if (tp_walk_active()) { walk_key(s, 1); return; }
     if (view_on && (s == SDL_SCANCODE_LEFT || s == SDL_SCANCODE_RIGHT || s == SDL_SCANCODE_UP || s == SDL_SCANCODE_DOWN)) {   /* the park view: the arrows move it */
-        double step = 40;
+        double step = 40.0 * 320 / (sw > 0 ? sw : 320);   /* (the same park pixels in both modes) */
         pan_by(s == SDL_SCANCODE_LEFT ? -step : s == SDL_SCANCODE_RIGHT ? step : 0, s == SDL_SCANCODE_UP ? -step : s == SDL_SCANCODE_DOWN ? step : 0);
         return;
     }
