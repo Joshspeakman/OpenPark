@@ -7,7 +7,7 @@ from pathlib import Path
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_INTR, UC_HOOK_INSN, UC_HOOK_MEM_WRITE, UcError
 from unicorn import x86_const as U
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from dos import DOS, Stop, MEMORY, GDT, load_image, scratch_profile
+from dos import DOS, Stop, MEMORY, GDT, load_image, scratch_profile, run_timeout
 
 
 class Original:
@@ -46,7 +46,7 @@ class Original:
 
     def run_blocks(self,budget):
         self.budget=budget;self.blocks_run=0;self.interrupt_number=0
-        self.uc.emu_start(self.get('eip'),0,timeout=10000000,count=10000000)
+        self.uc.emu_start(self.get('eip'),0,count=10000000,**run_timeout(10000000))
         self.budget=None
         return self.interrupt_number
 

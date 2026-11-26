@@ -23,7 +23,9 @@ if [[ "${3:-}" == --park ]]; then
   input_args=(--keys 60:1c0d,80:1454,82:1245,84:1f53,86:1454,88:1c0d,120:3b00,300:3d00
     --clicks 180:564:316,220:280:90
     --block-clicks 2450000:72:310,2650000:568:316,2800000:604:380)
-  trace_args=(--quantum 1000 --blocks 8000000 --seconds 60)
+  # (a time cap only: the trace must reach its 8,000,000 blocks. The PC's Python does about 110,000 a second, so it
+  # needs about 72 s, against the Mac's under 60)
+  trace_args=(--quantum 1000 --blocks 8000000 --seconds 180)
   native_args=(--quantum 1000 --blocks 8000000)
 fi
 "$PYTHON" tools/trace_startup.py "$1" --out work/check-startup "${trace_args[@]}" "${input_args[@]}"

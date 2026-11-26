@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from unicorn import UC_HOOK_INTR, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UC_HOOK_INSN, UcError
 from unicorn import x86_const as U
-from dos import DOS, Stop, REGS, SEGMENTS, MEMORY, load_image, scratch_profile
+from dos import DOS, Stop, REGS, SEGMENTS, MEMORY, load_image, scratch_profile, run_timeout
 from trace_startup import Original
 from lift_dos import create_lifter, ROOT
 from native_host import Native
@@ -125,7 +125,7 @@ def main():
                     seen_block[0] = True
                 hook = original.uc.hook_add(UC_HOOK_CODE,next_block)
                 original.uc.ctl_remove_cache(0,MEMORY)
-                original.uc.emu_start(original.get('eip'),0,timeout=1000000,count=1000000)
+                original.uc.emu_start(original.get('eip'),0,count=1000000,**run_timeout(1000000))
                 original.uc.hook_del(hook)
                 for reg in REGS+SEGMENTS+('eip',):
                     if native.get(reg)!=original.get(reg):
@@ -151,7 +151,7 @@ def main():
                 if original_number!=number or original.blocks_run!=native.lib.tp_blocks():
                     raise AssertionError(('quantum',comparisons,original_number,number,original.blocks_run,native.lib.tp_blocks(),hex(original.get('eip')),hex(native.get('eip'))))
             else:
-                original.uc.emu_start(original.get('eip'), 0, timeout=10000000, count=10000000)
+                original.uc.emu_start(original.get('eip'), 0, count=10000000, **run_timeout(10000000))
         if boundary != ([number] if number else []):
             raise AssertionError(('interrupt divergence',number,boundary))
         if hosts[0].io != hosts[1].io:

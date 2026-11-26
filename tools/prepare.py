@@ -55,6 +55,13 @@ def extract_installer(installer, extracted, source):
     for item in sorted(raw.iterdir()):
         if item.name not in INSTALLER_ONLY:
             shutil.move(str(item), str(source / item.name))
+    # GOG's install copies __support/app over the game (goggame-*.script, "DOSBoxConfig"). Its THEME.CD holds the sound
+    # setup the game reads (SNDSETUP.INF) and THEME.BAT; the rest is DOSBox and its settings, which stay out.
+    overlay = raw / '__support/app/THEME.CD'
+    if overlay.is_dir():
+        (source / 'THEME.CD').mkdir(exist_ok=True)
+        for item in sorted(overlay.iterdir()):
+            shutil.copy2(item, source / 'THEME.CD' / item.name)
 
 
 def main():
