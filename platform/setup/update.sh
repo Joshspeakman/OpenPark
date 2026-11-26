@@ -1,5 +1,5 @@
 #!/bin/bash
-# The app's updater (Contents/MacOS/update). "update --check" prints the newest release's tag; "update" downloads it and
+# The app's updater (Contents/Resources/update, put there by tools/make_dropin.sh). "update --check" prints the newest release's tag; "update" downloads it and
 # swaps it in. Saves and game files live outside the app, and the next launch rebuilds the game only if its code changed.
 set -euo pipefail
 REPO="@REPO@"; ASSET="@ASSET@"
@@ -16,7 +16,8 @@ curl -fsSL -m 1800 -o "$T/new.zip" "$WEB/$REPO/releases/download/$TAG/$ASSET"
 echo "== unpacking"
 /usr/bin/ditto -x -k "$T/new.zip" "$T/x"
 NEW="$(/usr/bin/find "$T/x" -maxdepth 2 -name '*.app' -type d | /usr/bin/head -1)"
-[ -n "$NEW" ] && [ -x "$NEW/Contents/MacOS/update" ] || { echo "== that download doesn't look right"; exit 1; }
+# (a release app: its updater where make_dropin.sh puts it; Contents/MacOS/update in the other ports' layout)
+[ -n "$NEW" ] && { [ -x "$NEW/Contents/Resources/update" ] || [ -x "$NEW/Contents/MacOS/update" ]; } || { echo "== that download doesn't look right"; exit 1; }
 echo "== installing"
 mv "$APP" "$T/old.app"
 mv "$NEW" "$APP" || { mv "$T/old.app" "$APP"; echo "== couldn't replace the app"; exit 1; }
