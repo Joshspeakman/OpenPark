@@ -87,12 +87,12 @@ RUNTIME=(runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/n
          platform/windows/platform_windows.c runtime/platform_pool.c)
 # The app: the game's window, its sound and settings, and the launch window (launcher.c, drawn by draw.c and midway.c).
 APP=(platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c platform/sdl/launcher.c platform/sdl/draw.c platform/sdl/midway.c
-     platform/sdl/card.c)
+     platform/sdl/card.c platform/sdl/dialog.c)
 # (the commit, for the launch window's NIGHTLY label: read from .git, as MSYS2's shell may have no git of its own)
 BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || "$PYTHON" tools/git_head.py 2>/dev/null || echo dev)
 "$CC" -O2 -Wall -Wno-unused-function -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I "$INC" -I runtime $(pkg-config --cflags sdl2) ${SYNTH[@]+"${SYNTH[@]}"} \
   -DTP_BUILD="\"$BUILD_ID\"" "${APP[@]}" "${RUNTIME[@]}" work/app-release/game.a work/app-release-intro/game.a "$OUT/app.res.o" \
-  ${SYNTH_LIBS[@]+"${SYNTH_LIBS[@]}"} $(pkg-config --static --libs sdl2) -lz -lwinmm -lpthread -o "$NEW/ThemePark.exe"
+  ${SYNTH_LIBS[@]+"${SYNTH_LIBS[@]}"} $(pkg-config --static --libs sdl2) -lz -lwinmm -lcomdlg32 -lpthread -o "$NEW/ThemePark.exe"
 if [[ -n ${TP_FLUIDSYNTH:-} ]]; then                 # (FluidSynth links dynamically: its DLLs beside the program)
   ldd "$NEW/ThemePark.exe" | awk '/clang64|clangarm64|ucrt64/ {print $3}' | while read -r dll; do cp "$dll" "$NEW/"; done
 fi

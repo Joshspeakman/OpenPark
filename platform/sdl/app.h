@@ -18,6 +18,12 @@ int settings_has(const char *key);
  * program's folder (with fonts/ and art/, ending in a separator); version: the build's commit, shown and checked. */
 int tp_launcher_run(const char *data_root, const char *res_dir, const char *version);
 
+/* dialog.c: the system's Open dialog for a SoundFont or DLS file (Windows: comdlg32; Linux: zenity, else kdialog).
+ * 1 and the path (UTF-8) in out when one was chosen. */
+#include <stddef.h>
+struct SDL_Window;
+int tp_pick_soundfont(struct SDL_Window *parent, char *out, size_t n);
+
 /* card.c: the controls card (the Mac's TPControlsCard) as premultiplied RGBA, pw x ph pixels at scale s (pixels per
  * point); the caller frees it. res_dir as tp_launcher_run's. */
 uint8_t *tp_card_render(int pw, int ph, float s, const char *res_dir);

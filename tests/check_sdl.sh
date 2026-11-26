@@ -13,7 +13,7 @@ RUNTIME=(runtime/host.c runtime/sha256.c runtime/sb16.c runtime/verify.c runtime
          runtime/qol.c runtime/walk.c runtime/bigmap.c runtime/freemode.c runtime/cinepak.c runtime/app_spec.c)
 case $(uname -s) in
   Darwin) PLAT=(platform/macos/platform_macos.c); LIBS=(-lz) ;;
-  MINGW*|MSYS*|CYGWIN*) PLAT=(platform/windows/platform_windows.c runtime/platform_pool.c); LIBS=(-lz -lwinmm -lpthread) ;;
+  MINGW*|MSYS*|CYGWIN*) PLAT=(platform/windows/platform_windows.c runtime/platform_pool.c); LIBS=(-lz -lwinmm -lcomdlg32 -lpthread) ;;
   *) PLAT=(runtime/platform_posix.c runtime/platform_pool.c); LIBS=(-lz -lm -lpthread) ;;
 esac
 mkdir -p build/check-sdl
@@ -27,13 +27,13 @@ INC=vendor/freedom-force-recomp/recomp/runtime
 # shellcheck disable=SC2086
 "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Werror -I runtime $SDL_CFLAGS -c platform/sdl/settings.c -o build/check-sdl/settings.o
 # The launch window and its drawing (draw.c compiles the vendored stb libraries, which it quiets itself)
-for f in launcher draw midway card; do
+for f in launcher draw midway card dialog; do
   # shellcheck disable=SC2086
   "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Werror -I runtime $SDL_CFLAGS -c platform/sdl/$f.c -o build/check-sdl/$f.o
 done
 # shellcheck disable=SC2086
 "$CC" -std=gnu11 -O1 -w -I "$INC" -I runtime build/check-sdl/main.o build/check-sdl/audio.o build/check-sdl/settings.o \
-  build/check-sdl/launcher.o build/check-sdl/draw.o build/check-sdl/midway.o build/check-sdl/card.o \
+  build/check-sdl/launcher.o build/check-sdl/draw.o build/check-sdl/midway.o build/check-sdl/card.o build/check-sdl/dialog.o \
   "${RUNTIME[@]}" "${PLAT[@]}" tests/stub_game.c $SDL_LIBS "${LIBS[@]}" -o build/check-sdl/ThemePark
 echo "the SDL app compiles and links ($(uname -s))"
 scratch=$(mktemp -d)

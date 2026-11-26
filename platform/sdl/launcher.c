@@ -55,6 +55,7 @@ static struct {
     Image *logo, *keyart, *poster_img;               /* poster_img: the riders, cut and sized for the well */
     int update_state; char update_latest[64];
     char data_root[1024], res_dir[1024], version[64];
+    SDL_Window *win;                                 /* (the file chooser's owner) */
 } L;
 
 static const char *G(const char *k) { const char *v = getenv(k); return v && *v ? v : NULL; }
@@ -227,6 +228,29 @@ static int tunes_changed(void) {
     int n = 0; for (char *p = t; *p; p++) if (*p == ':') n++;
     return n;
 }
+/* RideTunes: "type:tune,type:tune" (tune 0: none); a type not in it plays the game's own. As the Mac's pop-ups: item 0 the
+ * game's, 1 none, 2.. tunes 1..22 (launcher.m:330-368). */
+enum { TUNE_ITEMS = TP_TUNES + 2 };
+static void tunes_read(int item[TP_RIDE_TYPES]) {
+    char t[464]; settings_gets("RideTunes", t, sizeof t);
+    for (int i = 0; i < TP_RIDE_TYPES; i++) item[i] = 0;
+    for (char *p = t; *p;) {
+        int k, v, n = 0;
+        if (sscanf(p, "%d:%d%n", &k, &v, &n) == 2 && k >= 0 && k < TP_RIDE_TYPES && v >= 0 && v <= TP_TUNES) item[k] = v + 1;
+        p += n > 0 ? n : 1;
+        while (*p == ',' || *p == ' ') p++;
+    }
+}
+static void tunes_write(const int item[TP_RIDE_TYPES]) {
+    char t[464] = ""; size_t o = 0;
+    for (int i = 0; i < TP_RIDE_TYPES && o + 12 < sizeof t; i++)
+        if (item[i] > 0) o += (size_t)snprintf(t + o, sizeof t - o, "%s%d:%d", o ? "," : "", i, item[i] - 1);
+    settings_sets("RideTunes", t);
+}
+static void tune_text(int k, int item, char *out, size_t n) {
+    if (item == 0) { int g = tp_ride_type_tune(k); snprintf(out, n, "The Game's (%s)", g ? tp_tune_label(g) : "none"); }
+    else snprintf(out, n, "%s", tp_tune_label(item - 1));
+}
 static void summary(int page, char *out, size_t n);
 /* A row's value and note as shown (launcher.m valueOf / noteOf). */
 static void row_text(const TpRow *r, char *value, size_t vn, const char **note) {
@@ -292,7 +316,9 @@ static const Box SIGN = {44, 30, 584, 166}, LOGO_AREA = {88, 80, 496, 94}, POSTE
                  UPDATES = {232, 592, 236, 56}, QUIT = {556, 592, 162, 56}, PLAY = {734, 588, 222, 64}, BOARD = {44, 30, 912, 536};
 static Box ticket_box(int g) { return box(44 + g * 119.2f, 310, 107.2f, 132); }
 static Box tile_box(int k) { return box(44 + k * 231.f, 484, 219, 82); }
-static int page_rows(void) { return L.page >= 0 ? L.spec->pages[L.page].n : 0; }
+/* The Ride Tunes chooser: a page of this app's (the Mac's is a panel of pop-ups, launcher.m:330-368), opened from Music. */
+enum { PAGE_TUNES = TP_NPAGES };
+static int page_rows(void) { return L.page == PAGE_TUNES ? TP_RIDE_TYPES : L.page >= 0 ? L.spec->pages[L.page].n : 0; }
 static int compact(void) { return page_rows() > 6; }
 static float pitch(void) {
     int n = page_rows(); float avail = L.page == TP_PAGE_FREE ? 364 : 420;
@@ -608,6 +634,26 @@ static void draw_row(int k) {
         grad(box(78, r.y + pitch() - 0.5f, 844, 1), 0, c, at, 3, 0);
     }
 }
+/* The chooser: the 29 ride types in two columns, each with its tune between the pennant arrows; changed ones in gold. */
+static Box tune_box(int k) { return box(k < 15 ? 78 : 502, 122 + (k % 15) * 28.5f, 420, 28); }
+static Box tune_arrow(int k, int right) { Box b = tune_box(k); return box(right ? b.x + 388 : b.x + 154, b.y + 3, 24, 22); }
+static void draw_tunes(void) {
+    int item[TP_RIDE_TYPES]; tunes_read(item);
+    for (int k = 0; k < TP_RIDE_TYPES; k++) {
+        Box b = tune_box(k);
+        int focused = L.focus == k, hover = L.hover == 600 + k || L.hover == 700 + k;
+        if (!visible(b, 8)) continue;
+        if (focused || hover) {
+            rrect(inset(b, -2), 7, with_alpha(GOLD, focused ? 0.16f : 0.09f));
+            if (focused) stroke(inset(b, -2), 7, 1, with_alpha(GOLD, 0.5f));
+        }
+        label(tp_ride_type_name(k), kern(plain(15), 0.2f), CREAM, box(b.x + 10, b.y, 142, 28), LEFT, 1);
+        char v[64]; tune_text(k, item[k], v, sizeof v);
+        label(v, kern(poster(16), 0.4f), item[k] ? GOLD : CREAM, box(b.x + 180, b.y, 206, 28), CENTRE, 1);
+        arrow(tune_arrow(k, 0), -1, L.hover == 700 + k);
+        arrow(tune_arrow(k, 1), 1, hover);
+    }
+}
 static void draw_board(void) {
     shadow(BOARD, 16, 0.85f, 8, 22);
     rrect(BOARD, 16, NIGHT(0.94f));
@@ -617,6 +663,11 @@ static void draw_board(void) {
     grad2(box(73, 57, 854, 46), 6, col(214, 38, 46), col(150, 16, 28), -90);
     star(95, 80, 7, GOLD); star(905, 80, 7, GOLD);
     char t[112], a[48], b[48];                       /* (room for both titles and the dot between) */
+    if (L.page == PAGE_TUNES) {
+        label("MUSIC  ·  RIDE TUNES", kern(poster(30), 5), col(255, 226, 130), box(73, 57, 854, 46), CENTRE, 1);
+        draw_tunes();
+        return;
+    }
     const TpPage *pg = &L.spec->pages[L.page];
     if (pg->parent >= 0) { upper(L.spec->pages[pg->parent].title, a, sizeof a); upper(pg->title, b, sizeof b); snprintf(t, sizeof t, "%s  ·  %s", a, b); }
     else upper(pg->title, t, sizeof t);
@@ -671,6 +722,8 @@ static void draw_body(void) {
         draw_play(L.focus == 12 || L.hover == HIT_PLAY, L.focus == 12);
     } else {
         draw_board();
+        if (L.page == PAGE_TUNES)
+            draw_button(UPDATES, "ALL THE GAME'S", "Every ride its own tune", (Col){0, 0, 0, 0}, 0, L.hover == HIT_UPDATES ? 1 : 0);
         draw_button(QUIT, "BACK", NULL, (Col){0, 0, 0, 0}, 0, L.hover == HIT_BACK ? 1 : 0);
         draw_play(L.hover == HIT_PLAY, 0);
     }
@@ -758,6 +811,14 @@ static int hit(float x, float y) {
         for (int k = 0; k < L.spec->ntiles; k++) if (in_box(tile_box(k), x, y)) return 500 + k;
         return -1;
     }
+    if (L.page == PAGE_TUNES) {
+        if (in_box(UPDATES, x, y)) return HIT_UPDATES;
+        for (int k = 0; k < TP_RIDE_TYPES; k++) {
+            if (in_box(inset(tune_arrow(k, 0), -4), x, y)) return 700 + k;
+            if (in_box(tune_box(k), x, y)) return 600 + k;
+        }
+        return -1;
+    }
     if (L.page == TP_PAGE_CONTROLS) return -1;
     for (int k = 0; k < page_rows(); k++) {
         const TpRow *r = row_of(L.page, k);
@@ -775,6 +836,7 @@ static Box hit_box(int h) {
     if (h == HIT_UPDATES) return inset(UPDATES, -24);
     if (h >= 300 && h < 400) { Box b = ticket_box(h - 300); b.y -= 4; b.h += 4; return inset(b, -32); }
     if (h >= 500 && h < 600) return inset(tile_box(h - 500), -24);
+    if (h >= 600 && h < 800) return inset(tune_box(h % 100), -6);
     if (h >= 100 && h < 500) { Box r = row_box(h % 100); return box(60, r.y - 4, 880, pitch() + 8); }
     return box(0, 0, 0, 0);
 }
@@ -788,7 +850,9 @@ static void dirty_region(Box b) {
 static void dirty_row(int k) { dirty_region(hit_box(200 + k)); }
 static int hit_of_item(int f);
 /* What a focus on item f repaints: a main-screen item's piece, a page's row; nothing for none. */
-static Box focus_box(int f) { return f < 0 ? box(0, 0, 0, 0) : L.page < 0 ? hit_box(hit_of_item(f)) : hit_box(200 + f); }
+static Box focus_box(int f) {
+    return f < 0 ? box(0, 0, 0, 0) : L.page < 0 ? hit_box(hit_of_item(f)) : hit_box((L.page == PAGE_TUNES ? 600 : 200) + f);
+}
 static void open_saves(void) {
     char p[1300]; snprintf(p, sizeof p, "%s/saves", L.data_root); tp_mkdir(p);
     snprintf(p, sizeof p, "%s/saves/save", L.data_root); tp_mkdir(p);
@@ -808,13 +872,27 @@ static void step(int k, int d) {
     switch (r->kind) {
     case TP_ROW_PAGE: if (d > 0) open_page(r->page); return;
     case TP_ROW_FILES: if (d > 0) open_saves(); return;
-    case TP_ROW_RIDETUNES: if (d < 0) settings_sets("RideTunes", ""); dirty_row(k); return;   /* (→: the chooser, platform/sdl's own page: to come) */
-    case TP_ROW_SOUNDBANK: if (d < 0) settings_sets("SoundBank", ""); dirty_row(k); return;   /* (→: a file dialog: to come) */
+    case TP_ROW_RIDETUNES:                                  /* →: the chooser; ←: every ride back to its own */
+        if (d > 0) open_page(PAGE_TUNES); else { settings_sets("RideTunes", ""); dirty_row(k); }
+        return;
+    case TP_ROW_SOUNDBANK: {                                /* →: a SoundFont or DLS file; ←: back to built-in */
+        char path[1024] = "";
+        if (d < 0) settings_sets("SoundBank", "");
+        else if (tp_pick_soundfont(L.win, path, sizeof path) && path[0]) settings_sets("SoundBank", path);
+        dirty_row(k);
+        return;
+    }
     default: break;
     }
     if (!r->n) return;
     store(r, (index_of(r) + d + r->n) % r->n);
     dirty_row(k);
+}
+static void tune_step(int k, int d) {
+    int item[TP_RIDE_TYPES]; tunes_read(item);
+    item[k] = (item[k] + d + TUNE_ITEMS) % TUNE_ITEMS;
+    tunes_write(item);
+    dirty_region(hit_box(600 + k));
 }
 static void step_tile(int k, int d) {                /* (the tickets too: their summaries follow the tiles) */
     const TpRow *r = L.spec->tiles[k]; store(r, (index_of(r) + d + r->n) % r->n);
@@ -830,7 +908,16 @@ static void finish(int play) { L.result = play; L.done = 1; }
 static void press(int h, float x, int shift) {
     if (h == HIT_PLAY) { finish(1); return; }
     if (h == HIT_QUIT) { finish(0); return; }
-    if (h == HIT_BACK) { int parent = L.spec->pages[L.page].parent; open_page(parent >= 0 ? parent : -1); L.focus = -1; return; }
+    if (h == HIT_BACK) {
+        int parent = L.page == PAGE_TUNES ? TP_PAGE_MUSIC : L.spec->pages[L.page].parent;
+        open_page(parent >= 0 ? parent : -1); L.focus = -1; return;
+    }
+    if (L.page == PAGE_TUNES) {
+        if (h == HIT_UPDATES) { settings_sets("RideTunes", ""); L.dirty = 1; return; }    /* (all the game's) */
+        if (h >= 600 && h < 700) { L.focus = h - 600; tune_step(h - 600, 1); return; }
+        if (h >= 700 && h < 800) { L.focus = h - 700; tune_step(h - 700, -1); return; }
+        return;
+    }
     if (h == HIT_SAVES) { open_saves(); return; }
     if (h == HIT_UPDATES) return;                                   /* (the updater: to come, docs/PC-HANDOFF.md T4) */
     if (h >= 300 && h < 400) { open_page(L.spec->tickets[h - 300].page); return; }
@@ -853,8 +940,10 @@ static void key_down(SDL_Keysym ks) {
         case SDLK_ESCAPE: press(HIT_BACK, 0, 0); return;
         case SDLK_UP: if (n) L.focus = L.focus < 0 ? n - 1 : (L.focus + n - 1) % n; return;
         case SDLK_DOWN: if (n) L.focus = L.focus < 0 ? 0 : (L.focus + 1) % n; return;
-        case SDLK_LEFT: if (L.focus >= 0 && L.focus < n) step(L.focus, -1); return;
-        case SDLK_RIGHT: case SDLK_SPACE: if (L.focus >= 0 && L.focus < n) step(L.focus, 1); return;
+        case SDLK_LEFT: if (L.focus >= 0 && L.focus < n) { if (L.page == PAGE_TUNES) tune_step(L.focus, -1); else step(L.focus, -1); } return;
+        case SDLK_RIGHT: case SDLK_SPACE:
+            if (L.focus >= 0 && L.focus < n) { if (L.page == PAGE_TUNES) tune_step(L.focus, 1); else step(L.focus, 1); }
+            return;
         default: return;
         }
     }
@@ -893,6 +982,7 @@ static void setup_fonts(void) {
     for (int i = 0; i < 5; i++) if (i != 3) font_set_fallback(*slots[i], L.plain);   /* (Alegreya Sans has every arrow) */
 }
 static int open_page_named(const char *name) {
+    if (!SDL_strcasecmp(name, "ride tunes")) return PAGE_TUNES;
     for (int p = 0; p < TP_NPAGES; p++) if (!SDL_strcasecmp(L.spec->pages[p].title, name)) return p;
     return -1;
 }
@@ -959,6 +1049,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
     SDL_Window *win = SDL_CreateWindow("Theme Park", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ww, wh,
                                        SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
     if (!win) { fprintf(stderr, "launcher: %s\n", SDL_GetError()); return 1; }
+    L.win = win;
     { char icon[1300]; snprintf(icon, sizeof icon, "%sicon.bmp", res_dir); SDL_Surface *s = SDL_LoadBMP(icon); if (s) { SDL_SetWindowIcon(win, s); SDL_FreeSurface(s); } }
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE);
     if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_TARGETTEXTURE);
