@@ -1,6 +1,6 @@
 # Method and reference provenance
 
-Read the user's private [LLM-Decomp-Guides](https://github.com/Joshspeakman/LLM-Decomp-Guides):
+Read from the author's private [LLM-Decomp-Guides](https://github.com/Joshspeakman/LLM-Decomp-Guides):
 README, general working practices, Dungeon Siege 1 overview and chapters 02
 (recompiler), 03 (Win32), 04 (graphics), 09 (verification), 12 (pitfalls), and the
 Dungeon Siege 2 springboard. Applied its survey-first method, original-vs-native
@@ -12,7 +12,7 @@ Existing ports reviewed read-only:
   harness, background/muted runs, and overlay architecture. `prove_native.py`
   and the build import its lifter and include its runtime headers. Since
   2026-10-19 (issue #8) the six files used are vendored unchanged in
-  `vendor/freedom-force-recomp/recomp/` (both projects are the user's own);
+  `vendor/freedom-force-recomp/recomp/` (both projects are the author's own);
   `config/reference.json` pins the source commit and their hashes, checked
   before every use (`flow_targets.py`, imported lazily by `lift.py`, was missing
   from the pins and is now included). All game hooks and overrides are empty in this

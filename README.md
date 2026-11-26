@@ -32,7 +32,7 @@ The title on a lit marquee sign, the settings as ride tickets, quick settings al
 play; behind it your own park at dusk (its picture is taken when you quit), with searchlights and fireworks.
 
 **Status: beta 1.4.** The intro and the whole game run natively, at the original's pace. The recompiled code is
-checked against the original x86 code: scripted runs and long random-play runs match it. See [the plan](docs/PLAN.md) for what is verified and what is not, and [the port audit](docs/reports/2026-10-18-port-audit.md)
+checked against the original x86 code: scripted runs and long random-play runs match it. See [the port audit](docs/reports/2026-10-18-port-audit.md)
 for coverage, the original developers' unfinished features, and a modding map.
 
 ## What you get
@@ -63,8 +63,8 @@ for coverage, the original developers' unfinished features, and a modding map.
 | Platform | Status |
 |---|---|
 | macOS, Apple Silicon | **Playable** (this beta) |
-| Windows (x86-64) | **In progress** on the [`pc` branch](https://github.com/Joshspeakman/OpenPark/tree/pc): builds from GOG's Windows installer, passes the golden first-park check, plays into a new park, and has the same launch window; matching the Mac app feature by feature |
-| Linux (x86-64) | **In progress** on the same branch: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
+| Windows (x86-64) | **In progress**: builds from GOG's Windows installer, passes the golden first-park check, plays into a new park, and has the same launch window; matching the Mac app feature by feature |
+| Linux (x86-64) | **In progress**: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
 
 **Windows and Linux, as of 2026-11-25.** One app on three systems: the same recompiled game, the same settings (one
 shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 front end in place of the Mac's Cocoa one.
@@ -83,7 +83,6 @@ shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 fro
   - game windows in the wide view;
   - opening another release's disc from the app;
   - a drag-and-drop setup like the Mac's.
-- The checklist and results: [docs/PC-HANDOFF.md on `pc`](https://github.com/Joshspeakman/OpenPark/blob/pc/docs/PC-HANDOFF.md).
 
 How a platform is added, and what is portable today: [docs/PORTING.md](docs/PORTING.md).
 
