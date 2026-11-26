@@ -21,6 +21,7 @@ void tp_audio_stop(void);
 void tp_audio_set_volumes(float sfx, float music);
 int tp_audio_cd_play(const char *path, int loop); void tp_audio_cd_stop(void);
 BOOL tp_launcher_run(void);
+#include "app_spec.h"
 struct Ctx;
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 int tp_dispatch(struct Ctx *); void tp_dispatch_init(void);
@@ -1115,9 +1116,12 @@ static void *game_thread(void *arg) {
     }
     setenv("TP_IMAGE", _image.fileSystemRepresentation, 1);
     NSUserDefaults *u = NSUserDefaults.standardUserDefaults;
-    [u registerDefaults:@{@"SoundVolume": @1.0, @"MusicVolume": @0.8, @"MusicType": @0, @"RideVideos": @1, @"Sound": @YES, @"Cycles": @15000, @"PlayIntro": @YES, @"Widescreen": @YES, @"NativePasses": @YES,
-                          @"GrossOutGap": @0, @"PurchaseGap": @0, @"RideMusic": @YES, @"ParkTune": @0, @"FreeVisitors": @0, @"FreeBus": @0, @"FreeMapSize": @64, @"FreeRules": @0, @"FreeRamp": @60, @"SteadyPacing": @YES, @"PanelScale": @0.75,
-                          @"GameSoundVolume": @1.0, @"SystemSoundVolume": @1.0, @"EwVolume": @1.0, @"PurchaseVolume": @1.0}];
+    {   /* the settings' defaults: runtime/app_spec.c (shared with platform/sdl) */
+        const TpAppSpec *sp = tp_app_spec(); NSMutableDictionary *d = [NSMutableDictionary dictionary];
+        for (int i = 0; i < sp->ndefaults; i++) { const TpDefault *x = &sp->defaults[i];
+            d[@(x->key)] = x->is_bool ? @(x->value != 0) : x->value == floor(x->value) ? @((long long)x->value) : @(x->value); }
+        [u registerDefaults:d];
+    }
     /* Builds before 2026-10-17 counted a REP string instruction as one instruction, where DOSBox
      * charges every repetition: their "Original" ran about 1.9 times GOG's speed. The player found it
      * about 20% too fast, so a saved Original becomes 1.5x once (the launcher offers exact Original). */

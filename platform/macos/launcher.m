@@ -17,9 +17,11 @@
  * and are read by main.m.
  * TP_LAUNCHER_SHOT=<png> renders the window to an image and exits (TP_LAUNCHER_OPEN=<group> with a group open,
  * TP_LAUNCHER_FOCUS=<n> with item n focused, TP_LAUNCHER_HOVER=<hit> with something under the pointer, TP_LAUNCHER_TIME=<s>
- * the animation's clock, TP_LAUNCHER_PARK=<png> another park's picture, TP_LAUNCHER_PROFILE=<s> ticks' cost, then quits). */
+ * the animation's clock, TP_LAUNCHER_PARK=<png> another park's picture, TP_LAUNCHER_NO_ART=1 the drawn fallbacks only,
+ * TP_LAUNCHER_PROFILE=<s> ticks' cost, then quits). The rows, tickets, tiles, controls and words: runtime/app_spec.c. */
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
+#include "app_spec.h"                 /* (runtime/: the pages, rows, tickets, tiles, controls and words, shared with platform/sdl) */
 
 static NSColor *rgb(int r, int g, int b) { return [NSColor colorWithSRGBRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:1]; }
 static NSColor *rgba(int r, int g, int b, double a) { return [NSColor colorWithSRGBRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:a]; }
@@ -107,6 +109,7 @@ static NSImage *drawn_px(NSSize px, void (^draw)(NSRect r)) {   /* (one point a 
     NSImage *i = [[NSImage alloc] initWithSize:px]; [i addRepresentation:rep]; return i;
 }
 static void rfill(NSRect r) { NSRectFillUsingOperation(r, NSCompositingOperationSourceOver); }   /* (NSRectFill copies: a see-through colour punched holes) */
+static NSString *S(const char *c) { return c ? @(c) : @""; }
 static double frand(unsigned k) { k ^= k >> 13; k *= 0x5bd1e995u; k ^= k >> 15; return (k & 0xffffff) / (double)0x1000000; }   /* (steady: the same each run) */
 static NSImage *bulb_img(BOOL lit, NSColor *c) {
     return drawn(NSMakeSize(22, 22), ^(NSRect r) {
@@ -127,16 +130,9 @@ static NSImage *glow_img(NSColor *c, CGFloat rad) {          /* a soft point of 
 
 /* The controls, one table for the launch window's Controls page and the in-game card (main.m, ⌘/ or Help > Controls). */
 NSArray<NSArray<NSString *> *> *tp_controls_rows(void) {
-    return @[
-        @[@"Click", @"Select, build, place"], @[@"Right- or Control-click", @"Cancel, rotate, close panels"],
-        @[@"Pinch or ⌘-scroll", @"Zoom the park in and out"], @[@"⌘=  ⌘−  ⌘0", @"Zoom in, zoom out, actual size"],
-        @[@"Scroll, arrows, drag", @"Move the view (middle- or Option-drag)"], @[@"Hold Tab", @"Fast forward"],
-        @[@"R in the park", @"The game's 640 × 480 mode, and back"], @[@"⌘E", @"Save a picture of the whole park"],
-        @[@"Game controller", @"Sticks move; A, B click; shoulders zoom"],
-        @[@"Hold View + Menu", @"Quit from a game controller (one second)"],
-        @[@"Escape", @"Skips the intro"], @[@"⌃⌘F", @"Full screen"], @[@"⌘/", @"This card, in the game"],
-        @[@"⌘Q", @"Quit (save in the game first)"],
-    ];
+    const TpAppSpec *sp = tp_app_spec(); NSMutableArray *a = [NSMutableArray array];
+    for (int i = 0; i < sp->ncontrols; i++) [a addObject:@[S(sp->controls[i][0]), S(sp->controls[i][1])]];
+    return a;
 }
 
 /* ---- the midway: animated layers behind and over the settings (Core Animation, set from one clock) ---- */
@@ -310,22 +306,8 @@ static Setting setting(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray
 static Setting slider(NSString *t, NSString *k, NSArray *v, NSArray *l, NSArray *n) { Setting s = {t, k, v, l, n, YES}; return s; }
 
 /* ---- music: the game's tunes and its ride types (the type table at 0x1cced0, in order) ---- */
-static NSString *const ride_types[29] = {@"Flight Sim", @"Tree House", @"Pirate Boat", @"Plane Flyer", @"Maze", @"Ghost House",
-    @"Haunted House", @"Rubber Tubing", @"Race Car Ride", @"Roller Coaster", @"Loop the Loop", @"Cork Screw", @"Big Wheel",
-    @"Merry-Go-Round", @"Bouncy Castle", @"Space Shuttle", @"Big Dipper", @"Water Splash", @"Monorail", @"Snakes and Ladders",
-    @"Observation Tower", @"Parasol Chairs", @"Cowboy Acts", @"Clown Acts", @"Dolphin Acts", @"Medieval Acts", @"Super Spinner",
-    @"Observatory", @"Planet Rocket"};
-static const int ride_tune[29] = {13, 5, 6, 12, 5, 4, 4, 9, 15, 2, 0, 0, 1, 1, 15, 13, 14, 0, 17, 11, 12, 17, 7, 8, 16, 10, 12, 3, 1};
-NSString *tp_tune_name(int t) {
-    static NSString *const jingles[5] = {@"Heartbeat", @"Fanfare", @"Takeover", @"Winner", @"Funeral"};
-    return t <= 0 ? @"None" : t <= 17 ? [NSString stringWithFormat:@"Ride Tune %d", t] : jingles[t - 18];
-}
-NSString *tp_tune_note(int t) {                         /* which rides play it in the game */
-    if (t > 17) return @"One of the game's jingles, played on and on";
-    NSMutableArray *who = [NSMutableArray array];
-    for (int i = 0; i < 29; i++) if (ride_tune[i] == t) [who addObject:ride_types[i]];
-    return who.count ? [@"As played by " stringByAppendingString:[who componentsJoinedByString:@", "]] : @"A tune no ride plays in the game";
-}
+NSString *tp_tune_name(int t) { return S(tp_tune_label(t)); }
+NSString *tp_tune_note(int t) { return S(tp_tune_about(t)); }    /* which rides play it in the game */
 /* Per ride type: the game's tune, none, or another (RideTunes: {type index: tune, 0 none}). */
 void tp_ride_tunes_window(NSWindow *parent) {
     NSDictionary *cur = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"RideTunes"] ?: @{};
@@ -339,11 +321,11 @@ void tp_ride_tunes_window(NSWindow *parent) {
     NSMutableArray<NSPopUpButton *> *pops = [NSMutableArray array];
     for (int i = 0; i < 29; i++) {
         CGFloat y = doc.frame.size.height - 36 - i * 30;
-        NSTextField *l = [NSTextField labelWithString:ride_types[i]]; l.frame = NSMakeRect(12, y + 3, 180, 20); [doc addSubview:l];
+        NSTextField *l = [NSTextField labelWithString:S(tp_ride_type_name(i))]; l.frame = NSMakeRect(12, y + 3, 180, 20); [doc addSubview:l];
         NSPopUpButton *pb = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(200, y, 250, 26) pullsDown:NO];
-        [pb addItemWithTitle:ride_tune[i] ? [NSString stringWithFormat:@"The Game's (%@)", tp_tune_name(ride_tune[i])] : @"The Game's (none)"];
+        [pb addItemWithTitle:tp_ride_type_tune(i) ? [NSString stringWithFormat:@"The Game's (%@)", tp_tune_name(tp_ride_type_tune(i))] : @"The Game's (none)"];
         [pb addItemWithTitle:@"None"];
-        for (int t = 1; t <= 22; t++) [pb addItemWithTitle:tp_tune_name(t)];
+        for (int t = 1; t <= TP_TUNES; t++) [pb addItemWithTitle:tp_tune_name(t)];
         NSNumber *v = cur[[NSString stringWithFormat:@"%d", i]];
         [pb selectItemAtIndex:v ? [v intValue] + 1 : 0];
         [doc addSubview:pb]; [pops addObject:pb];
@@ -570,10 +552,9 @@ static void icon(NSInteger g, NSRect b, NSColor *c) {
 
 @implementation TPLaunchView {
     NSImage *_logo, *_park, *_posterImg; BOOL _parkSoft;
-    Setting _top[4];
+    Setting _rows[64]; int _nrows;                 /* every row of runtime/app_spec.c, as the view uses them */
     int _ustate; NSString *_latest, *_updater, *_branch, *_built;   /* the Updates button (below) */
     NSArray<NSString *> *_groups;                  /* the pages: the five tickets', then Music and Effects (within Sound) */
-    Setting _display[8], _sound[9], _tweaks[7], _free[5], _links[5];
     Setting *_page[7][10]; int _npage[7];
     Setting *_tile[N_TILES];
 }
@@ -613,100 +594,17 @@ static void icon(NSInteger g, NSRect b, NSColor *c) {
                 }
             }
         }
-        NSArray *vol = @[@0.0, @0.1, @0.2, @0.3, @0.4, @0.5, @0.6, @0.7, @0.8, @0.9, @1.0];
-        NSArray *volL = @[@"Off", @"10%", @"20%", @"30%", @"40%", @"50%", @"60%", @"70%", @"80%", @"90%", @"100%"];
-        NSArray *volN = @[@"", @"", @"", @"", @"", @"", @"", @"", @"", @"", @""];
-        _top[0] = setting(@"Game Speed", @"Cycles", @[@10000, @12500, @15000, @20000, @40000], @[@"Original", @"1.25×", @"1.5×", @"2×", @"4×"],
-                          @[@"Exactly as GOG's DOSBox runs it", @"A quarter faster than GOG's DOSBox", @"Half again as fast as GOG's DOSBox",
-                            @"Twice GOG's DOSBox", @"Four times: the seasons fly by"]);
-        _top[2] = setting(@"Language", @"Language", @[@0, @1, @2, @3, @4], @[@"English", @"Deutsch", @"Italiano", @"Español", @"Français"],
-                          @[@"The game's text and advisors", @"Texte und Berater des Spiels", @"Testi e consiglieri del gioco",
-                            @"Textos y asesores del juego", @"Textes et conseillers du jeu"]);
-        _top[3] = setting(@"Updates", @"Updates", @[@""], @[@""], @[@""]);   /* (its value and note: the updater's state) */
-        _top[1] = setting(@"Intro", @"PlayIntro", @[@YES, @NO], @[@"Play", @"Skip"],
-                          @[@"The 1994 intro movie; Escape skips it", @"Straight to the title screen"]);
-        _groups = @[@"Game", @"Display", @"Sound", @"Free Mode", @"Controls", @"Music", @"Effects"];
-        _display[7] = setting(@"Ride Videos", @"RideVideos", @[@0, @1, @2], @[@"PC", @"PC + 3DO", @"3DO"],
-                              @[@"The PC's ride videos only", @"The PC's, and the 3DO's for Space Shuttle and Tree House",
-                                @"The 3DO's in full colour, the PC's for the rest"]);
-        _display[0] = setting(@"Screen", @"StartFullScreen", @[@NO, @YES], @[@"Window", @"Full Screen"],
-                              @[@"A window you can resize; ⌃⌘F switches", @"The whole display; ⌃⌘F switches"]);
-        _display[1] = setting(@"Pixels", @"SmoothPixels", @[@0, @1, @2], @[@"Sharp", @"Smooth", @"CRT"],
-                              @[@"Square pixels, as the game drew them", @"Softened as they are scaled up", @"Soft, with a 1994 monitor's scanlines"]);
-        _display[2] = setting(@"Aspect", @"Stretch", @[@NO, @YES], @[@"4:3", @"Fill the Window"],
-                              @[@"The shape a 1994 monitor gave it", @"Stretched to the window's shape"]);
-        _sound[0] = setting(@"Sound", @"Sound", @[@YES, @NO], @[@"On", @"Off"],
-                            @[@"Sound Blaster effects and General MIDI music", @"The park is silent"]);
-        _sound[8] = setting(@"Music Type", @"MusicType", @[@0, @1, @2], @[@"General MIDI", @"Amiga CD32", @"3DO Recorded"],
-                            @[@"The game's MIDI tunes, as on the PC", @"The CD32 disc's own tracks (tools/extras.py imports them)",
-                              @"The 3DO's recordings of the PC tunes (tools/extras.py imports them)"]);
-        _sound[7] = setting(@"Music Instruments", @"SoundBank", @[@""], @[@"Built-in"],
-                            @[@"The Mac's synthesizer; → picks a SoundFont"]);
-        _sound[1] = slider(@"Effects Volume", @"SoundVolume", vol, volL, volN);
-        _sound[6] = slider(@"Music Volume", @"MusicVolume", vol, volL, volN);
-        _sound[2] = slider(@"Game Sounds", @"GameSoundVolume", vol, volL, volN);     /* (qol.c: rides, people, the ew, purchases) */
-        _sound[5] = slider(@"System Sounds", @"SystemSoundVolume", vol, volL, volN); /* (the button clicks) */
-        NSArray *lv = @[@0.0, @0.25, @0.5, @0.75, @1.0], *lvL = @[@"Off", @"Quarter", @"Half", @"Three Quarters", @"Full"];   /* (as the game's EXTRAS menu) */
-        _sound[3] = slider(@"Ew Volume", @"EwVolume", lv, lvL, @[@"Visitors keep their disgust to themselves", @"The \"ew\" at a quarter of the game sounds",
-                           @"The \"ew\" at half the game sounds", @"The \"ew\" at three quarters of the game sounds", @"The \"ew\" as loud as the other game sounds"]);
-        _sound[4] = slider(@"Till Volume", @"PurchaseVolume", lv, lvL, @[@"Visitors pay quietly", @"The till at a quarter of the game sounds",
-                           @"The till at half the game sounds", @"The till at three quarters of the game sounds", @"The till as loud as the other game sounds"]);
-        _display[5] = setting(@"Start In", @"StartHiRes", @[@NO, @YES], @[@"320 × 200", @"640 × 480"],
-                              @[@"The game's usual screen; R in the park switches", @"The game's SVGA mode: more of the park at once"]);
-        _display[4] = setting(@"Wide Windows", @"Widescreen", @[@YES, @NO], @[@"More Park", @"Black Bars"],
-                              @[@"The park fills the window; the panel stays centred", @"The game's 4:3 picture, as on a CRT"]);
-        _display[6] = setting(@"Zoomed Drawing", @"NativePasses", @[@YES, @NO], @[@"Native", @"The Game's"],
-                              @[@"Zoomed-out views drawn by the new engine: faster", @"Zoomed-out views drawn by the game's own code"]);
-        _tweaks[6] = slider(@"Panel Size", @"PanelScale", @[@0.5, @0.75, @1.0, @1.25, @1.5, @1.75, @2.0], @[@"0.5×", @"0.75×", @"The Game's", @"1.25×", @"1.5×", @"1.75×", @"2×"],
-                              @[@"The panel and the advisor half size, more park in view (wide windows)", @"The panel and the advisor three quarters size (wide windows)",
-                                @"The panel and the advisor as drawn in 1994", @"The panel and the advisor a quarter larger (wide windows)",
-                                @"The panel and the advisor half as large again (wide windows)", @"The panel and the advisor 1.75 times as large (wide windows)",
-                                @"The panel and the advisor twice as large (wide windows)"]);
-        _display[3] = setting(@"Mouse Pointer", @"ShowMacCursor", @[@NO, @YES], @[@"The Game's", @"Both"],
-                            @[@"The Mac's pointer hides over the game", @"The Mac's pointer stays visible too"]);
-        NSMutableArray *tunes = [NSMutableArray arrayWithObject:@0], *tuneL = [NSMutableArray arrayWithObject:@"None"],
-                       *tuneN = [NSMutableArray arrayWithObject:@"Quiet where no ride's music plays"];
-        for (int t = 1; t <= 22; t++) { [tunes addObject:@(t)]; [tuneL addObject:tp_tune_name(t)]; [tuneN addObject:tp_tune_note(t)]; }
-        _tweaks[0] = setting(@"Ew How Often", @"GrossOutGap", @[@0, @5, @15, @30, @-1], @[@"Every Time", @"Every 5 s", @"Every 15 s", @"Every 30 s", @"Off"],
-                             @[@"The \"ew\" each time a visitor sees a mess, as in 1994", @"At most one \"ew\" every 5 seconds",
-                               @"At most one \"ew\" every 15 seconds", @"At most one \"ew\" every 30 seconds", @"Visitors keep their disgust to themselves"]);
-        _tweaks[1] = setting(@"Till How Often", @"PurchaseGap", @[@0, @5, @15, @30, @-1], @[@"Every Time", @"Every 5 s", @"Every 15 s", @"Every 30 s", @"Off"],
-                             @[@"The till rings for every purchase on screen", @"At most one till every 5 seconds",
-                               @"At most one till every 15 seconds", @"At most one till every 30 seconds", @"Visitors pay quietly"]);
-        _tweaks[2] = setting(@"Ride Music", @"RideMusic", @[@YES, @NO], @[@"On", @"Off"],
-                             @[@"Running rides on screen play their tunes", @"No ride tunes (the game's fanfares still play)"]);
-        _tweaks[3] = setting(@"Ride Tunes", @"RideTunes", @[@""], @[@"The Game's"], @[@"Each ride plays its own tune; → chooses per ride"]);
-        _tweaks[4] = setting(@"Park Music", @"ParkTune", tunes, tuneL, tuneN);
-        _tweaks[5] = setting(@"Frame Pacing", @"SteadyPacing", @[@YES, @NO], @[@"Steady", @"Like DOSBox"],
-                             @[@"Every frame the same length, in step with the display", @"The game's speed follows how busy the screen is, as in 1994"]);
-        _free[0] = setting(@"Rules", @"FreeRules", @[@0, @1, @2], @[@"Sandbox", @"Endless", @"True Freeplay"],
-                           @[@"The game's sandbox, at the settings you choose", @"Starts as easy as the first parks and grows to the hardest; research as normal",
-                             @"Every ride and shop researched, and money that never runs out"]);
-        _free[1] = setting(@"Endless Ramp", @"FreeRamp", @[@36, @60, @120], @[@"3 Years", @"5 Years", @"10 Years"],
-                           @[@"Endless parks reach the hardest in three game years", @"Endless parks reach the hardest in five game years",
-                             @"Endless parks reach the hardest in ten game years"]);
-        _free[2] = setting(@"Visitors", @"FreeVisitors", @[@0, @1000, @2500, @5000, @10000], @[@"The Game's", @"1,000", @"2,500", @"5,000", @"10,000"],
-                           @[@"800 in a 64 × 64 park, 10,000 in a 128 × 128 one", @"Up to 1,000, about all a 64 × 64 park can hold",
-                             @"Up to 2,500 in a 128 × 128 park (1,000 in a 64 × 64 one)", @"Up to 5,000 in a 128 × 128 park (1,000 in a 64 × 64 one)",
-                             @"Up to 10,000 in a 128 × 128 park (1,000 in a 64 × 64 one)"]);
-        _free[4] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
-                           @[@"The game's park size", @"4× the land; buses bring 4× the visitors, who stay twice as long"]);
-        _free[3] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
-                           @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
-                             @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
-        _links[2] = setting(@"Music Options", @"page:5", @[@""], @[@""], @[@"Music type, instruments, ride and park tunes"]);
-        _links[3] = setting(@"Effect Options", @"page:6", @[@""], @[@""], @[@"Game and system sounds, the ew and the till"]);
-        _links[4] = setting(@"Saved Parks", @"files", @[@""], @[@"Show in Finder"], @[@"Your saved parks' folder"]);
-        Setting *pages[7][10] = {
-            {&_top[0], &_top[1], &_top[2], &_tweaks[5], &_links[4]},
-            {&_display[0], &_display[5], &_display[2], &_display[4], &_tweaks[6], &_display[1], &_display[3], &_display[6], &_display[7]},
-            {&_sound[0], &_sound[6], &_sound[1], &_links[2], &_links[3]},
-            {&_free[0], &_free[1], &_free[2], &_free[4], &_free[3]},
-            {0},
-            {&_sound[8], &_sound[7], &_tweaks[2], &_tweaks[3], &_tweaks[4]},
-            {&_sound[2], &_sound[5], &_sound[3], &_tweaks[0], &_sound[4], &_tweaks[1]}};
-        for (int g = 0; g < 7; g++) { _npage[g] = 0; for (int k = 0; k < 10 && pages[g][k]; k++) _page[g][_npage[g]++] = pages[g][k]; }
-        _tile[0] = &_display[0]; _tile[1] = &_display[5]; _tile[2] = &_top[0]; _tile[3] = &_display[1];
+        if (getenv("TP_LAUNCHER_NO_ART")) { _logo = nil; _posterImg = nil; _park = nil; _parkSoft = NO; }   /* (references: the drawn fallbacks only,
+                                                        * no GOG art and no park picture: tools/launcher_reference.sh) */
+        {   /* the settings, pages and tiles: runtime/app_spec.c */
+            const TpAppSpec *sp = tp_app_spec(); NSMutableArray *groups = [NSMutableArray array];
+            for (int g = 0; g < TP_NPAGES; g++) {
+                const TpPage *pg = &sp->pages[g]; [groups addObject:S(pg->title)]; _npage[g] = 0;
+                for (int k = 0; k < pg->n && k < 10; k++) _page[g][_npage[g]++] = [self settingFor:pg->rows[k]];
+            }
+            _groups = groups;
+            for (int k = 0; k < sp->ntiles && k < N_TILES; k++) _tile[k] = [self settingFor:sp->tiles[k]];
+        }
         self.open = -1; self.hover = HIT_NONE; self.focus = -1; self.dragRow = -1;
         _updater = [NSBundle.mainBundle pathForResource:@"update" ofType:nil];
         if (![NSFileManager.defaultManager fileExistsAtPath:_updater ?: @""]) _updater = nil;
@@ -722,6 +620,21 @@ static void icon(NSInteger g, NSRect b, NSColor *c) {
     }
     return self;
 }
+/* A row of the spec as the view's Setting (made once per row) */
+- (Setting *)settingFor:(const TpRow *)r {
+    NSString *key = r->kind == TP_ROW_PAGE ? [NSString stringWithFormat:@"page:%d", r->page] : r->kind == TP_ROW_FILES ? @"files" : S(r->key);
+    for (int i = 0; i < _nrows; i++) if ([_rows[i].key isEqual:key]) return &_rows[i];
+    NSMutableArray *v = [NSMutableArray array], *l = [NSMutableArray array], *n = [NSMutableArray array];
+    for (int i = 0; i < r->n; i++) {
+        double x = r->choices[i].value;
+        [v addObject:r->kind == TP_ROW_BOOL ? @(x != 0) : x == floor(x) ? @((long long)x) : @(x)];
+        [l addObject:S(r->choices[i].label)]; [n addObject:S(r->choices[i].note)];
+    }
+    if (!r->n) { [v addObject:@""]; [l addObject:r->kind == TP_ROW_PAGE ? @"" : S(r->value)]; [n addObject:S(r->note)]; }
+    Setting st = {S(r->title), key, v, l, n, r->kind == TP_ROW_SLIDER};
+    _rows[_nrows] = st; return &_rows[_nrows++];
+}
+- (Setting *)key:(NSString *)k { const TpRow *r = tp_app_row(k.UTF8String); return r ? [self settingFor:r] : NULL; }
 - (void)checkUpdates {
     if (!_updater) { _ustate = UPD_NONE; return; }
     _ustate = UPD_CHECKING; self.needsDisplay = YES;
@@ -766,7 +679,7 @@ static void icon(NSInteger g, NSRect b, NSColor *c) {
 
 - (NSInteger)rowCount { return self.open < 0 ? 0 : _npage[self.open]; }
 - (Setting *)rowSetting:(NSInteger)k { return _page[self.open][k]; }
-static const int page_parent[7] = {-1, -1, -1, -1, -1, 2, 2};
+static int page_parent_of(NSInteger g) { return g >= 0 && g < TP_NPAGES ? tp_app_spec()->pages[g].parent : -1; }
 static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key isEqual:@"files"]; }
 - (NSInteger)valueIndex:(Setting *)s {
     id v = [NSUserDefaults.standardUserDefaults objectForKey:s->key];
@@ -849,7 +762,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
 - (NSRect)playRect { return NSMakeRect(734, 588, 222, 64); }
 - (NSRect)board { return NSMakeRect(44, 30, 912, 536); }
 - (NSRect)rowRect:(NSInteger)k {
-    NSRect p = self.board; CGFloat top = p.origin.y + 96, avail = NSMaxY(p) - 20 - top - (self.open == 3 ? 56 : 0);
+    NSRect p = self.board; CGFloat top = p.origin.y + 96, avail = NSMaxY(p) - 20 - top - (tp_app_spec()->pages[self.open].footnote[0] ? 56 : 0);
     CGFloat pitch = MIN(72, floor(avail / MAX(1, self.rowCount)));
     return NSMakeRect(p.origin.x + 34, top + pitch * k, p.size.width - 68, pitch);
 }
@@ -889,7 +802,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
 - (void)press:(NSInteger)h back:(BOOL)back {
     if (h == HIT_PLAY) { self.result = YES; self.done = YES; }
     else if (h == HIT_QUIT) { self.result = NO; self.done = YES; }
-    else if (h == HIT_BACK) { self.open = self.open >= 0 ? page_parent[self.open] : -1; self.focus = -1; }
+    else if (h == HIT_BACK) { self.open = self.open >= 0 ? page_parent_of(self.open) : -1; self.focus = -1; }
     else if (h == HIT_SAVES) [self openFiles];
     else if (h == HIT_UPDATES) [self runUpdate];
     else if (h >= 500) [self stepSetting:_tile[h - 500] by:back ? -1 : 1];
@@ -962,13 +875,13 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
 /* ---- drawing ---- */
 - (NSString *)summary:(NSInteger)g {
     switch (g) {
-    case 0: return [NSString stringWithFormat:@"%@ · %@", [self valueOf:&_top[0]], [self valueOf:&_top[2]]];
-    case 1: return [NSString stringWithFormat:@"%@ · %@", [self valueOf:&_display[0]], [self valueOf:&_display[5]]];
-    case 2: return [self valueIndex:&_sound[0]] ? @"Off" : [NSString stringWithFormat:@"Music %@ · Effects %@", [self valueOf:&_sound[6]], [self valueOf:&_sound[1]]];
-    case 3: return [NSString stringWithFormat:@"%@ · %@", [self valueOf:&_free[0]], [self valueOf:&_free[4]]];
+    case 0: return [NSString stringWithFormat:@"%@ · %@", [self valueOf:[self key:@"Cycles"]], [self valueOf:[self key:@"Language"]]];
+    case 1: return [NSString stringWithFormat:@"%@ · %@", [self valueOf:[self key:@"StartFullScreen"]], [self valueOf:[self key:@"StartHiRes"]]];
+    case 2: return [self valueIndex:[self key:@"Sound"]] ? @"Off" : [NSString stringWithFormat:@"Music %@ · Effects %@", [self valueOf:[self key:@"MusicVolume"]], [self valueOf:[self key:@"SoundVolume"]]];
+    case 3: return [NSString stringWithFormat:@"%@ · %@", [self valueOf:[self key:@"FreeRules"]], [self valueOf:[self key:@"FreeMapSize"]]];
     case 4: return @"Mouse, keys, controller";
-    case 5: return [self valueOf:&_sound[8]];
-    case 6: return [[NSString stringWithFormat:@"Ew %@ · Till %@", [self valueOf:&_tweaks[0]], [self valueOf:&_tweaks[1]]] stringByReplacingOccurrencesOfString:@"Every " withString:@""];
+    case 5: return [self valueOf:[self key:@"MusicType"]];
+    case 6: return [[NSString stringWithFormat:@"Ew %@ · Till %@", [self valueOf:[self key:@"GrossOutGap"]], [self valueOf:[self key:@"PurchaseGap"]]] stringByReplacingOccurrencesOfString:@"Every " withString:@""];
     default: return @"";
     }
 }
@@ -1004,7 +917,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     rounded(in, 8, nil, rgb(70, 8, 16), 2);
     rounded(NSInsetRect(in, 4, 4), 5, nil, rgba(255, 220, 120, 0.5), 1);
     for (int i = 0; i < 2; i++) star(NSMakePoint(i ? NSMaxX(in) - 22 : in.origin.x + 22, in.origin.y + 22), 7, gold());
-    label(@"BULLFROG PRODUCTIONS PRESENTS", caps(10.5), rgb(255, 226, 150), NSMakeRect(in.origin.x, in.origin.y + 12, in.size.width, 20), NSTextAlignmentCenter, 4.2, YES);
+    label(S(tp_app_spec()->presents), caps(10.5), rgb(255, 226, 150), NSMakeRect(in.origin.x, in.origin.y + 12, in.size.width, 20), NSTextAlignmentCenter, 4.2, YES);
     if (_logo) {
         [NSGraphicsContext saveGraphicsState]; [shadow_of(0.6, 4, 9) set];
         [_logo drawInRect:self.logoRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
@@ -1035,19 +948,19 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     NSRect sash = NSMakeRect(-90, -14, 180, 28);
     [NSGraphicsContext saveGraphicsState]; [shadow_of(0.6, 2, 5) set]; [rgb(196, 28, 36) setFill]; rfill(sash); [NSGraphicsContext restoreGraphicsState];
     [rgba(255, 220, 120, 0.9) setFill]; rfill(NSMakeRect(-90, -12, 180, 1)); rfill(NSMakeRect(-90, 11, 180, 1));
-    label(@"NOW OPEN", caps(11), cream(), NSMakeRect(-90, -10, 180, 20), NSTextAlignmentCenter, 3.5, NO);
+    label(S(tp_app_spec()->sash), caps(11), cream(), NSMakeRect(-90, -10, 180, 20), NSTextAlignmentCenter, 3.5, NO);
     [NSGraphicsContext restoreGraphicsState];
     rounded(plaque, 0, night(0.95), nil, 0);
     [rgba(250, 204, 82, 0.8) setFill]; rfill(NSMakeRect(plaque.origin.x, plaque.origin.y, plaque.size.width, 1.5));
-    label(@"LOOP THE LOOP", caps(13), gold(), NSMakeRect(plaque.origin.x, plaque.origin.y + 7, plaque.size.width, 22), NSTextAlignmentCenter, 4.5, YES);
-    label(@"Hold on tight. Keep your burger down.", ital(12.5), cream(), NSMakeRect(plaque.origin.x + 6, plaque.origin.y + 30, plaque.size.width - 12, 18), NSTextAlignmentCenter, 0.2, YES);
+    label(S(tp_app_spec()->plaque), caps(13), gold(), NSMakeRect(plaque.origin.x, plaque.origin.y + 7, plaque.size.width, 22), NSTextAlignmentCenter, 4.5, YES);
+    label(S(tp_app_spec()->plaque_sub), ital(12.5), cream(), NSMakeRect(plaque.origin.x + 6, plaque.origin.y + 30, plaque.size.width - 12, 18), NSTextAlignmentCenter, 0.2, YES);
 }
 - (void)drawCard:(NSInteger)g {
-    static const int col[5][3] = {{206, 44, 48}, {38, 112, 212}, {232, 164, 26}, {44, 150, 84}, {128, 74, 196}};
+    const unsigned char *col = tp_app_spec()->tickets[g].rgb;
     NSRect r = [self cardRect:g];
     int st = self.focus == g ? 2 : self.hover == 300 + g ? 1 : 0;
     if (st) r = NSOffsetRect(r, 0, -4);
-    NSColor *base = rgb(col[g][0], col[g][1], col[g][2]);
+    NSColor *base = rgb(col[0], col[1], col[2]);
     CGFloat ny = r.origin.y + 92;
     ticket_clip(r, YES, ny, 7, ^{
         NSShadow *sh = st ? ({ NSShadow *s = [NSShadow new]; s.shadowColor = rgba(255, 214, 110, 0.85); s.shadowBlurRadius = 16; s.shadowOffset = NSZeroSize; s; }) : shadow_of(0.7, 4, 6);
@@ -1068,7 +981,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     [NSGraphicsContext saveGraphicsState]; [shadow_of(0.55, 1.5, 2) set];
     icon(g, NSMakeRect(NSMidX(r) - 22, r.origin.y + 12, 44, 44), cream());
     [NSGraphicsContext restoreGraphicsState];
-    label([_groups[g] uppercaseString], poster(g == 3 ? 17 : 19), cream(), NSMakeRect(r.origin.x + 4, r.origin.y + 62, r.size.width - 8, 24), NSTextAlignmentCenter, 1.2, YES);
+    label([S(tp_app_spec()->tickets[g].title) uppercaseString], poster(g == 3 ? 17 : 19), cream(), NSMakeRect(r.origin.x + 4, r.origin.y + 62, r.size.width - 8, 24), NSTextAlignmentCenter, 1.2, YES);
     wrapped([[self summary:g] stringByReplacingOccurrencesOfString:@" × " withString:@"\u00a0×\u00a0"], print_f(9.5), rgba(255, 247, 226, 0.92), NSMakeRect(r.origin.x + 7, ny + 6, r.size.width - 14, 32), NSTextAlignmentCenter);
     if (st == 2) rounded(NSInsetRect(r, -3, -3), 11, nil, rgba(255, 247, 226, 0.9), 2);
 }
@@ -1173,7 +1086,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     NSGradient *lac = [[NSGradient alloc] initWithColorsAndLocations:rgb(214, 38, 46), 0.0, rgb(150, 16, 28), 1.0, nil];
     [lac drawInBezierPath:[NSBezierPath bezierPathWithRoundedRect:hi xRadius:6 yRadius:6] angle:-90];
     for (int i = 0; i < 2; i++) star(NSMakePoint(i ? NSMaxX(hi) - 22 : hi.origin.x + 22, NSMidY(hi)), 7, gold());
-    NSString *parent = page_parent[self.open] >= 0 ? [_groups[page_parent[self.open]] uppercaseString] : nil;
+    NSString *parent = page_parent_of(self.open) >= 0 ? [_groups[page_parent_of(self.open)] uppercaseString] : nil;
     NSString *title = parent ? [NSString stringWithFormat:@"%@  ·  %@", parent, [_groups[self.open] uppercaseString]] : [_groups[self.open] uppercaseString];
     label(title, poster(30), rgb(255, 226, 130), hi, NSTextAlignmentCenter, 5, YES);
     if (self.open == 4) {                                   /* the controls: a table */
@@ -1191,9 +1104,8 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
         if (k + 1 < self.rowCount) { NSGradient *g = [[NSGradient alloc] initWithColorsAndLocations:rgba(250, 204, 82, 0), 0.0, rgba(250, 204, 82, 0.35), 0.5, rgba(250, 204, 82, 0), 1.0, nil];
             NSRect rr = [self rowRect:k]; [g drawInRect:NSMakeRect(rr.origin.x, NSMaxY(rr) - 0.5, rr.size.width, 1) angle:0]; }
     }
-    if (self.open == 3) {
-        NSArray *lines = @[@"For new sandbox parks (Sim Level Sandbox); other parks play by the game's rules.",
-                           @"Saved parks keep the size and rules they were started with."];
+    if (tp_app_spec()->pages[self.open].footnote[0]) {
+        const char *const *fn = tp_app_spec()->pages[self.open].footnote; NSArray *lines = fn[1] ? @[S(fn[0]), S(fn[1])] : @[S(fn[0])];
         CGFloat y0 = NSMaxY([self rowRect:self.rowCount - 1]) + 12;
         for (NSUInteger i = 0; i < lines.count; i++)
             label(lines[i], ital(14.5), muted(), NSMakeRect(p.origin.x + 50, y0 + 22 * i, p.size.width - 100, 20), NSTextAlignmentCenter, 0.2, YES);
@@ -1203,8 +1115,8 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
     [(TPMidway *)self.midway setPageOpen:self.open >= 0];
     if (self.open < 0) {
         [self drawSign];
-        label(@"BULLFROG PRODUCTIONS  ·  1994  ·  NATIVE FOR APPLE SILICON", caps(10.5), gold(), NSMakeRect(44, 204, 584, 18), NSTextAlignmentCenter, 3.4, YES);
-        wrapped(@"Build the rides, hire the staff, set the prices: and keep\nthe crowds screaming for the right reasons.", ital(16.5), cream(),
+        label(S(tp_app_spec()->credits), caps(10.5), gold(), NSMakeRect(44, 204, 584, 18), NSTextAlignmentCenter, 3.4, YES);
+        wrapped(S(tp_app_spec()->tagline), ital(16.5), cream(),
                 NSMakeRect(44, 228, 584, 50), NSTextAlignmentCenter);
         heading(@"ATTRACTIONS", NSMakePoint(44, 294), 628);
         for (NSInteger g = 0; g < N_CARDS; g++) if (g != self.hover - 300 && g != self.focus) [self drawCard:g];
@@ -1223,8 +1135,7 @@ static BOOL is_link(Setting *s) { return [s->key hasPrefix:@"page:"] || [s->key 
         [self drawButton:self.quitRect title:@"BACK" sub:nil dot:nil state:self.hover == HIT_BACK];
     }
     [self drawPlay];
-    NSString *hint = self.open < 0 ? @"Click a ticket or a tile  ·  arrows move  ·  Return chooses  ·  Esc quits"
-                                   : @"Click the arrows or a row  ·  ↑ ↓ choose  ·  ← → change  ·  Esc goes back";
+    NSString *hint = S(self.open < 0 ? tp_app_spec()->hint_main : tp_app_spec()->hint_page);
     label(hint, plain(12), rgba(210, 206, 230, 0.75), NSMakeRect(44, 670, 640, 18), NSTextAlignmentLeft, 0.3, YES);
     NSString *build = NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"] ?: @"dev";
     label([NSString stringWithFormat:[_branch isEqualToString:@"release"] ? @"VERSION %@" : @"NIGHTLY %@", build.uppercaseString], caps(9.5), rgba(250, 204, 82, 0.6),
