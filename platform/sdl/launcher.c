@@ -827,15 +827,15 @@ static void setup_fonts(void) {
     }
     for (int i = 0; i < 5; i++) if (i != 3) font_set_fallback(*slots[i], L.plain);   /* (Alegreya Sans has every arrow) */
 }
-static SDL_BlendMode premultiplied(void) {
-    return SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD,
-                                      SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
-}
 static int open_page_named(const char *name) {
     for (int p = 0; p < TP_NPAGES; p++) if (!SDL_strcasecmp(L.spec->pages[p].title, name)) return p;
     return -1;
 }
-static Image *park_picture(void) {
+/* The backdrop (launcher.m:594-612): the player's park (<data>/art/your-park.png, saved at quit), else GOG's park
+ * screenshots (<data>/art/park-shot-*.png, chosen at install time) composed in two rows and shown soft; *soft says which. */
+static int by_name(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
+static Image *park_picture(int *soft) {
+    *soft = 0;
     if (G("TP_LAUNCHER_NO_ART")) return NULL;
     char p[1300];
     if (G("TP_LAUNCHER_PARK")) return img_load(G("TP_LAUNCHER_PARK"));
@@ -843,7 +843,21 @@ static Image *park_picture(void) {
     Image *m = img_load(p);
     if (m && m->w >= 320) return m;
     img_free(m);
-    return NULL;                                                     /* (GOG's park shots: midway.c's composition, to come) */
+    /* GOG's shots, sorted by name, up to four */
+    char dir[1100]; snprintf(dir, sizeof dir, "%s/art", L.data_root);
+    char *names[16]; int n = 0;
+    for (int i = 1; i <= 16 && n < 16; i++) {                     /* (park-shot-1.png .. : the install step numbers them) */
+        snprintf(p, sizeof p, "%s/park-shot-%d.png", dir, i);
+        struct stat st; if (stat(p, &st) == 0) names[n++] = SDL_strdup(p);
+    }
+    qsort(names, (size_t)n, sizeof *names, by_name);
+    Image *shots[4]; int k = 0;
+    for (int i = 0; i < n; i++) { if (k < 4 && (shots[k] = img_load(names[i]))) k++; SDL_free(names[i]); }
+    if (!k) return NULL;
+    Image *b = midway_park_from_shots((const Image *const *)shots, k);
+    for (int i = 0; i < k; i++) img_free(shots[i]);
+    *soft = b != NULL;
+    return b;
 }
 /* What the window shows now: midway's back layers, the settings view, midway's front layers, into the renderer's target. */
 static void compose(SDL_Renderer *ren, SDL_Texture *view, Midway *mid, double t) {
@@ -853,7 +867,9 @@ static void compose(SDL_Renderer *ren, SDL_Texture *view, Midway *mid, double t)
     SDL_RenderCopy(ren, view, NULL, NULL);
     if (mid) midway_draw_front(mid, t, L.page >= 0);
 }
-static void upload(SDL_Texture *view) { SDL_UpdateTexture(view, NULL, L.cv->px, L.cv->w * 4); }
+/* The settings view into its texture, in the sprites' blend convention (midway.h: premultiplied, or straight where the
+ * renderer refuses custom blend modes). */
+static SDL_Texture *upload(Midway *mid, SDL_Texture *view) { return mid ? midway_upload(mid, L.cv->px, L.cv->w, L.cv->h, view) : view; }
 
 int tp_launcher_run(const char *data_root, const char *res_dir, const char *version) {
     memset(&L, 0, sizeof L);
@@ -863,7 +879,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
     snprintf(L.version, sizeof L.version, "%s", version ? version : "");
     L.page = -1; L.focus = -1; L.hover = -1; L.drag_row = -1; L.dirty = 1;
     const char *shot = G("TP_LAUNCHER_SHOT");
-    double t0 = G("TP_LAUNCHER_TIME") ? atof(G("TP_LAUNCHER_TIME")) : 3.0;
+    double t0 = G("TP_LAUNCHER_TIME") ? atof(G("TP_LAUNCHER_TIME")) : MIDWAY_T0;
     if (G("TP_LAUNCHER_OPEN")) { int p = open_page_named(G("TP_LAUNCHER_OPEN")); if (p >= 0) L.page = p; }
     if (G("TP_LAUNCHER_FOCUS")) L.focus = atoi(G("TP_LAUNCHER_FOCUS"));
     if (G("TP_LAUNCHER_HOVER")) L.hover = atoi(G("TP_LAUNCHER_HOVER"));
@@ -888,18 +904,19 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
     L.cv = cv_new(cw, ch);
     setup_fonts();
     load_art();
-    SDL_Texture *view = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, cw, ch);
-    SDL_SetTextureBlendMode(view, premultiplied());
-    Image *park = park_picture();
+    int soft;
+    Image *park = park_picture(&soft);
     MidwayLayout lay = {SIGN, POSTER, PLAY, logo_box()};
     SDL_Texture *target = shot ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, cw, ch) : NULL;
     if (target) SDL_SetRenderTarget(ren, target);
-    Midway *mid = midway_new(ren, L.s, park, lay);
+    Midway *mid = midway_new(ren, L.s, soft ? NULL : park, lay);
+    if (mid && soft) midway_set_backdrop(mid, park, 1);
     img_free(park);
+    SDL_Texture *view = NULL;
     int still = midway_reduce_motion();
 
     if (shot) {
-        draw_view(); upload(view);
+        draw_view(); view = upload(mid, view);
         compose(ren, view, mid, t0);
         uint8_t *px = malloc((size_t)cw * ch * 4);
         int rc = 1;
@@ -940,7 +957,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
                 }
             }
             double now = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), t = still ? t0 : t0 + now - start;
-            if (L.dirty) { draw_view(); upload(view); }
+            if (L.dirty) { draw_view(); view = upload(mid, view); }
             compose(ren, view, mid, t);
             SDL_RenderPresent(ren);
             double spent = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - now;
@@ -954,7 +971,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
     }
     midway_free(mid);
     if (target) SDL_DestroyTexture(target);
-    SDL_DestroyTexture(view);
+    if (view) SDL_DestroyTexture(view);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     cv_free(L.cv); L.cv = NULL;
