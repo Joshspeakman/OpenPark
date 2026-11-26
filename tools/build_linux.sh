@@ -64,19 +64,31 @@ RUNTIME=(runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/n
 # The app: the game's window, its sound and settings, and the launch window (launcher.c, drawn by draw.c and midway.c).
 APP=(platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c platform/sdl/launcher.c platform/sdl/draw.c platform/sdl/midway.c
      platform/sdl/card.c)
-# (the commit, for the launch window's NIGHTLY label: MSYS2's shell may have no git of its own, Python finds Windows')
-BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || "$PYTHON" -c 'import subprocess; print(subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip())' 2>/dev/null || echo dev)
+# (the commit, for the launch window's NIGHTLY label: read from .git, as MSYS2's shell may have no git of its own)
+BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || "$PYTHON" tools/git_head.py 2>/dev/null || echo dev)
 "$CC" -O2 -Wall -Wno-unused-function -I "$INC" -I runtime $(sdl2-config --cflags) ${SYNTH[@]+"${SYNTH[@]}"} -DTP_BUILD="\"$BUILD_ID\"" \
   "${APP[@]}" "${RUNTIME[@]}" work/app-release/game.a work/app-release-intro/game.a \
   $(sdl2-config --libs) ${SYNTH_LIBS[@]+"${SYNTH_LIBS[@]}"} -lz -lm -lpthread -o "$NEW/ThemePark"
 "$PYTHON" tools/export_image.py "$EXE" "$NEW/MAIN.TPIMG" >/dev/null
 "$PYTHON" tools/export_image.py "$INTRO" "$NEW/INTRO.TPIMG" >/dev/null
 mkdir -p "$NEW/fonts"; cp platform/sdl/fonts/* "$NEW/fonts/"      # (the launch window's type and its licences)
-# The icon: GOG's, from the package (the window's and the menu entry's).
+"$PYTHON" tools/render_banner.py "$GAMEDIR/GAME" "$NEW/MAIN.TPIMG" work/app-release/game.a "$NEW/art/banner.png"
+# GOG's store art and park pictures (keyart.jpg, logo.png, box.jpg, park-shot-*.png) for the launch window and the
+# icon, from GOG's public store API into the player's data folder only (TP_NO_DOWNLOADS=1 skips it; never fails).
+mkdir -p "$DATA/art"
+"$PYTHON" tools/store_art.py "$DATA/art"
+# The icon: the park planet (GOG's box art, else GOG's icon from the package) on the Nightly tile (tools/make_icon.c,
+# the Mac's tp_icon.m) as the icon theme's sizes, in hicolor/ beside the program; GOG's own icon if that cannot be made.
 ICO=$GAMEDIR/goggame-1207660423.ico
 ICON_SIZE=
 if [[ -f $ICO ]] && ICON_SIZE=$("$PYTHON" tools/ico_image.py "$ICO" --png "$NEW/icon.png" --bmp "$NEW/icon.bmp"); then :
 else ICON_SIZE=; echo "   (no icon: GOG's could not be read)"; fi
+if "$CC" -O2 -I platform/sdl -I vendor/stb tools/make_icon.c platform/sdl/draw.c -lm -o "$OUT/make_icon"; then
+  ICON_ARGS=(--nightly --font platform/sdl/fonts/Poppins-Bold.ttf --hicolor "$NEW/hicolor" --bmp "$NEW/icon.bmp")
+  if [[ -s $DATA/art/box.jpg ]] && "$OUT/make_icon" "$DATA/art/box.jpg" --box "${ICON_ARGS[@]}"; then :
+  elif [[ -s $NEW/icon.png ]] && "$OUT/make_icon" "$NEW/icon.png" "${ICON_ARGS[@]}"; then :
+  else rm -rf "$NEW/hicolor"; fi
+fi
 
 # Replaced things go to the Trash (freedesktop.org's), never deleted.
 trash() {
@@ -106,11 +118,15 @@ if [[ ${TP_NO_INSTALL:-0} != 1 ]]; then
   BIN=$HOME/.local/bin; mkdir -p "$BIN"
   ln -sfn "$DEST/ThemePark" "$BIN/theme-park"
   APPS=${XDG_DATA_HOME:-$HOME/.local/share}/applications; mkdir -p "$APPS"
+  # (every size of the made icon, else GOG's one size)
   ICON_LINE=
-  if [[ -n $ICON_SIZE ]]; then
-    ICONS=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/$ICON_SIZE/apps; mkdir -p "$ICONS"
-    cp "$DEST/icon.png" "$ICONS/theme-park-native.png"; ICON_LINE="Icon=theme-park-native"
+  ICONS=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor
+  if [[ -d $DEST/hicolor ]]; then
+    mkdir -p "$ICONS"; cp -R "$DEST/hicolor/." "$ICONS/"; ICON_LINE="Icon=theme-park-native"
+  elif [[ -n $ICON_SIZE ]]; then
+    mkdir -p "$ICONS/$ICON_SIZE/apps"; cp "$DEST/icon.png" "$ICONS/$ICON_SIZE/apps/theme-park-native.png"; ICON_LINE="Icon=theme-park-native"
   fi
+  if command -v gtk-update-icon-cache >/dev/null; then gtk-update-icon-cache -q -t "$ICONS" 2>/dev/null || true; fi
   cat > "$APPS/theme-park-native.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application

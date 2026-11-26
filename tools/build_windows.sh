@@ -58,12 +58,25 @@ mkdir -p "$OUT"
 NEW=$OUT/ThemeParkNative.new
 rm -rf "$NEW"; mkdir -p "$NEW"
 INC="$REF/recomp/runtime"
-# The icon (GOG's, from the package) and the manifest, into the program.
+# GOG's store art and park pictures (keyart.jpg, logo.png, box.jpg, park-shot-*.png) for the launch window and the
+# icon, from GOG's public store API into the player's data folder only (TP_NO_DOWNLOADS=1 skips it; never fails).
+mkdir -p "$DATA/art"
+"$PYTHON" tools/store_art.py "$(win "$DATA/art")"
+# The icon: the park planet (GOG's box art, else GOG's icon from the package) on the Nightly tile (tools/make_icon.c,
+# the Mac's tp_icon.m); GOG's own icon if that cannot be made. Then the icon and the manifest, into the program.
 ICO=$GAMEDIR/goggame-1207660423.ico
-{ [[ -f $ICO ]] && printf '1 ICON "%s"\n' "$(cygpath -m "$PWD/$ICO")"; printf '1 24 "%s"\n' "$(cygpath -m "$PWD/platform/sdl/windows.manifest")"; } > "$OUT/app.rc"
+ICON=$ICO
+rm -f "$OUT/icon-256.png" "$OUT/box.jpg"
+[[ -f $ICO ]] && "$PYTHON" tools/ico_image.py "$ICO" --png "$OUT/icon-256.png" --bmp "$NEW/icon.bmp" >/dev/null || true
+if "$CC" -O2 -I platform/sdl -I vendor/stb tools/make_icon.c platform/sdl/draw.c -lm -o "$OUT/make_icon.exe"; then
+  ICON_ARGS=(--nightly --font platform/sdl/fonts/Poppins-Bold.ttf --ico "$OUT/ThemePark.ico" --bmp "$NEW/icon.bmp")
+  [[ -s $DATA/art/box.jpg ]] && cp "$DATA/art/box.jpg" "$OUT/box.jpg"     # (a plain path for stb's fopen)
+  if [[ -s $OUT/box.jpg ]] && "$OUT/make_icon.exe" "$OUT/box.jpg" --box "${ICON_ARGS[@]}"; then ICON=$OUT/ThemePark.ico
+  elif [[ -s $OUT/icon-256.png ]] && "$OUT/make_icon.exe" "$OUT/icon-256.png" "${ICON_ARGS[@]}"; then ICON=$OUT/ThemePark.ico; fi
+fi
+{ [[ -f $ICON ]] && printf '1 ICON "%s"\n' "$(cygpath -m "$PWD/$ICON")"; printf '1 24 "%s"\n' "$(cygpath -m "$PWD/platform/sdl/windows.manifest")"; } > "$OUT/app.rc"
 WINDRES=$(command -v llvm-windres || command -v windres)
 "$WINDRES" "$OUT/app.rc" -O coff -o "$OUT/app.res.o"
-[[ -f $ICO ]] && "$PYTHON" tools/ico_image.py "$ICO" --bmp "$NEW/icon.bmp" >/dev/null || true
 SYNTH=(); SYNTH_LIBS=(-static)
 if [[ -n ${TP_FLUIDSYNTH:-} ]]; then
   pkg-config --exists fluidsynth || { echo 'FluidSynth not found: pacman -S mingw-w64-clang-x86_64-fluidsynth' >&2; exit 1; }
@@ -75,8 +88,8 @@ RUNTIME=(runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/n
 # The app: the game's window, its sound and settings, and the launch window (launcher.c, drawn by draw.c and midway.c).
 APP=(platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c platform/sdl/launcher.c platform/sdl/draw.c platform/sdl/midway.c
      platform/sdl/card.c)
-# (the commit, for the launch window's NIGHTLY label: MSYS2's shell may have no git of its own, Python finds Windows')
-BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || "$PYTHON" -c 'import subprocess; print(subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip())' 2>/dev/null || echo dev)
+# (the commit, for the launch window's NIGHTLY label: read from .git, as MSYS2's shell may have no git of its own)
+BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || "$PYTHON" tools/git_head.py 2>/dev/null || echo dev)
 "$CC" -O2 -Wall -Wno-unused-function -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I "$INC" -I runtime $(pkg-config --cflags sdl2) ${SYNTH[@]+"${SYNTH[@]}"} \
   -DTP_BUILD="\"$BUILD_ID\"" "${APP[@]}" "${RUNTIME[@]}" work/app-release/game.a work/app-release-intro/game.a "$OUT/app.res.o" \
   ${SYNTH_LIBS[@]+"${SYNTH_LIBS[@]}"} $(pkg-config --static --libs sdl2) -lz -lwinmm -lpthread -o "$NEW/ThemePark.exe"
@@ -86,6 +99,7 @@ fi
 "$PYTHON" tools/export_image.py "$EXE" "$NEW/MAIN.TPIMG" >/dev/null
 "$PYTHON" tools/export_image.py "$INTRO" "$NEW/INTRO.TPIMG" >/dev/null
 mkdir -p "$NEW/fonts"; cp platform/sdl/fonts/* "$NEW/fonts/"      # (the launch window's type and its licences)
+"$PYTHON" tools/render_banner.py "$(win "$GAMEDIR/GAME")" "$(win "$NEW/MAIN.TPIMG")" "$(win work/app-release/game.a)" "$(win "$NEW/art/banner.png")"
 
 # Replaced things go to the Recycle Bin, never deleted.
 recycle() {
