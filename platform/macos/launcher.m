@@ -690,7 +690,7 @@ static void icon(NSInteger g, NSRect b, NSColor *c) {
                              @"Up to 2,500 in a 128 × 128 park (1,000 in a 64 × 64 one)", @"Up to 5,000 in a 128 × 128 park (1,000 in a 64 × 64 one)",
                              @"Up to 10,000 in a 128 × 128 park (1,000 in a 64 × 64 one)"]);
         _free[4] = setting(@"Map Size", @"FreeMapSize", @[@64, @128], @[@"64 × 64", @"128 × 128"],
-                           @[@"The game's park size", @"Four times the land for new sandbox parks: buses bring four times the visitors, who stay twice as long"]);
+                           @[@"The game's park size", @"4× the land; buses bring 4× the visitors, who stay twice as long"]);
         _free[3] = setting(@"Bus Size", @"FreeBus", @[@0, @60, @100, @150, @255], @[@"The Game's", @"60", @"100", @"150", @"255"],
                            @[@"20 to 150 a bus, growing with the park", @"At least 60 visitors a bus", @"At least 100 visitors a bus",
                              @"At least 150 visitors a bus", @"Up to 255 visitors a bus, the most it can carry"]);
