@@ -21,8 +21,8 @@ Col mix(Col a, Col b, float t);
 Canvas *cv_new(int w, int h);
 void cv_free(Canvas *c);
 void cv_fill(Canvas *c, Col k);                                 /* the whole canvas, replaced */
-void cv_clip(Canvas *c, Box b);                                 /* draws stay inside b until cv_unclip */
-void cv_unclip(Canvas *c);
+void cv_clip(Canvas *c, Box b);                                 /* draws stay inside b (and any clip already set) until cv_unclip */
+void cv_unclip(Canvas *c);                                      /* the latest clip taken away */
 void cv_over(Canvas *dst, const Canvas *src, float x, float y, float alpha);   /* src over dst at whole pixels */
 
 /* Shapes. A rounded rectangle's radius is clamped to half its shorter side. */

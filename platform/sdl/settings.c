@@ -20,7 +20,7 @@ static const struct { const char *key, *value, *note; } defaults[] = {
     {"Cycles", "15000", "game speed: emulated instructions a second (10000 = GOG's DOSBox, 15000 = 1.5x; EXTRAS menu)"},
     {"PlayIntro", "1", "play the intro"},
     {"Language", "0", "0 English, 1 German, 2 Italian, 3 Spanish, 4 French (the game's own -l option, its LANG0-4 files)"},
-    {"StartFullScreen", "0", "start in full screen (F11 or Alt+Enter switches)"},
+    {"StartFullScreen", "0", "0 a window, 1 borderless over the whole display, 2 full screen (the display to itself); F11 or Alt+Enter switches"},
     {"StartHiRes", "0", "start the park in the game's 640x480 mode (R in the park switches)"},
     {"Widescreen", "1", "a wider window shows more of the park"},
     {"Stretch", "0", "stretch the game's 4:3 picture to the window"},

@@ -44,7 +44,15 @@ static const TpRow r_pacing = {"Frame Pacing", "SteadyPacing", TP_ROW_BOOL, N(c_
 static const TpRow r_files = {"Saved Parks", NULL, TP_ROW_FILES, 0, NULL, "Your saved parks' folder", FOLDER};
 
 /* ---- Display ---- */
+#ifdef __APPLE__
 static const TpChoice c_screen[] = {{0, "Window", "A window you can resize; " FULL_KEY " switches"}, {1, "Full Screen", "The whole display; " FULL_KEY " switches"}};
+#define SCREEN_KIND TP_ROW_BOOL
+#else   /* Windows and Linux: a borderless window over the display, or the display to itself (exclusive) */
+static const TpChoice c_screen[] = {{0, "Window", "A window you can resize; " FULL_KEY " switches"},
+    {1, "Borderless", "A window over the whole display, no border; " FULL_KEY " switches"},
+    {2, "Full Screen", "The display to itself, at its own resolution; " FULL_KEY " switches"}};
+#define SCREEN_KIND TP_ROW_CHOICE
+#endif
 static const TpChoice c_start[] = {{0, "320 × 200", "The game's usual screen; R in the park switches"}, {1, "640 × 480", "The game's SVGA mode: more of the park at once"}};
 static const TpChoice c_aspect[] = {{0, "4:3", "The shape a 1994 monitor gave it"}, {1, "Fill the Window", "Stretched to the window's shape"}};
 static const TpChoice c_wide[] = {{1, "More Park", "The park fills the window; the panel stays centred"}, {0, "Black Bars", "The game's 4:3 picture, as on a CRT"}};
@@ -58,7 +66,7 @@ static const TpChoice c_pointer[] = {{0, "The Game's", SYS_PTR " pointer hides o
 static const TpChoice c_zoomed[] = {{1, "Native", "Zoomed-out views drawn by the new engine: faster"}, {0, "The Game's", "Zoomed-out views drawn by the game's own code"}};
 static const TpChoice c_videos[] = {{0, "PC", "The PC's ride videos only"}, {1, "PC + 3DO", "The PC's, and the 3DO's for Space Shuttle and Tree House"},
     {2, "3DO", "The 3DO's in full colour, the PC's for the rest"}};
-static const TpRow r_screen = {"Screen", "StartFullScreen", TP_ROW_BOOL, N(c_screen), c_screen};
+static const TpRow r_screen = {"Screen", "StartFullScreen", SCREEN_KIND, N(c_screen), c_screen};
 static const TpRow r_start = {"Start In", "StartHiRes", TP_ROW_BOOL, N(c_start), c_start};
 static const TpRow r_aspect = {"Aspect", "Stretch", TP_ROW_BOOL, N(c_aspect), c_aspect};
 static const TpRow r_wide = {"Wide Windows", "Widescreen", TP_ROW_BOOL, N(c_wide), c_wide};
@@ -149,8 +157,8 @@ static const char *const controls[][2] = {
     {"Scroll, arrows, drag", "Move the view (middle- or Option-drag)"},
 #else
     {"Click", "Select, build, place"}, {"Right-click", "Cancel, rotate, close panels"},
-    {"Pinch or Ctrl-scroll", "Zoom the park in and out"}, {"Ctrl+=  Ctrl+−  Ctrl+0", "Zoom in, zoom out, actual size"},
-    {"Scroll, arrows, drag", "Move the view (middle- or Alt-drag)"},
+    {"Mouse wheel or pinch", "Zoom the park in and out"}, {"Ctrl+=  Ctrl+−  Ctrl+0", "Zoom in, zoom out, actual size"},
+    {"Arrows, drag, Shift+wheel", "Move the view (middle- or Alt-drag)"},
 #endif
     {"Hold Tab", "Fast forward"}, {"R in the park", "The game's 640 × 480 mode, and back"}, {CMD "E", "Save a picture of the whole park"},
     {"Game controller", "Sticks move; A, B click; shoulders zoom"}, {"Hold View + Menu", "Quit from a game controller (one second)"},

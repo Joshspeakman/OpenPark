@@ -142,7 +142,7 @@ static int walk_drop, wk[8], wk_run;
 static double walk_last, look_dx, look_dy, hold[3], hold_until, pad[4];
 static uint32_t *walk_px; static int walk_w, walk_h;
 static char hud_text[256], subtitle[160];
-static int full;
+static int full;                                          /* 0 the window, 1 borderless over the display, 2 exclusive (set_full) */
 
 static void set_subtitle(const char *s) {
     snprintf(subtitle, sizeof subtitle, "%s", s);
@@ -573,13 +573,26 @@ static void fail(const char *message) {
     if (!getenv("DS_TEST")) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Theme Park stopped", message, win);
 }
 
-/* Full screen: the window over the whole display (F11 or Alt+Enter switches back). */
-static void toggle_full(void) {
-    full = !full;
-    SDL_SetWindowFullscreen(win, full ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+/* Full screen, as the Screen setting chooses it (F11 or Alt+Enter switches, back to the window too): 1 borderless, a
+ * window over the whole display; 2 the display to itself (exclusive), kept at its own resolution and refresh so
+ * nothing on the screen changes size. Exclusive gives way to borderless where the system refuses it; leaving the game
+ * (Alt+Tab) minimises it, and the game waits meanwhile (hold_game). */
+static void set_full(int kind) {
+    if (kind == 2) {
+        SDL_DisplayMode m; int d = SDL_GetWindowDisplayIndex(win);
+        if (d < 0 || SDL_GetDesktopDisplayMode(d, &m) != 0 || SDL_SetWindowDisplayMode(win, &m) != 0)
+            fprintf(stderr, "full screen: the display's own mode: %s\n", SDL_GetError());
+    }
+    if (SDL_SetWindowFullscreen(win, kind == 2 ? SDL_WINDOW_FULLSCREEN : kind ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) != 0) {
+        fprintf(stderr, "full screen %d refused: %s\n", kind, SDL_GetError());
+        if (kind != 2 || SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0) return;
+        kind = 1;
+    }
+    full = kind;
     int w, h; SDL_GetWindowSize(win, &w, &h);
     fprintf(stderr, "full screen %d (%dx%d)\n", full, w, h);
 }
+static void toggle_full(void) { set_full(full ? 0 : settings_get("StartFullScreen") == 2 ? 2 : 1); }
 static void toggle_fps(void) { tp_view_debug_fps = !tp_view_debug_fps; tp_view_count_game_frames(tp_view_debug_fps); settings_set("DebugFPS", tp_view_debug_fps); }
 static void toggle_grid(void) { tp_view_debug_grid = !tp_view_debug_grid; settings_set("DebugGrid", tp_view_debug_grid); }
 /* Larger / Smaller Panel (remembered): the panel and the advisor. */
@@ -708,11 +721,12 @@ static void run_test_script(void) {
 
 /* Development: live control for playtests (TP_CONTROL=<file>), as the Mac app's. Lines appended to the file run
  * in order, one batch per tick: key HEX | shift HEX | raw SCAN 1|0 | type TEXT | mouse X Y B | click X Y [B] |
- * vmouse X Y B | vclick X Y [B] | zoom Z | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
+ * vmouse X Y B | vclick X Y [B] | zoom Z | wheel DX DY | center CX CY | pan DX DY | size W H | cycles N | shot PATH | vshot PATH |
  * sleep S | ack TAG | peek ADDR LEN | dump ADDR LEN PATH | coverage PATH | full | fps | grid | panel K |
  * poke16 ADDR V | poke32 ADDR|money V | unlockall | walk X Y | walkcmd N | walkhold F S T SECONDS |
  * walkteleport X Y YAW | walkstop | walkshot PATH | show | quit. mouse/click are in the game frame's pixels;
  * vmouse/vclick in a vshot's pixels. ack appends TAG to <file>.ack once everything before it has run. */
+static void mouse_wheel(const SDL_MouseWheelEvent *e);
 static char *queue[4096]; static int q_head = 64, q_tail = 64;    /* (room in front for a click's steps) */
 static void q_push_front(const char *line) { if (q_head > 0) queue[--q_head] = strdup(line); }
 static void run_control(void) {
@@ -756,6 +770,10 @@ static void run_control(void) {
             until = t + 0.05; free(line); for (int i = 0; i < np; i++) free(p[i]); continue;
         }
         else if (!strcmp(op, "zoom")) zoom_to(a1, NAN, NAN);
+        else if (!strcmp(op, "wheel")) {                   /* a wheel's turn at the pointer (no keys held) */
+            SDL_MouseWheelEvent w = {.type = SDL_MOUSEWHEEL, .direction = SDL_MOUSEWHEEL_NORMAL, .preciseX = (float)a1, .preciseY = (float)a2};
+            mouse_wheel(&w); fprintf(stderr, "wheel %g %g: zoom %.3f, centre %.0f,%.0f\n", a1, a2, zoom, cx, cy);
+        }
         else if (!strcmp(op, "center")) center_on(a1, a2);
         else if (!strcmp(op, "pan")) pan_by(a1, a2);
         else if (!strcmp(op, "size")) SDL_SetWindowSize(win, (int)a1, (int)a2);
@@ -1018,12 +1036,17 @@ static void mouse_motion(const SDL_MouseMotionEvent *e) {
     if (panning) { pan_by(-(e->x - pan_fx), -(e->y - pan_fy)); pan_fx = e->x; pan_fy = e->y; return; }   /* the park follows the pointer */
     send_mouse(e->x, e->y);
 }
+/* The wheel. A mouse's wheel zooms the park in and out toward the pointer (a notch about a fifth), where the Mac pinches;
+ * Ctrl+wheel too (a touchpad's pinch arrives as one). Shift+wheel moves the view, and so does a sideways wheel or
+ * swipe. In the Visitor View it looks around. */
 static void mouse_wheel(const SDL_MouseWheelEvent *e) {
     double k = e->direction == SDL_MOUSEWHEEL_FLIPPED ? -30 : 30;
     double dx = e->preciseX * k, dy = e->preciseY * k;
     if (tp_walk_active()) { look_dx -= dx * 0.004; look_dy += dy * 0.004; return; }   /* the wheel looks around too */
-    if (SDL_GetModState() & (KMOD_CTRL | KMOD_ALT)) zoom_to(zoom * pow(1.006, dy), mouse_x, mouse_y);
-    else pan_by(dx, -dy);
+    SDL_Keymod m = SDL_GetModState();
+    if (m & KMOD_SHIFT) pan_by(dx, -dy);
+    else if ((m & (KMOD_CTRL | KMOD_ALT)) || fabs(dy) >= fabs(dx)) { if (dy) zoom_to(zoom * pow(1.006, dy), mouse_x, mouse_y); }
+    else pan_by(dx, 0);
 }
 
 int main(int argc, char *argv[]) {
@@ -1074,7 +1097,7 @@ int main(int argc, char *argv[]) {
     int vsync = (ri.flags & SDL_RENDERER_PRESENTVSYNC) != 0;
     fprintf(stderr, "renderer %s, vsync %d\n", ri.name, vsync);
     SDL_StartTextInput();
-    if (settings_get("StartFullScreen")) toggle_full();
+    if (settings_get("StartFullScreen")) set_full(settings_get("StartFullScreen") == 2 ? 2 : 1);
     tp_view_debug_fps = (int)settings_get("DebugFPS"); tp_view_debug_grid = (int)settings_get("DebugGrid");
     tp_view_set_ui_scale(settings_getf("PanelScale"));
     if (settings_get("Sound") && tp_audio_start() == 0) tp_audio_set_volumes((float)settings_getf("SoundVolume"), (float)settings_getf("MusicVolume"));

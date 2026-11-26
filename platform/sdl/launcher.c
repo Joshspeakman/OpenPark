@@ -1055,7 +1055,7 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
     if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_TARGETTEXTURE);
     if (!ren) { fprintf(stderr, "launcher: %s\n", SDL_GetError()); SDL_DestroyWindow(win); return 1; }
     int pw, ph; SDL_GetRendererOutputSize(ren, &pw, &ph);
-    L.s = shot ? 2.f : pw / 1000.f;
+    L.s = shot ? (G("TP_LAUNCHER_SCALE") ? (float)atof(G("TP_LAUNCHER_SCALE")) : 2.f) : pw / 1000.f;   /* (a test may ask for a display's scale) */
     int cw = (int)lroundf(1000 * L.s), ch = (int)lroundf(700 * L.s);
     L.cv = cv_new(cw, ch);
     setup_fonts();
@@ -1075,6 +1075,44 @@ int tp_launcher_run(const char *data_root, const char *res_dir, const char *vers
         double d0 = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
         draw_view(); view = upload(mid, view);
         fprintf(stderr, "launcher: view drawn in %.1f ms\n", 1000 * ((double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency() - d0));
+        if (G("TP_LAUNCHER_SWEEP")) {
+            /* (a test: the pointer passes over every target in turn and leaves; after each, the view must equal the
+             * first whole drawing. A label the whole drawing loses shows up here, as it did on the screen.) */
+            size_t n = (size_t)L.cv->w * L.cv->h * 4;
+            uint8_t *whole = malloc(n);
+            int bad = 0;
+            /* (the page's targets: what the pointer can reach, on a 4-point grid) */
+            int targets[256], nt = 0;
+            for (float y = 0; y < 700; y += 4) for (float x = 0; x < 1000; x += 4) {
+                int h = hit(x, y), seen = h < 0;
+                for (int i = 0; i < nt && !seen; i++) seen = targets[i] == h;
+                if (!seen && nt < 256) targets[nt++] = h;
+            }
+            if (whole) {
+                memcpy(whole, L.cv->px, n);
+                for (int pair = 0; pair < nt * nt; pair++) {
+                    int a = targets[pair / nt], h = targets[pair % nt];   /* (from a straight to h, then away) */
+                    dirty_region(hit_box(L.hover)); L.hover = a; dirty_region(hit_box(a)); repaint(dirty_box); has_dirty = 0;
+                    dirty_region(hit_box(a)); L.hover = h; dirty_region(hit_box(h)); Box was = dirty_box; repaint(dirty_box); has_dirty = 0;
+                    dirty_region(hit_box(h)); L.hover = -1; repaint(dirty_box); has_dirty = 0;
+                    size_t differ = 0; int worst = 0, fx = -1, fy = -1;
+                    for (size_t i = 0; i < n; i++) {
+                        int d = abs((int)whole[i] - (int)L.cv->px[i]);
+                        if (d > 2) { if (!differ) { fx = (int)(i / 4 % L.cv->w); fy = (int)(i / 4 / L.cv->w); } differ++; }
+                        if (d > worst) worst = d;
+                    }
+                    if (differ) {
+                        bad++;
+                        fprintf(stderr, "launcher sweep: hit %d to %d (region %.0f,%.0f %.0fx%.0f pt), %zu bytes differ (worst %d), first at %.0f,%.0f pt\n",
+                                a, h, was.x, was.y, was.w, was.h, differ, worst, fx / L.s, fy / L.s);
+                        if (bad == 1 && strcmp(G("TP_LAUNCHER_SWEEP"), "1")) cv_write_png(L.cv, G("TP_LAUNCHER_SWEEP"));   /* (a path: the view after it) */
+                    }
+                    memcpy(L.cv->px, whole, n);
+                }
+                free(whole);
+            }
+            fprintf(stderr, "launcher sweep (page %d, scale %.3f): %d targets leave the view changed\n", L.page, L.s, bad);
+        }
         if (G("TP_LAUNCHER_REPAINT_CHECK")) {
             /* (a test: the pointer moves to hit h; the region repainted must equal the whole view drawn afresh) */
             int h = atoi(G("TP_LAUNCHER_REPAINT_CHECK"));

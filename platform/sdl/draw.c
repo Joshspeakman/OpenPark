@@ -38,7 +38,11 @@ Col mix(Col a, Col b, float t) { Col r = {a.r + (b.r - a.r) * t, a.g + (b.g - a.
 /* ---- the canvas ---- */
 typedef struct { int x0, y0, x1, y1; } Span;            /* pixels x0 <= x < x1, y0 <= y < y1 */
 static Span clip_of(const Canvas *c);
-static struct { const Canvas *c; Span s; } clips[8];   /* (a few canvases may each have a clip at a time) */
+/* Clips nest: each cv_clip adds one (a canvas's draws stay inside all of its clips at once) and cv_unclip takes away
+ * the latest. (One clip a canvas, replaced and then cleared, lost the launcher's repaint clip at the poster's sash:
+ * everything drawn after it went over the whole view, the tiles over their own labels.) */
+static struct { const Canvas *c; Span s; unsigned order; } clips[16];
+static unsigned clip_order;
 
 Canvas *cv_new(int w, int h) {
     Canvas *c = calloc(1, sizeof *c);
@@ -50,7 +54,7 @@ Canvas *cv_new(int w, int h) {
 }
 void cv_free(Canvas *c) {
     if (!c) return;
-    cv_unclip(c);
+    for (int i = 0; i < 16; i++) if (clips[i].c == c) clips[i].c = NULL;   /* (all of its clips) */
     free(c->px); free(c);
 }
 void cv_fill(Canvas *c, Col k) {
@@ -59,16 +63,19 @@ void cv_fill(Canvas *c, Col k) {
 }
 void cv_clip(Canvas *c, Box b) {
     int slot = -1;
-    for (int i = 0; i < 8; i++) if (clips[i].c == c) { slot = i; break; }
-    for (int i = 0; slot < 0 && i < 8; i++) if (!clips[i].c) slot = i;
-    if (slot < 0) return;
-    clips[slot].c = c;
+    for (int i = 0; slot < 0 && i < 16; i++) if (!clips[i].c) slot = i;
+    if (slot < 0) { fprintf(stderr, "draw: more than 16 clips\n"); return; }
+    clips[slot].c = c; clips[slot].order = ++clip_order;
     clips[slot].s = (Span){(int)floorf(b.x), (int)floorf(b.y), (int)ceilf(b.x + b.w), (int)ceilf(b.y + b.h)};
 }
-void cv_unclip(Canvas *c) { for (int i = 0; i < 8; i++) if (clips[i].c == c) clips[i].c = NULL; }
+void cv_unclip(Canvas *c) {
+    int last = -1;
+    for (int i = 0; i < 16; i++) if (clips[i].c == c && (last < 0 || clips[i].order > clips[last].order)) last = i;
+    if (last >= 0) clips[last].c = NULL;
+}
 static Span clip_of(const Canvas *c) {
     Span s = {0, 0, c->w, c->h};
-    for (int i = 0; i < 8; i++) if (clips[i].c == c) {
+    for (int i = 0; i < 16; i++) if (clips[i].c == c) {
         Span k = clips[i].s;
         if (k.x0 > s.x0) s.x0 = k.x0;
         if (k.y0 > s.y0) s.y0 = k.y0;
