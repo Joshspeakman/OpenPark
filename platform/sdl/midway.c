@@ -400,8 +400,11 @@ Midway *midway_new(SDL_Renderer *r, float scale, const Image *park, MidwayLayout
     m->blend = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD,
                                           SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
     {
+        /* (SDL's software renderer accepts the custom mode, then ignores it when drawing: every sprite came out on an
+         * opaque black square, found on the Mac with SDL_VIDEODRIVER=dummy. VMs, Remote Desktop and basic display
+         * drivers get it, so it goes by its name too.) */
         SDL_Texture *t = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, 1, 1);
-        m->premul = t && SDL_SetTextureBlendMode(t, m->blend) == 0;
+        m->premul = t && SDL_SetTextureBlendMode(t, m->blend) == 0 && !(SDL_GetRendererInfo(r, &info) == 0 && info.name && !strcmp(info.name, "software"));
         if (t) SDL_DestroyTexture(t);
         if (!m->premul) m->blend = SDL_BLENDMODE_BLEND;
     }

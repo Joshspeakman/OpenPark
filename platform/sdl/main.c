@@ -885,9 +885,18 @@ static void draw_card(void) {
         uint8_t *px = tp_card_render(pw, ph, w > 0 ? (float)pw / w : 1, base_dir);
         card_tex = px ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, pw, ph) : NULL;
         if (card_tex) {
+            /* premultiplied with the custom blend; straight alpha and SDL's blend on its software renderer, which accepts
+             * the custom mode and then ignores it (midway.c) */
+            SDL_RendererInfo ri; int soft = SDL_GetRendererInfo(ren, &ri) == 0 && ri.name && !strcmp(ri.name, "software");
+            if (soft)
+                for (size_t i = 0; i < (size_t)pw * ph; i++) {
+                    uint8_t *q = px + i * 4; unsigned a = q[3];
+                    for (int c = 0; c < 3; c++) q[c] = a ? (uint8_t)(q[c] * 255u / a > 255 ? 255 : q[c] * 255u / a) : 0;
+                }
             SDL_UpdateTexture(card_tex, NULL, px, pw * 4);
-            SDL_SetTextureBlendMode(card_tex, SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD));
+            SDL_SetTextureBlendMode(card_tex, soft ? SDL_BLENDMODE_BLEND : SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE,
+                SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                SDL_BLENDOPERATION_ADD));
         }
         free(px); card_w = pw; card_h = ph;
     }
