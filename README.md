@@ -63,18 +63,26 @@ for coverage, the original developers' unfinished features, and a modding map.
 | Platform | Status |
 |---|---|
 | macOS, Apple Silicon | **Playable** (this beta) |
-| Windows (x86-64) | **In progress** on the [`pc` branch](https://github.com/Joshspeakman/OpenPark/tree/pc): builds from GOG's Windows installer, passes the golden first-park check, runs to the title screen, and has the same launch window; matching the Mac app feature by feature |
+| Windows (x86-64) | **In progress** on the [`pc` branch](https://github.com/Joshspeakman/OpenPark/tree/pc): builds from GOG's Windows installer, passes the golden first-park check, plays into a new park, and has the same launch window; matching the Mac app feature by feature |
 | Linux (x86-64) | **In progress** on the same branch: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
 
 **Windows and Linux, as of 2026-11-25.** One app on three systems: the same recompiled game, the same settings (one
 shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 front end in place of the Mac's Cocoa one.
 - **Proven on both:** the recompiled code reproduces the golden first-park frame and saved profile, byte for byte
-  (`tests/check_native.sh --park`, the same check the Mac passes), and a muted test run reaches the title screen.
-- **Ported so far:** the launch window with every page and its animation, the in-game controls card, controller quit,
-  the park picture for the launcher, GOG's store art, the icon and title banner, and the extras importer
-  (CD images read in place).
-- **Still to come:** the CD32 and 3DO music, the 3DO ride films, the updater, Save Park Picture, game windows in the
-  wide view, and a drag-and-drop setup like the Mac's.
+  (`tests/check_native.sh --park`, the same check the Mac passes), and a muted test run plays into a new park with the
+  zoomable park view live.
+- **Ported so far:**
+  - the launch window, with every page, the Ride Tunes chooser, the SoundFont picker and its animation;
+  - in the game: the controls card, controller quit, and Save Park Picture (to a folder for now);
+  - the park picture for the launcher, GOG's store art, and the icon and title banner;
+  - the extras importer, which reads CD images in place.
+- **Still to come:**
+  - the CD32 and 3DO music, the 3DO ride films and the Visitor View's ride clips;
+  - the updater;
+  - Save Park Picture's save dialog;
+  - game windows in the wide view;
+  - opening another release's disc from the app;
+  - a drag-and-drop setup like the Mac's.
 - The checklist and results: [docs/PC-HANDOFF.md on `pc`](https://github.com/Joshspeakman/OpenPark/blob/pc/docs/PC-HANDOFF.md).
 
 How a platform is added, and what is portable today: [docs/PORTING.md](docs/PORTING.md).
