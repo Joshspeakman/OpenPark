@@ -57,7 +57,11 @@ def link_game_library(out, objects):
 
 def shared():
     """Flags that make a shared library (the file name the callers choose is kept: loading does not mind)."""
-    return ['-dynamiclib'] if SYSTEM == 'macos' else ['-shared', *pic()]   # (position-independent by default on macOS)
+    if SYSTEM == 'macos':
+        return ['-dynamiclib']                  # (position-independent by default on macOS)
+    # Windows: MinGW's runtime (libwinpthread-1.dll and the like) linked in, so python.org Python's ctypes can load the
+    # library: it doesn't search PATH for dependencies, and MSYS2's bin folder isn't on it anyway.
+    return ['-shared', *pic(), *(['-static'] if SYSTEM == 'windows' else [])]
 
 
 def static_lib(out, objects):

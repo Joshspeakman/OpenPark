@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Extract the pinned owned GOG package locally, without running its installer."""
+"""Extract the pinned owned GOG copy locally, without running its installer: GOG's Mac package (xar/cpio), or GOG's
+Windows installer (InnoSetup, read by innoextract). Either way the game's own files end up in
+work/extracted/payload/Contents/Resources/game, so every later step is the same."""
 import argparse
 import hashlib
 import json
@@ -20,19 +22,56 @@ def digest(path):
     return h.hexdigest()
 
 
+# What GOG's Windows installer holds besides the game: its DOSBox, redistributables, installer support and temporary
+# files. They stay in work/extracted/installer; the game folder gets the rest (GAME, CONFIG, THEME.CD, GOG's files).
+INSTALLER_ONLY = {'DOSBOX', '__redist', '__support', 'commonappdata', 'tmp', 'app'}
+
+
+def which_input(path, pins):
+    """'package' or 'windows_installer': the pinned input this file is (size, then SHA-256), or None."""
+    size, sha = path.stat().st_size, None
+    for kind in ('package', 'windows_installer'):
+        pin = pins.get(kind)
+        if pin and size == pin['size']:
+            sha = sha or digest(path)
+            if sha == pin['sha256']:
+                return kind
+    return None
+
+
+def extract_installer(installer, extracted, source):
+    """GOG's Windows installer, read by innoextract (nothing in it runs), then its game files moved into `source`."""
+    tool = shutil.which('innoextract')
+    if not tool:
+        raise SystemExit("reading GOG's Windows installer needs innoextract: pacman -S mingw-w64-clang-x86_64-innoextract "
+                         '(MSYS2), apt install innoextract, or brew install innoextract')
+    raw = extracted / 'installer'
+    if raw.exists():
+        raise SystemExit(f'{raw} is left from an earlier extraction: move it aside, then run this again')
+    raw.mkdir(parents=True)
+    # (English where GOG's files come in several languages, as in the Mac package: theme_park_enUS)
+    subprocess.run([tool, '--silent', '--extract', '--language', 'en-US', '--output-dir', str(raw), str(installer)], check=True)
+    source.mkdir(parents=True)
+    for item in sorted(raw.iterdir()):
+        if item.name not in INSTALLER_ONLY:
+            shutil.move(str(item), str(source / item.name))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('package', type=Path)
+    ap.add_argument('package', type=Path, help="GOG's Mac package (.pkg) or GOG's Windows installer (.exe)")
     args = ap.parse_args()
     pins = json.loads((ROOT / 'config/inputs.json').read_text())
     package = args.package.resolve()
-    expected = pins['package']
-    if package.stat().st_size != expected['size'] or digest(package) != expected['sha256']:
+    kind = which_input(package, pins)
+    if kind is None:
         raise SystemExit('unsupported package: size/SHA-256 mismatch; original not modified')
     work = ROOT / 'work'
     archive = work / 'package'
     extracted = work / 'extracted'
     source = extracted / 'payload/Contents/Resources/game'
+    if not source.exists() and kind == 'windows_installer':
+        extract_installer(package, extracted, source)
     if not source.exists():
         # Both extraction tools read only the hash-pinned package. No postinstall,
         # bundled launcher or DOSBox executable is executed.

@@ -20,7 +20,11 @@ class PlatformTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        library = Path(cls.tmp.name) / 'platform.dylib'     # (any name: ctypes loads it by path)
+        # (any name: ctypes loads it by path. Windows can't delete a DLL its process still holds, and the pool's threads
+        # live in it, so there it goes in the ignored build/ and the next run replaces it.)
+        where = ROOT / 'build/test-platform' if toolchain.SYSTEM == 'windows' else Path(cls.tmp.name)
+        where.mkdir(parents=True, exist_ok=True)
+        library = where / 'platform.dylib'
         threads = ['-lpthread'] if toolchain.SYSTEM != 'macos' else []
         subprocess.run([*toolchain.cc(), '-O2', *toolchain.shared(), '-I', str(ROOT / 'runtime'), str(ROOT / 'runtime/sha256.c'),
                         str(ROOT / 'runtime/platform_pool.c'), '-o', str(library), *threads], check=True)
