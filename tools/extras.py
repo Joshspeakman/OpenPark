@@ -4,16 +4,19 @@
   tools/extras.py [--data DIR] SOURCE...        import what is recognised
   tools/extras.py --list [--data DIR]           what is installed
 
-A SOURCE is a .cue (with its .bin files), an .iso or .img disk image (mounted read-only for the scan), a
-mounted volume or any folder. config/extras.json says what each recognised disc gives; it holds hashes only.
-Imported files go to DIR/extras/<pack>/ (DIR: TP_DATA or ~/Games/ThemeParkNative) with a manifest.json the app
-reads. Nothing is copied into this project.
+A SOURCE is a .cue (with its .bin files), an .iso or .img disk image (on the Mac mounted read-only for the scan; on
+Windows and Linux read in place, ISO 9660 and FAT images: tools/disc_image.py), a mounted volume or any folder.
+config/extras.json says what each recognised disc gives; it holds hashes only. Imported files go to
+DIR/extras/<pack>/ with a manifest.json the app reads. DIR: TP_DATA, else the app's data folder
+(~/Games/ThemeParkNative on the Mac, %LOCALAPPDATA%\\ThemeParkNative on Windows, $XDG_DATA_HOME/ThemeParkNative or
+~/.local/share/ThemeParkNative on Linux). Nothing is copied into this project.
 
 Today: the Amiga CD32 disc's 25 audio tracks become the "Amiga CD32" music (Launcher > Sound > Music Type).
 Other discs are recognised and reported (docs/reports/2026-10-19-other-editions.md).
 """
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -75,13 +78,21 @@ def find_ci(root, rel):
     return p if p.is_file() else None
 
 
-def identify_folder(root, packs):
+def identify(read, packs):
+    """The pack whose key file read(path) (its bytes, or None if it isn't there) has, or None."""
     for name, pack in packs.items():
         rel, want = pack['key_file']
-        f = find_ci(root, rel)
-        if f and sha256(f.read_bytes()) == want:
+        data = read(rel)
+        if data is not None and sha256(data) == want:
             return name
     return None
+
+
+def identify_folder(root, packs):
+    def read(rel):
+        f = find_ci(root, rel)
+        return f.read_bytes() if f else None
+    return identify(read, packs)
 
 
 def wav(pcm):
@@ -113,26 +124,24 @@ def import_3do(tracks, pack, dest):
     sys.path.insert(0, str(ROOT / 'tools'))
     import opera
     mode, raw = [t for t in tracks.values() if t[0].startswith('MODE')][0]
-    with tempfile.NamedTemporaryFile(suffix='.bin') as tmp:      # (opera reads raw sectors from a file)
-        tmp.write(raw); tmp.flush()
-        disc = opera.Disc(tmp.name)
-        (dest / 'music').mkdir(parents=True, exist_ok=True)
-        (dest / 'video').mkdir(parents=True, exist_ok=True)
-        tunes = {}
-        for tune, f in pack['music'].items():
-            out = 'music/%s.wav' % Path(f).stem
-            (dest / out).write_bytes(opera.wav(*opera.aifc_pcm(disc.read(f))))
-            tunes[tune] = out
-        for f in pack['music_extra']:
-            (dest / 'music' / (Path(f).stem + '.wav')).write_bytes(opera.wav(*opera.aifc_pcm(disc.read(f))))
-        rides = {}
-        for ride, stem in pack['ride_videos'].items():
-            v = dest / 'video' / (stem + '.STREAM')
-            if not v.exists():
-                data = disc.read(stem + '.STREAM')
-                v.write_bytes(data)
-                (dest / 'video' / (stem + '.wav')).write_bytes(opera.wav(*opera.stream_audio(data)))
-            rides[ride] = 'video/' + stem
+    disc = opera.Disc(io.BytesIO(raw))      # (the raw sectors in memory: Windows can't reopen an open temporary file)
+    (dest / 'music').mkdir(parents=True, exist_ok=True)
+    (dest / 'video').mkdir(parents=True, exist_ok=True)
+    tunes = {}
+    for tune, f in pack['music'].items():
+        out = 'music/%s.wav' % Path(f).stem
+        (dest / out).write_bytes(opera.wav(*opera.aifc_pcm(disc.read(f))))
+        tunes[tune] = out
+    for f in pack['music_extra']:
+        (dest / 'music' / (Path(f).stem + '.wav')).write_bytes(opera.wav(*opera.aifc_pcm(disc.read(f))))
+    rides = {}
+    for ride, stem in pack['ride_videos'].items():
+        v = dest / 'video' / (stem + '.STREAM')
+        if not v.exists():
+            data = disc.read(stem + '.STREAM')
+            v.write_bytes(data)
+            (dest / 'video' / (stem + '.wav')).write_bytes(opera.wav(*opera.stream_audio(data)))
+        rides[ride] = 'video/' + stem
     manifest = {'pack': '3do-usa', 'title': pack['title'], 'tunes': tunes, 'ride_videos': rides}
     (dest / 'manifest.json').write_text(json.dumps(manifest, indent=1) + '\n')
     return '%d recorded tunes and %d ride videos imported' % (len(tunes), len(set(rides.values())))
@@ -159,6 +168,8 @@ def scan(source, packs, data):
         for name, pack in packs.items():
             if pack.get('data_track_sha256') == sha256(raw):
                 return name, 'data track only: the audio tracks are missing (dump the whole disc as bin/cue)'
+        if sys.platform != 'darwin':
+            return scan_image(src, packs)
         mounted = already_mounted(src)                   # (attached already: scan where it is)
         if mounted:
             return scan_folder(mounted, packs)
@@ -190,7 +201,23 @@ def already_mounted(image):
 
 
 def scan_folder(root, packs):
-    name = identify_folder(root, packs)
+    return found(identify_folder(root, packs), packs)
+
+
+def scan_image(image, packs):
+    """An image read in place: Windows and Linux (tools/disc_image.py; the Mac mounts it with hdiutil instead)."""
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import disc_image
+    img = disc_image.open_image(image)
+    if img is None:
+        if image.suffix.lower() == '.dmg':
+            return None, 'a .dmg opens only on a Mac: copy its files to a folder and give that'
+        return None, 'not an ISO 9660 or FAT image (mount it and give its folder)'
+    with img:
+        return found(identify(img.read, packs), packs)
+
+
+def found(name, packs):
     if not name:
         return None, 'not a known disc'
     if name == 'amiga-cd32':
@@ -198,10 +225,24 @@ def scan_folder(root, packs):
     return name, packs[name]['gives']
 
 
+def default_data(system=sys.platform, env=os.environ):
+    """The app's data folder: TP_DATA, else the Mac's ~/Games/ThemeParkNative, or the SDL app's (platform/sdl/main.c's
+    data_paths: %LOCALAPPDATA%\\ThemeParkNative; $XDG_DATA_HOME/ThemeParkNative, else ~/.local/share/ThemeParkNative)."""
+    if system == 'darwin':
+        return Path(env.get('TP_DATA', Path.home() / 'Games/ThemeParkNative'))
+    if env.get('TP_DATA'):
+        return Path(env['TP_DATA'])
+    if system == 'win32':
+        return Path(env.get('LOCALAPPDATA', '.'), 'ThemeParkNative')
+    if env.get('XDG_DATA_HOME'):
+        return Path(env['XDG_DATA_HOME'], 'ThemeParkNative')
+    return Path(env.get('HOME', '.'), '.local/share/ThemeParkNative')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('sources', nargs='*')
-    ap.add_argument('--data', type=Path, default=Path(os.environ.get('TP_DATA', Path.home() / 'Games/ThemeParkNative')))
+    ap.add_argument('--data', type=Path, default=default_data())
     ap.add_argument('--list', action='store_true')
     args = ap.parse_args()
     packs = json.loads((ROOT / 'config/extras.json').read_text())['packs']
