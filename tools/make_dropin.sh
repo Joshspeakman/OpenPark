@@ -22,7 +22,7 @@ TP_NO_INSTALL=1 TP_NO_DOWNLOADS=1 bash tools/build_app.sh "$PKG" > "$REL/build_a
 GA=(work/app-release/game.a work/app-release-intro/game.a)
 O="$ROOT/build/dropin"; rm -rf "${O:?}"; mkdir -p "$O/host" "$O/runner"
 echo "== the host, the launch window and the runner"
-HOST=(platform/macos/main.m platform/macos/audio.m platform/macos/launcher.m platform/macos/platform_macos.c runtime/cinepak.c runtime/host.c
+HOST=(platform/macos/main.m platform/macos/audio.m platform/macos/launcher.m platform/macos/platform_macos.c runtime/app_spec.c runtime/cinepak.c runtime/host.c
       runtime/sha256.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/native_land.c runtime/native_draw.c runtime/qol.c runtime/walk.c
       runtime/bigmap.c runtime/freemode.c)
 RUN=(platform/macos/platform_macos.c runtime/host.c runtime/sha256.c runtime/sb16.c runtime/headless.c runtime/verify.c runtime/view.c
