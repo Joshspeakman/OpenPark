@@ -18,6 +18,10 @@ int settings_has(const char *key);
  * program's folder (with fonts/ and art/, ending in a separator); version: the build's commit, shown and checked. */
 int tp_launcher_run(const char *data_root, const char *res_dir, const char *version);
 
+/* card.c: the controls card (the Mac's TPControlsCard) as premultiplied RGBA, pw x ph pixels at scale s (pixels per
+ * point); the caller frees it. res_dir as tp_launcher_run's. */
+uint8_t *tp_card_render(int pw, int ph, float s, const char *res_dir);
+
 /* audio.c: the emulated Sound Blaster 16 and the General MIDI music through SDL audio. */
 int tp_audio_start(void);
 void tp_audio_stop(void);

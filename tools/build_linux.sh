@@ -62,7 +62,8 @@ RUNTIME=(runtime/host.c runtime/sb16.c runtime/verify.c runtime/view.c runtime/n
          runtime/walk.c runtime/bigmap.c runtime/freemode.c runtime/cinepak.c runtime/sha256.c runtime/app_spec.c
          runtime/platform_posix.c runtime/platform_pool.c)
 # The app: the game's window, its sound and settings, and the launch window (launcher.c, drawn by draw.c and midway.c).
-APP=(platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c platform/sdl/launcher.c platform/sdl/draw.c platform/sdl/midway.c)
+APP=(platform/sdl/main.c platform/sdl/audio.c platform/sdl/settings.c platform/sdl/launcher.c platform/sdl/draw.c platform/sdl/midway.c
+     platform/sdl/card.c)
 BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 "$CC" -O2 -Wall -Wno-unused-function -I "$INC" -I runtime $(sdl2-config --cflags) ${SYNTH[@]+"${SYNTH[@]}"} -DTP_BUILD="\"$BUILD_ID\"" \
   "${APP[@]}" "${RUNTIME[@]}" work/app-release/game.a work/app-release-intro/game.a \

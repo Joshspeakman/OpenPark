@@ -27,13 +27,13 @@ INC=vendor/freedom-force-recomp/recomp/runtime
 # shellcheck disable=SC2086
 "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Werror -I runtime $SDL_CFLAGS -c platform/sdl/settings.c -o build/check-sdl/settings.o
 # The launch window and its drawing (draw.c compiles the vendored stb libraries, which it quiets itself)
-for f in launcher draw midway; do
+for f in launcher draw midway card; do
   # shellcheck disable=SC2086
   "$CC" -std=gnu11 -O1 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Werror -I runtime $SDL_CFLAGS -c platform/sdl/$f.c -o build/check-sdl/$f.o
 done
 # shellcheck disable=SC2086
 "$CC" -std=gnu11 -O1 -w -I "$INC" -I runtime build/check-sdl/main.o build/check-sdl/audio.o build/check-sdl/settings.o \
-  build/check-sdl/launcher.o build/check-sdl/draw.o build/check-sdl/midway.o \
+  build/check-sdl/launcher.o build/check-sdl/draw.o build/check-sdl/midway.o build/check-sdl/card.o \
   "${RUNTIME[@]}" "${PLAT[@]}" tests/stub_game.c $SDL_LIBS "${LIBS[@]}" -o build/check-sdl/ThemePark
 echo "the SDL app compiles and links ($(uname -s))"
 scratch=$(mktemp -d)

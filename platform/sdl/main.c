@@ -127,6 +127,9 @@ static int sw, sh, wh;                              /* the game's screen now: si
 static int cursor_hidden;
 static SDL_Cursor *game_cursor, *sys_cursor; static int cur_serial; static uint32_t cur_hash; static double cur_kx, cur_ky;
 static uint32_t buttons;
+static uint8_t raw_down[128]; static int fast_forward, swallow_text;   /* (what the game was told is held: release_input lets it go) */
+static int away, card_up;                            /* why the game waits (refresh_hold): minimised or hidden; the controls card */
+static void show_controls(int on);
 /* The park view: on when zoomed, or when the window is wider than 4:3 (widescreen: the park fills it, the
  * interface stays in a centred 4:3 column); off, the game draws its own view. */
 static int view_on, live, view_moved, menu_wide;
@@ -188,6 +191,19 @@ static void send_mouse(double x, double y) {
     fy = fy < 0 ? 0 : fy > 0.9999 ? 0.9999 : fy;
     if (live) tp_view_mouse(fx, fy, buttons);   /* mapped into the park */
     else tp_host_mouse(fx, fy, buttons);        /* the game's own screen */
+}
+/* The window lost the keyboard (another window, or the controls card over the game): what the game was told is held is
+ * let go, since the releases will go elsewhere: a mouse button (a drag that never ends), Shift, Ctrl, Alt, keys, Tab's
+ * fast forward. The Mac's releaseInput (main.m:415-427). */
+static void release_input(void) {
+    panning = 0;
+    if (buttons) { buttons = 0; send_mouse(mouse_x, mouse_y); }
+    tp_host_shift(0);
+    for (int k = 0; k < 128; k++) if (raw_down[k]) { raw_down[k] = 0; tp_host_key_raw((uint8_t)k, 0); }
+    if (fast_forward) {
+        fast_forward = 0; set_subtitle("");
+        if (!getenv("TP_CYCLES")) tp_host_set_cycles(settings_getf("Cycles"));
+    }
 }
 
 /* The game's cursor (view.c reads it from the game) as the system cursor over the park view, at the view's scale. */
@@ -402,6 +418,7 @@ static void present(void) {
     update_game_cursor();
     update_scanlines(fh);
 }
+static void draw_card(void);
 static void draw(void) {
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
@@ -411,6 +428,7 @@ static void draw(void) {
         SDL_RenderCopy(ren, tex, NULL, &d);
         if (show_scan && scan_tex && !tp_walk_active()) SDL_RenderCopy(ren, scan_tex, NULL, &d);
     }
+    draw_card();
 }
 
 /* ---- the Visitor View (runtime/walk.c) ---- */
@@ -744,6 +762,7 @@ static void run_control(void) {
         else if (!strcmp(op, "cycles")) tp_host_set_cycles(a1);
         else if (!strcmp(op, "shot")) { char hex[65]; tp_host_png(arg, hex); fprintf(stderr, "shot %s\n", arg); }
         else if (!strcmp(op, "vshot")) vshot(arg);
+        else if (!strcmp(op, "controls")) show_controls(!card_up);
         else if (!strcmp(op, "sleep")) { until = t + a1; free(line); for (int i = 0; i < np; i++) free(p[i]); break; }
         else if (!strcmp(op, "ack")) { char ap[1100]; snprintf(ap, sizeof ap, "%s.ack", path); FILE *af = fopen(ap, "a"); if (af) { fprintf(af, "%s\n", np > 1 ? p[1] : ""); fclose(af); } }
         else if (!strcmp(op, "peek") && np > 1) {        /* peek ADDR(hex) LEN: guest memory to the log */
@@ -799,6 +818,16 @@ static double axis(SDL_GameControllerAxis a) { return SDL_GameControllerGetAxis(
 static int button(SDL_GameControllerButton b) { return SDL_GameControllerGetButton(pad_dev, b); }
 static void poll_controller(void) {
     if (!pad_dev) return;
+    {   /* View + Menu held a second: quit, as the Mac's controller quit (save in the game first) */
+        static double both_since;
+        if (button(SDL_CONTROLLER_BUTTON_BACK) && button(SDL_CONTROLLER_BUTTON_START)) {
+            if (!both_since) both_since = now();
+            else if (now() - both_since > 1.0) {
+                fprintf(stderr, "controller: View + Menu held: quit\n"); both_since = 0;
+                SDL_Event q = {.type = SDL_QUIT}; SDL_PushEvent(&q); return;
+            }
+        } else both_since = 0;
+    }
     double lx = axis(SDL_CONTROLLER_AXIS_LEFTX), ly = -axis(SDL_CONTROLLER_AXIS_LEFTY), rx = axis(SDL_CONTROLLER_AXIS_RIGHTX), ry = -axis(SDL_CONTROLLER_AXIS_RIGHTY);
     if (tp_walk_active()) {                             /* Visitor View: left stick walks, right stick looks, A follow, X hop, Y ride, Start leaves */
         static int a0, x0, y0, m0;
@@ -828,11 +857,41 @@ static void poll_controller(void) {
     menu = nm;
 }
 
-/* Hidden or minimised, the park waits (and is silent) until it is back. */
-static void hold_game(int hold_it) {
-    tp_host_pause(hold_it);
-    if (hold_it) tp_audio_set_volumes(0, 0);
+/* Why the game waits, worked out together each time, as the Mac's refreshHold (main.m:1549-1558): away (minimised or
+ * hidden: silent too) or under the controls card. One reason ending alone used to resume a game still held by another. */
+static void refresh_hold(void) {
+    tp_host_pause(away || card_up);
+    if (away) tp_audio_set_volumes(0, 0);
     else tp_audio_set_volumes((float)settings_getf("SoundVolume"), (float)settings_getf("MusicVolume"));
+}
+static void hold_game(int hold_it) { away = hold_it; refresh_hold(); }
+
+/* The controls card (Ctrl+/; card.c): over the game, which waits; any key or click puts it away. */
+static SDL_Texture *card_tex; static int card_w, card_h;
+static void show_controls(int on) {
+    if (on == card_up) return;
+    if (on) release_input();
+    card_up = on;
+    if (!on && card_tex) { SDL_DestroyTexture(card_tex); card_tex = NULL; }
+    refresh_hold();
+    fprintf(stderr, "controls card: %s\n", on ? "shown" : "away");
+}
+static void draw_card(void) {
+    if (!card_up) return;
+    int pw, ph; SDL_GetRendererOutputSize(ren, &pw, &ph);
+    if (!card_tex || pw != card_w || ph != card_h) {         /* (made again for a new window size) */
+        if (card_tex) SDL_DestroyTexture(card_tex);
+        int w, h; SDL_GetWindowSize(win, &w, &h);
+        uint8_t *px = tp_card_render(pw, ph, w > 0 ? (float)pw / w : 1, base_dir);
+        card_tex = px ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, pw, ph) : NULL;
+        if (card_tex) {
+            SDL_UpdateTexture(card_tex, NULL, px, pw * 4);
+            SDL_SetTextureBlendMode(card_tex, SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD));
+        }
+        free(px); card_w = pw; card_h = ph;
+    }
+    if (card_tex) SDL_RenderCopy(ren, card_tex, NULL, NULL);
 }
 
 /* ---- keys: a printable key waits for its character (SDL's text event), others go at once ---- */
@@ -862,6 +921,7 @@ static int app_key(const SDL_KeyboardEvent *k) {
     case SDLK_RIGHTBRACKET: panel_step(1); return 1;
     case SDLK_LEFTBRACKET: panel_step(-1); return 1;
     case SDLK_e: if (!k->repeat) save_picture(); return 1;
+    case SDLK_SLASH: if (!k->repeat) show_controls(!card_up); return 1;   /* (the Mac's ⌘/) */
     case SDLK_q: { SDL_Event q = {.type = SDL_QUIT}; SDL_PushEvent(&q); return 1; }
     default: return 0;
     }
@@ -871,7 +931,7 @@ static void key_down(const SDL_KeyboardEvent *k) {
     shift_state();
     if (app_key(k)) return;
     if (s == SDL_SCANCODE_TAB) {                          /* Tab, held: fast forward (the game does not use Tab) */
-        if (!k->repeat && !getenv("TP_CYCLES")) { tp_host_set_cycles(settings_getf("Cycles") * 4); set_subtitle("Fast forward"); }
+        if (!k->repeat && !getenv("TP_CYCLES")) { tp_host_set_cycles(settings_getf("Cycles") * 4); set_subtitle("Fast forward"); fast_forward = 1; }
         return;
     }
     if (walk_drop && s == SDL_SCANCODE_ESCAPE) { end_drop(); return; }   /* no Visitor View after all */
@@ -884,7 +944,7 @@ static void key_down(const SDL_KeyboardEvent *k) {
     uint8_t scan = pc_scan(s);
     if (!scan) return;
     flush_pending();
-    if (!k->repeat) tp_host_key_raw(scan, 1);
+    if (!k->repeat) { tp_host_key_raw(scan, 1); raw_down[scan & 127] = 1; }
     uint32_t ascii = 0;
     if (c == SDLK_RETURN || c == SDLK_KP_ENTER) ascii = 13;
     else if (c == SDLK_ESCAPE) ascii = 27;
@@ -912,10 +972,10 @@ static void text_input(const char *text) {
 static void key_up(const SDL_KeyboardEvent *k) {
     SDL_Scancode s = k->keysym.scancode;
     shift_state();
-    if (s == SDL_SCANCODE_TAB) { if (!getenv("TP_CYCLES")) tp_host_set_cycles(settings_getf("Cycles")); set_subtitle(""); return; }
+    if (s == SDL_SCANCODE_TAB) { if (!getenv("TP_CYCLES")) tp_host_set_cycles(settings_getf("Cycles")); set_subtitle(""); fast_forward = 0; return; }
     if (tp_walk_active()) { walk_key(s, 0); return; }
     uint8_t scan = pc_scan(s);
-    if (scan) tp_host_key_raw(scan, 0);
+    if (scan) { tp_host_key_raw(scan, 0); raw_down[scan & 127] = 0; }
 }
 
 static void mouse_down(const SDL_MouseButtonEvent *e) {
@@ -1020,10 +1080,13 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&e)) {
             switch (e.type) {
             case SDL_QUIT: running = 0; break;
-            case SDL_KEYDOWN: key_down(&e.key); break;
+            case SDL_KEYDOWN:
+                /* the card up: any key puts it away (its character too), but Ctrl+Q still quits */
+                if (card_up && !((e.key.keysym.mod & KMOD_CTRL) && e.key.keysym.sym == SDLK_q)) { show_controls(0); swallow_text = 1; break; }
+                key_down(&e.key); break;
             case SDL_KEYUP: key_up(&e.key); break;
-            case SDL_TEXTINPUT: text_input(e.text.text); break;
-            case SDL_MOUSEBUTTONDOWN: mouse_down(&e.button); break;
+            case SDL_TEXTINPUT: if (swallow_text) { swallow_text = 0; break; } text_input(e.text.text); break;
+            case SDL_MOUSEBUTTONDOWN: if (card_up) { show_controls(0); break; } mouse_down(&e.button); break;
             case SDL_MOUSEBUTTONUP: mouse_up(&e.button); break;
             case SDL_MOUSEMOTION: mouse_motion(&e.motion); break;
             case SDL_MOUSEWHEEL: mouse_wheel(&e.wheel); break;
@@ -1037,7 +1100,7 @@ int main(int argc, char *argv[]) {
                 case SDL_WINDOWEVENT_RESTORED: case SDL_WINDOWEVENT_SHOWN: if (minimized) { minimized = 0; hold_game(0); } break;
                 case SDL_WINDOWEVENT_LEAVE: set_cursor_hidden(0); mouse_in = 0; break;
                 case SDL_WINDOWEVENT_FOCUS_GAINED: focused = 1; break;
-                case SDL_WINDOWEVENT_FOCUS_LOST: focused = 0; set_cursor_hidden(0); break;
+                case SDL_WINDOWEVENT_FOCUS_LOST: focused = 0; set_cursor_hidden(0); release_input(); break;
                 }
                 break;
             }
