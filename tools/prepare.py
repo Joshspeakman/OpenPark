@@ -22,9 +22,10 @@ def digest(path):
     return h.hexdigest()
 
 
-# What GOG's Windows installer holds besides the game: its DOSBox, redistributables, installer support and temporary
-# files. They stay in work/extracted/installer; the game folder gets the rest (GAME, CONFIG, THEME.CD, GOG's files).
+# What GOG's Windows installer holds besides the game: its DOSBox, redistributables, installer support, temporary files
+# and its own records of the install. They stay in work/extracted/installer; the game folder gets the rest.
 INSTALLER_ONLY = {'DOSBOX', '__redist', '__support', 'commonappdata', 'tmp', 'app'}
+INSTALLER_RECORDS = ('.hashdb', '.info', '.script')      # (goggame-<id>.*: its .ico stays, as in the Mac package)
 
 
 def which_input(path, pins):
@@ -53,15 +54,17 @@ def extract_installer(installer, extracted, source):
     subprocess.run([tool, '--silent', '--extract', '--language', 'en-US', '--output-dir', str(raw), str(installer)], check=True)
     source.mkdir(parents=True)
     for item in sorted(raw.iterdir()):
-        if item.name not in INSTALLER_ONLY:
+        if item.name not in INSTALLER_ONLY and not (item.name.startswith('goggame-') and item.name.endswith(INSTALLER_RECORDS)):
             shutil.move(str(item), str(source / item.name))
-    # GOG's install copies __support/app over the game (goggame-*.script, "DOSBoxConfig"). Its THEME.CD holds the sound
-    # setup the game reads (SNDSETUP.INF) and THEME.BAT; the rest is DOSBox and its settings, which stay out.
-    overlay = raw / '__support/app/THEME.CD'
-    if overlay.is_dir():
-        (source / 'THEME.CD').mkdir(exist_ok=True)
-        for item in sorted(overlay.iterdir()):
-            shutil.copy2(item, source / 'THEME.CD' / item.name)
+    # GOG's install copies __support/app over the game (goggame-*.script, "DOSBoxConfig"): THEME.CD's sound setup
+    # (SNDSETUP.INF) and THEME.BAT, and DOSBox's two settings files. The DOSBox program and the cloud-save copies stay out.
+    # The game folder is then the Mac package's, file for file (171 files, checked 2026-11-25).
+    overlay = raw / '__support/app'
+    for item in sorted(overlay.rglob('*')) if overlay.is_dir() else []:
+        rel = item.relative_to(overlay)
+        if item.is_file() and rel.parts[0] not in ('DOSBox', 'cloud_saves'):
+            (source / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, source / rel)
 
 
 def main():
