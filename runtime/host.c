@@ -298,13 +298,14 @@ static void file_note(const char *name) {
  * (Park frames only: after a screen pass at the title, the menus ran ungoverned and the sound card starved.) */
 volatile int tp_frame_paced_park;                         /* (the last release was a park frame's, not a screen pass's: view.c) */
 static double pace_seen; static int passes_since_pace; static uint64_t poll_insns;
-extern volatile unsigned long tp_count_hits; static unsigned long presents_at_pace;   /* (verify.c: the game's copies to the screen) */
+extern volatile unsigned long tp_count_hits; static unsigned long presents_at_pace;
+static uint32_t retrace_at_pace;                           /* (the retrace reads at the last park frame's release) */   /* (verify.c: the game's copies to the screen) */
 static void pace_sync(void) {
     if (tp_frame_paced_at != pace_seen) {
         static int dbg = -1; if (dbg < 0) dbg = getenv("TP_PRESENT_DEBUG") != NULL;
         if (dbg) { static int hist[8]; static double l; unsigned long n = tp_count_hits - presents_at_pace; hist[n < 7 ? n : 7]++;
             if (now_s() - l > 2) { fprintf(stderr, "presents per park frame: %d %d %d %d %d %d %d %d+\n", hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6], hist[7]); memset(hist, 0, sizeof hist); l = now_s(); } }
-        pace_seen = tp_frame_paced_at; passes_since_pace = 0; presents_at_pace = tp_count_hits;
+        pace_seen = tp_frame_paced_at; passes_since_pace = 0; presents_at_pace = tp_count_hits; retrace_at_pace = retrace_reads;
     }
 }
 static int frame_paced(void) {
@@ -315,6 +316,11 @@ static int frame_paced(void) {
      * it is governed. (Paced as a park frame for two seconds, it ran unthrottled: the charts' timed display, about a
      * thousand frames, went by in a fifth of a second, seen as a 0.2 s hitch every game year and the screens skipped.) */
     if (tp_count_hits - presents_at_pace > 2) return 0;
+    /* Nor a loop that waits for the retrace (the park's own frames read port 0x3da not at all): the staff negotiation
+     * (0x144ea5) polls no keys and copies its picture inline, so only its retrace waits show it. Paced as a park frame,
+     * its 620-pass countdown ran at about 1,500 passes a second: the talks failed half a second after F8. Governed: about
+     * 75 a second, as in DOSBox at the same cycles (8 seconds to bargain). Found by the PC session, 2026-11-26. */
+    if (tp_frame_paced_park && retrace_reads - retrace_at_pace > 2) return 0;
     return ago < 0.1 || (tp_frame_paced_park && ago < 2 && passes_since_pace < 2);
 }
 static double emu_now(void) {
