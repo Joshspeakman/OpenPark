@@ -298,8 +298,8 @@ static void file_note(const char *name) {
  * (Park frames only: after a screen pass at the title, the menus ran ungoverned and the sound card starved.) */
 volatile int tp_frame_paced_park;                         /* (the last release was a park frame's, not a screen pass's: view.c) */
 static double pace_seen; static int passes_since_pace; static uint64_t poll_insns;
-extern volatile unsigned long tp_count_hits; static unsigned long presents_at_pace;
-static uint32_t retrace_at_pace;                           /* (the retrace reads at the last park frame's release) */   /* (verify.c: the game's copies to the screen) */
+extern volatile unsigned long tp_count_hits; static unsigned long presents_at_pace;   /* (verify.c: the game's copies to the screen) */
+static uint32_t retrace_at_pace;                           /* (the retrace reads at the last park frame's release) */
 static void pace_sync(void) {
     if (tp_frame_paced_at != pace_seen) {
         static int dbg = -1; if (dbg < 0) dbg = getenv("TP_PRESENT_DEBUG") != NULL;
@@ -321,6 +321,11 @@ static int frame_paced(void) {
      * its 620-pass countdown ran at about 1,500 passes a second: the talks failed half a second after F8. Governed: about
      * 75 a second, as in DOSBox at the same cycles (8 seconds to bargain). Found by the PC session, 2026-11-26. */
     if (tp_frame_paced_park && retrace_reads - retrace_at_pace > 2) return 0;
+    if (ago > 0.15 && tp_frame_paced_park && ago < 2 && passes_since_pace < 2) {   /* development: a long stretch ungoverned */
+        static int dbg = -1; if (dbg < 0) dbg = getenv("TP_GOV_DEBUG") != NULL;
+        static double told; if (dbg && told != tp_frame_paced_at) { told = tp_frame_paced_at;
+            fprintf(stderr, "gov: ungoverned %.0f ms after a park frame, at %08x\n", ago * 1e3, G(EIP)); }
+    }
     return ago < 0.1 || (tp_frame_paced_park && ago < 2 && passes_since_pace < 2);
 }
 static double emu_now(void) {

@@ -304,10 +304,12 @@ void tp_qol_hook(int nested) {
     int k = tp_hook_which - QOL0;
     if (k == NHOOK) { if (pc == video_ret) { tp_game_video = 0; tp_hook_pcs[QOL0 + NHOOK] = 0xffffffffu; tp_hooks_changed(); } return; }
     if (k > NHOOK) {                                  /* development (TP_PROBE=pc,pc,..: up to 3): which code ran, and its caller */
-        static int n; if (n++ < 400) { fprintf(stderr, "probe %06x hit, mouse %d,%d buttons %d, code on the stack:", pc,
+        static int n; static double t0, last; static long since; double t = now(); if (!t0) t0 = last = t;
+        if (n++ < 400) { fprintf(stderr, "probe %06x hit at %.3f s, mouse %d,%d buttons %d, code on the stack:", pc, t - t0,
             *(int16_t *)(m + 0x1becac), *(int16_t *)(m + 0x1becae), m[0x1becb2]);
             for (int i = 0; i < 48; i++) { uint32_t v = r32(m, sp + 4 * i); if (v >= 0x100000 && v < 0x1a0000) fprintf(stderr, " %06x", v); }
             fprintf(stderr, "\n"); }
+        since++; if (t - last >= 1) { fprintf(stderr, "probe hits: %ld in %.2f s\n", since, t - last); since = 0; last = t; }   /* (a rate) */
         return;
     }
     if (k < 0 || k >= NHOOK || pc != hook_pc[k]) return;
