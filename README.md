@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/readme-banner.png" alt="OpenPark: Bullfrog's Theme Park, natively, for macOS, Windows and Linux" width="900">
+  <img src="media/readme-banner.png" alt="OpenPark" width="900">
 </p>
 
 <p align="center">
@@ -8,28 +8,25 @@
 
 # OpenPark
 
-**Theme Park, natively.** Bullfrog's Theme Park (1994) running as native code. The DOS game's own code is statically recompiled to C and
-compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU emulator at run time. macOS on Apple
-Silicon is playable today; Windows and Linux are well under way ([Platforms](#platforms)). You build it from your own
-copy of the game; this repository contains no game code, data or art.
+OpenPark runs Bullfrog's Theme Park (1994) as native code. The DOS game's code is statically recompiled to C and
+compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU emulator at run time. It runs on macOS
+(Apple Silicon); Windows and Linux are in beta ([Platforms](#platforms)). You build it from your own copy of the game;
+this repository contains no game code, data or art.
 
-![A park in a widescreen window, the bus at the gates](docs/screenshots/opening-day.jpg)
+![A park in the widescreen view](docs/screenshots/opening-day.jpg)
 
 | | |
 |---|---|
-| ![Zoomed in close on the visitors](docs/screenshots/burger-oclock.jpg) | ![Panning the park at any zoom](docs/screenshots/haunted-row.jpg) |
-| ![The whole park in the game's own 640 x 480 mode](docs/screenshots/whole-park.jpg) | ![The controls card over the paused park](docs/screenshots/help-at-hand.jpg) |
-| ![Visitor View: walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The original ride films](docs/screenshots/ride-films.jpg) |
+| ![Zoomed in](docs/screenshots/burger-oclock.jpg) | ![Zoomed in, panned across the park](docs/screenshots/haunted-row.jpg) |
+| ![The game's 640 x 480 mode](docs/screenshots/whole-park.jpg) | ![The controls card](docs/screenshots/help-at-hand.jpg) |
+| ![Visitor View](docs/screenshots/visitor-view.jpg) | ![A ride film](docs/screenshots/ride-films.jpg) |
 
 ### The launch window
 
-![The launch window: the midway at dusk](docs/screenshots/launcher-main.jpg)
+![The launch window](docs/screenshots/launcher-main.jpg)
 
 | ![The Display page](docs/screenshots/launcher-display.jpg) | ![The Sound page](docs/screenshots/launcher-sound.jpg) |
 |---|---|
-
-The title on a lit marquee sign, the settings as ride tickets, quick settings along the bottom, an ADMIT ONE ticket to
-play; behind it your own park at dusk (its picture is taken when you quit), with searchlights and fireworks.
 
 **Status: beta 1.4.** The intro and the whole game run natively, at the original's pace. The recompiled code is
 checked against the original x86 code: scripted runs and long random-play runs match it. See [the port audit](docs/reports/2026-10-18-port-audit.md)
@@ -53,9 +50,9 @@ for coverage, the original developers' unfinished features, and a modding map.
   - music, effects and interface volumes;
   - "ew" (sick visitors) and purchase sound levels.
 - **Saves:** saving and loading work, including 128 × 128 parks.
-- **Mac comforts:** full screen, the launch window, and the game's pointer as the Mac pointer. Control-click is
+- **On the Mac:** full screen, the launch window, and the game's pointer as the Mac pointer. Control-click is
   the right mouse button.
-- **Controls at hand:** ⌘/ (Help > Controls) shows every control over the paused game; a game controller works too
+- **Controls:** ⌘/ (Help > Controls) shows every control over the paused game; a game controller works too
   (sticks, A and B click, shoulders zoom), and holding View + Menu for a second quits.
 
 ## Platforms
@@ -63,16 +60,16 @@ for coverage, the original developers' unfinished features, and a modding map.
 | Platform | Status |
 |---|---|
 | macOS, Apple Silicon | **Playable** (this beta) |
-| Windows (x86-64) | **Beta 1** ([PC Beta 1](https://github.com/Joshspeakman/OpenPark/releases/tag/pc-beta-1)): builds from GOG's Windows installer, passes the golden first-park check, plays the game, with the same launch window; matching the Mac app feature by feature |
+| Windows (x86-64) | **Beta 1** ([PC Beta 1](https://github.com/Joshspeakman/OpenPark/releases/tag/pc-beta-1)): builds from GOG's Windows installer, passes the golden first-park check and plays the game, with the Mac's launch window; some Mac features are still to come (below) |
 | Linux (x86-64) | **Beta 1**: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
 
-**Windows and Linux: PC Beta 1 (2026-11-26).** One app on three systems: the same recompiled game, the same settings (one
-shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 front end in place of the Mac's Cocoa one.
+**Windows and Linux: PC Beta 1 (2026-11-26).** The same recompiled game, the same settings (one shared table,
+`runtime/app_spec.c`) and the same launch window as the Mac, with an SDL2 front end in place of the Mac's Cocoa one.
 - **Proven on both:** the recompiled code reproduces the golden first-park frame and saved profile, byte for byte
   (`tests/check_native.sh --park`, the same check the Mac passes), and a muted test run plays into a new park with the
   zoomable park view live.
 - **Ported so far:**
-  - the launch window, with every page, the Ride Tunes chooser, the SoundFont picker and its animation;
+  - the launch window, with every page, the Ride Tunes chooser and the SoundFont picker;
   - in the game: the controls card, controller quit, and Save Park Picture (to a folder for now);
   - the park picture for the launcher, GOG's store art, and the icon and title banner;
   - the extras importer, which reads CD images in place.
@@ -180,12 +177,13 @@ python3 tools/extras.py --list                                            # what
 ## How it works
 
 - **The executables:** the game ships DOS/4GW LE executables. `tools/` parses them, surveys the code and lifts
-  every function to C, which is compiled to ARM64.
+  every function to C, which is compiled for the machine (ARM64 or x86-64).
 - **The host:** `runtime/host.c` provides the DOS, DPMI, mouse, keyboard, timer and VGA/VESA services in C.
   `runtime/sb16.c` models the Sound Blaster 16 and its DMA.
 - **The platform layer:** `runtime/platform.h` (timing, the game thread, parallel drawing), implemented in
   `platform/macos/platform_macos.c` and `runtime/platform_posix.c`.
 - **The app:** `platform/macos/` is the Mac app: launcher, Core Animation presentation, Core Audio and input.
+  `platform/sdl/` is the Windows and Linux app (SDL2).
 - **Verification:** the Unicorn engine is used only during development, as a differential oracle. The CPU-written
   memory, registers, port traffic and frames of the recompiled code are compared with the x86 original. See
   [DOS contract](docs/DOS-CONTRACT.md) and [provenance](docs/PROVENANCE.md).
@@ -199,7 +197,7 @@ buying land and entering the first park. The native-only runner then reproduces 
 
 Theme Park is © Bullfrog Productions / Electronic Arts. This is an unofficial fan project, not affiliated with or
 endorsed by them. It distributes no game code, data or art: you need your own copy, and the build reads it on
-your Mac. The project's own source is under the [MIT License](LICENSE).
+your computer. The project's own source is under the [MIT License](LICENSE).
 
 ## Insert Coin
 
