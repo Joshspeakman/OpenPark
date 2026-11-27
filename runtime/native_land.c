@@ -196,6 +196,26 @@ static void frame_logged(int f, int x, int y) {
         e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10;
     }
 }
+/* A frame drawn w x h (0x167182): each part's sprite entry (kind 7: a = x, b = y, c = w | h << 16, d = the entry)
+ * placed and sized by the frame's scale (its width and height, bytes 2 and 3, * 256 / w or h: 16-bit divisors), for
+ * the scaled blitter 0x166dfa (native_draw.c). Parts' flags are not used. Returns nonzero where the game would divide
+ * by zero (a frame scaled past 256 times). */
+static int scaled_frame_logged(int f, int x, int y, int w, int h) {
+    uint32_t fr = r32(FRAMES) + (uint32_t)(uint16_t)f * 8, elems = r32(ELEMENTS), sprites = r32(SPRITES);
+    w &= 0xffff; h &= 0xffff;
+    if (!w || !h) return 0;
+    uint16_t sx = (uint16_t)(((int32_t)M[fr + 2] << 8) / w), sy = (uint16_t)(((int32_t)M[fr + 3] << 8) / h);
+    uint32_t e = elems + (uint32_t)(uint16_t)r16(fr) * 10;
+    for (int guard = 0; e > elems && guard < 256; guard++, e = elems + (uint32_t)(uint16_t)r16(e + 8) * 10) {
+        uint32_t spr = sprites + (uint16_t)r16(e);
+        if (spr <= sprites) continue;
+        if (!sx || !sy) return 1;
+        int dx = (int32_t)(int16_t)r16(e + 2) * 256 / sx, dy = (int32_t)(int16_t)r16(e + 4) * 256 / sy;
+        int ph = (((int32_t)M[spr + 5] << 8) / sy) & 0xffff, pw = (((int32_t)M[spr + 4] << 8) / sx) & 0xffff;
+        if (dlog) dlog(7, (int16_t)(x + dx), (int16_t)(y + dy), pw | ph << 16, spr, 0, dctx);
+    }
+    return 0;
+}
 /* The renderer advances animations as it draws (frame word 6 = the next frame). The native
  * renderer leaves the game's state alone and computes what the game would draw instead. */
 static int next_frame(int f) { return (uint16_t)r16(r32(FRAMES) + (uint32_t)f * 8 + 6); }
@@ -337,9 +357,18 @@ static int class2(uint32_t t, int x, int y) {
             frame_logged((uint16_t)r16(t + 0xa), px, (int16_t)(py - ((M[SCREEN_MODE] & 8) ? h >> 1 : h)));
             return 0;
         }
-        if (sub == 0x44 || sub == 0x46 || sub == 0x48)           /* 0x11d5c5, 0x11d764: a scaled frame (0x167182): not native */
-            return r16(FRAME_MODE) == 8 ? 0 : 0x302;
-        return 0;                                                /* (0x4e plays a sound; 0x75 and unknown keys draw nothing) */
+        if (sub == 0x44 || sub == 0x46 || sub == 0x48) {         /* thrown by an exploding ride: the figure scaled (0x167182) */
+            if (r16(FRAME_MODE) == 8) return 0;                  /* (the game draws nothing then) */
+            uint32_t fr = frames + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
+            int f = (uint16_t)r16(t + 0xa), up = (uint16_t)r16(t + 0x5f), w, h, ry = py;
+            if (sub == 0x48) { w = M[fr + 2] + (up << 5); h = M[fr + 3] + (up << 5); }   /* 0x11d764: grown by word 0x5f * 32 */
+            else {                                               /* 0x11d5c5: grown by byte 0xb1 * 10, raised by word 0x5f */
+                w = M[fr + 2] + M[t + 0xb1] * 10; h = M[fr + 3] + M[t + 0xb1] * 10;
+                ry = (int16_t)(py - ((M[SCREEN_MODE] & 8) ? up >> 2 : up >> 1));
+            }
+            return scaled_frame_logged(f, px, ry, w, h) ? 0x302 : 0;
+        }
+        return 0;                                               /* (0x4e plays a sound; 0x75 and unknown keys draw nothing) */
     }
     if (sub == 0xc && find_in_cell(map + (uint32_t)((M[t + 9] * (int)tp_map_w + M[t + 7]) * 4), 0x1a)) py = (int16_t)(py - 8);
     if ((M[0x1b14cc] & 7) && (M[t + 5] & 0x80)) frame_logged((uint16_t)r16(deco + 0x46c), px, py);
@@ -736,13 +765,25 @@ static int ride_draw(uint32_t t, int x, int y) {
 /* Class 4, rides (0x11d87a): sub-kinds 2, 4, 6, 0x1e, 0x26 (raised by byte 0xb1) are placed like
  * people; while running (word 0x2e at least byte 0xa8 of the record) the ride shakes a pixel
  * and has an overlay animation (word 0x8e, stepped by speed before drawing); 0x1e adds up to
- * two frames (words 0x87, 0x89). Sub-kind 0x24 is a scaled sprite (0x166dfa): not native. */
+ * two frames (words 0x87, 0x89). Sub-kind 0x24, a ride exploding (0x11db5c): the frame's first part only, through
+ * the scaled blitter 0x166dfa, shrunk to size * 256 / (size + byte 0xb1 * 10) and raised by word 0x5f. */
 static int class4(uint32_t t, int x, int y) {
     int sub = M[t + 0xc], tw = (uint16_t)r16(TILE_W), hires = r16(SCREEN_MODE) == 8, missing = 0;
     if (sub == 0x24) {
         uint32_t fr = r32(FRAMES) + (uint32_t)(uint16_t)r16(t + 0xa) * 8;
-        uint32_t e = r32(ELEMENTS) + (uint32_t)(uint16_t)r16(fr) * 10;
-        return r32(SPRITES) + (uint16_t)r16(e) > r32(SPRITES) ? 0x424 : 0;
+        uint32_t e = r32(ELEMENTS) + (uint32_t)(uint16_t)r16(fr) * 10, spr = r32(SPRITES) + (uint16_t)r16(e);
+        int grow = M[t + 0xb1] * 10, dw = M[fr + 2] + grow, dh = M[fr + 3] + grow;
+        if (!dw || !dh) return 0x424;                            /* (the game would divide by zero) */
+        uint16_t sx = (uint16_t)(((int32_t)M[fr + 2] << 8) / dw), sy = (uint16_t)(((int32_t)M[fr + 3] << 8) / dh);
+        if (spr <= r32(SPRITES)) return 0;
+        if (!sx || !sy) return 0x424;
+        int px = (int16_t)(x + ((tw * M[t + 6]) >> 8) + (M[t + 8] >> (hires ? 5 : 4)));
+        int py = (int16_t)(y + (hires ? (M[t + 8] >> 3) >> 1 : M[t + 8] >> 3));
+        py = (int16_t)(py - ((M[SCREEN_MODE] & 8) ? (uint16_t)r16(t + 0x5f) >> 2 : (uint16_t)r16(t + 0x5f) >> 1));
+        int dx = (int32_t)(int16_t)r16(e + 2) * 256 / sx, dy = (int32_t)(int16_t)r16(e + 4) * 256 / sy;
+        int ph = (((int32_t)M[spr + 5] << 8) / sy) & 0xffff, pw = (((int32_t)M[spr + 4] << 8) / sx) & 0xffff;
+        if (dlog) dlog(7, (int16_t)(px + dx), (int16_t)(py + dy), pw | ph << 16, spr, 0, dctx);
+        return 0;
     }
     if (sub == 0x26) y = (int16_t)(y - M[t + 0xb1]);
     else if (sub != 2 && sub != 4 && sub != 6 && sub != 0x1e) return 0;
@@ -841,7 +882,8 @@ static int cell_things(int idx, int x, int y) {
         } else if (cls == 4) {
             int m = class4(t, x, y);
             if (m && !missing) missing = m;
-        } else if (!missing) missing = cls ? cls : 0x100;
+        } else if (cls == 0x1a && !missing) missing = cls;      /* (0x11c90b: not native yet) */
+        /* (any other class: the game's switch passes over it, drawing nothing; it made the pass the game's) */
         idx = r16(t + 2);
     }
     return missing;

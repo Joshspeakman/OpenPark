@@ -169,6 +169,69 @@ void tp_native_draw_sprite(NDTarget *t, const uint8_t *s, int w, int h, int x, i
     }
 }
 
+/* The scaled sprite blitter 0x166dfa (the parts of a scaled frame, 0x167182: visitors thrown by an exploding ride).
+ * The sprite entry at `entry` (dword: its RLE rows; bytes 4, 5: width and height) drawn w x h at x, y: each output
+ * row takes a source row and each output pixel a source column by 8.8 steps (source size * 256 / output size),
+ * the first a step in, not at 0; a row is decoded into a buffer first, skips as 0xff, and 0xff is not drawn.
+ * Straight into the screen (buffer + y * pitch + x: not the clip window), bounded by its width (the pitch, which is
+ * also the game's test for 320x200: 0x140) and height. Off the top: as many source rows skipped (in 320x200 the
+ * height is cut by twice that, then halved: the game's arithmetic, kept); off the left: columns not written; off
+ * the right: the row ends. In 320x200 x, y and the output height halve; the width and both steps do not. Bytes
+ * where the game keeps bytes (the heights, the row length, the row counter); the column step is a 16-bit sum. */
+void tp_native_draw_scaled(NDTarget *t, const uint8_t *mem, uint32_t entry, int x, int y, int w, int h, int scr_w, int scr_h) {
+    uint32_t data = (uint32_t)mem[entry] | (uint32_t)mem[entry + 1] << 8 | (uint32_t)mem[entry + 2] << 16 | (uint32_t)mem[entry + 3] << 24;
+    const uint8_t *s = mem + data;
+    int sw = mem[entry + 4], sh = mem[entry + 5];
+    uint8_t srch = (uint8_t)sh, rows;
+    int16_t xx = (int16_t)x, yy = (int16_t)y;
+    w &= 0xffff; h &= 0xffff;
+    if (scr_w == 0x140) {
+        xx = (int16_t)(xx / 2); yy = (int16_t)(yy / 2);          /* (cwd; sub; sar: toward zero) */
+        if (!w || !h || xx >= scr_w || yy >= scr_h) return;
+        rows = (uint8_t)(h >> 1);
+        if (yy < 0) {
+            if ((srch >> 1) + yy <= 0) return;
+            srch = (uint8_t)(srch + 2 * yy);
+            s = skip_rows(s, -yy); yy = 0;
+        } else if (rows + yy > scr_h) rows = (uint8_t)(scr_h - yy);
+        srch >>= 1;
+    } else {
+        if (!w || !h || xx >= scr_w || yy >= scr_h) return;
+        rows = (uint8_t)h;
+        if (yy < 0) {
+            if (srch + yy <= 0) return;
+            srch = (uint8_t)(srch + yy);
+            s = skip_rows(s, -yy); yy = 0;
+        } else if (rows + yy > scr_h) rows = (uint8_t)(scr_h - yy);
+    }
+    long dst = (long)yy * scr_w + xx;
+    uint32_t xstep = ((uint32_t)sw << 8) / (uint32_t)w, ystep = ((uint32_t)sh << 8) / (uint32_t)h, yacc = ystep;
+    int cur = -1; uint8_t buf[1024], len = 0;
+    for (; rows; rows--, yacc += ystep, dst += scr_w) {
+        uint8_t srow = (uint8_t)(yacc >> 8);
+        if (srow != (uint16_t)cur) {
+            if (srow >= srch) return;
+            cur++;
+            while ((int16_t)srow > (int16_t)cur) { s = skip_rows(s, 1); cur++; }
+            int p = 0;
+            for (;;) {
+                int8_t c = (int8_t)*s++;
+                if (!c) break;
+                if (c > 0) { for (int k = 0; k < c; k++) if (p + k < (int)sizeof buf) buf[p + k] = s[k]; p += c; s += c; }
+                else { for (int k = 0; k < -c; k++) if (p + k < (int)sizeof buf) buf[p + k] = 0xff; p -= c; }
+            }
+            len = (uint8_t)p;
+        }
+        uint16_t xacc = (uint16_t)xstep; long d = dst; int16_t px = xx;
+        for (;;) {
+            uint8_t sx = (uint8_t)(xacc >> 8);
+            if (sx >= len || px >= scr_w) break;
+            if (px++ >= 0 && buf[sx] != 0xff) put(t, d, buf[sx]);
+            xacc = (uint16_t)(xacc + xstep); d++;
+        }
+    }
+}
+
 /* The small font (0x180e88 at 320x200, 0x180f34 at 640x480): glyphs of 6 rows of 3 pixels
  * from 6 bytes each at 0x1ba2fc + 6 * (c - 0x20), each row byte one of 8 patterns, written
  * in one colour straight into the screen (the screen's own origin, not the clip window's;
