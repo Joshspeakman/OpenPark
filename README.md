@@ -13,11 +13,11 @@ compiled for the machine, with a native host: no DOSBox, Wine, Rosetta or CPU em
 Silicon is playable today; Windows and Linux are well under way ([Platforms](#platforms)). You build it from your own
 copy of the game; this repository contains no game code, data or art.
 
-![Opening day: the bus pulls in and the gates swing open, in a widescreen window](docs/screenshots/opening-day.jpg)
+![A park in a widescreen window, the bus at the gates](docs/screenshots/opening-day.jpg)
 
 | | |
 |---|---|
-| ![Burger o'clock: zoomed in close on the visitors](docs/screenshots/burger-oclock.jpg) | ![Haunted House Row: panning the park at any zoom](docs/screenshots/haunted-row.jpg) |
+| ![Zoomed in close on the visitors](docs/screenshots/burger-oclock.jpg) | ![Panning the park at any zoom](docs/screenshots/haunted-row.jpg) |
 | ![The whole park in the game's own 640 x 480 mode](docs/screenshots/whole-park.jpg) | ![The controls card over the paused park](docs/screenshots/help-at-hand.jpg) |
 | ![Visitor View: walking the park at a visitor's height](docs/screenshots/visitor-view.jpg) | ![The original ride films](docs/screenshots/ride-films.jpg) |
 

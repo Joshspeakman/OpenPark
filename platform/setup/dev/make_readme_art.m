@@ -1,6 +1,7 @@
 // make_readme_art: the README's art in the launch window's look (platform/macos/launcher.m, "Midway Marquee"): ours only,
 // drawn here, no publisher art. The screenshots it frames are the player's own park in the game, taken by tests/e2e.
 //   make_readme_art banner <out.png>                                   the page's logo: OPENPARK on a lit marquee sign
+//   make_readme_art plain <shot> <out.jpg> [--over <png>]   the screenshot as it is (the README's, since 2026-11-26)
 //   make_readme_art card <shot> <title> <caption> <colour> <out.jpg>   a screenshot in a gilt frame of bulbs, a ribbon
 //                       [--over <png>]                                 (another picture laid over the shot: the controls card)
 //   colour: red, blue, gold, green, purple (the launcher's tickets)
@@ -200,12 +201,25 @@ static int card(NSString *shot, NSString *title, NSString *caption, NSString *co
     });
 }
 
+/* ---- a screenshot as it is (the README's shots since 2026-11-26: no frame, ribbon or caption), the card over it ---- */
+static int plain(NSString *shot, NSString *over, NSString *out) {
+    NSImage *img = [[NSImage alloc] initWithContentsOfFile:shot]; if (!img) { fprintf(stderr, "no image %s\n", shot.UTF8String); return 1; }
+    NSImage *top = over ? [[NSImage alloc] initWithContentsOfFile:over] : nil;
+    NSBitmapImageRep *rep = (NSBitmapImageRep *)img.representations.firstObject;
+    return render(rep.pixelsWide / 2.0, rep.pixelsHigh / 2.0, out, ^(NSRect r) {   /* (render draws at 2 pixels a point: the shot keeps its own size) */
+        [img drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+        if (top) [top drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+    });
+}
+
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc == 3 && !strcmp(argv[1], "banner")) return banner(@(argv[2]));
         if ((argc == 7 || argc == 9) && !strcmp(argv[1], "card"))
             return card(@(argv[2]), @(argv[3]), @(argv[4]), @(argv[5]), argc == 9 && !strcmp(argv[7], "--over") ? @(argv[8]) : nil, @(argv[6]));
-        fprintf(stderr, "usage: make_readme_art banner <out.png> | card <shot> <title> <caption> <colour> <out.jpg> [--over <png>]\n");
+        if ((argc == 4 || argc == 6) && !strcmp(argv[1], "plain"))
+            return plain(@(argv[2]), argc == 6 && !strcmp(argv[4], "--over") ? @(argv[5]) : nil, @(argv[3]));
+        fprintf(stderr, "usage: make_readme_art banner <out.png> | plain <shot> <out.jpg> [--over <png>] | card <shot> <title> <caption> <colour> <out.jpg> [--over <png>]\n");
         return 2;
     }
 }

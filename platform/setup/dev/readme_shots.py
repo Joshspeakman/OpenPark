@@ -7,7 +7,8 @@ harness's own copy of the app (tests/e2e: muted, scratch data, its own bundle id
                 "walk": 1 the Visitor View (walkshot). Control lines: tests/e2e/ctl.py, main.m's runControl (size, zoom,
                 pan, key, controls, walk -1 0, sleep).
 The 2026-11-25 set: JOSH:g0 with size 1600 900; zoom 0.6 (opening-day), 1.8 (burger-oclock), 1.2 + pan 500 -150
-(haunted-row), R (whole-park, 640 x 480), zoom 0.85 + pan -150 60 + the card (help-at-hand). Framed by make_readme_art."""
+(haunted-row), R (whole-park, 640 x 480), zoom 0.85 + pan -150 60 + the card (help-at-hand). Since 2026-11-26 the
+README shows them as they are (make_readme_art plain, the card composited with --over; no frame, ribbon or caption)."""
 import sys, os, shutil, time, re, json
 sys.path.insert(0, sys.argv[1] + '/tests/e2e'); slot = sys.argv[2]; plan = json.loads(sys.argv[3]); outdir = sys.argv[4]; sys.argv = sys.argv[:1]
 from e2e import *
