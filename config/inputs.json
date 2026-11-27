@@ -5,6 +5,12 @@
     "size": 104934252,
     "scripts_sha256": "1774ad34b9447e0e32d2232071089c43743562fc54b6afe7fdc36355e07fd5bb"
   },
+  "windows_installer": {
+    "name": "setup_theme_park_1.01_cs_(77027).exe",
+    "sha256": "c58e8606f8e660c9c6c5e695f213ca420f93df19167a60b4af3adef55c5465d1",
+    "size": 108945824,
+    "note": "GOG's Windows installer (InnoSetup 5.6.2). Its GAME and CONFIG executables are the package's bytes (checked 2026-11-25)."
+  },
   "executables": {
     "GAME/MAIN.EXE": {
       "sha256": "fba72de2cee7f92dc26801ab2ee6a7c6f8c84aefb8cdab0da1fbcee532b5dc79",

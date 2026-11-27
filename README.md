@@ -63,10 +63,10 @@ for coverage, the original developers' unfinished features, and a modding map.
 | Platform | Status |
 |---|---|
 | macOS, Apple Silicon | **Playable** (this beta) |
-| Windows (x86-64) | **In progress**: builds from GOG's Windows installer, passes the golden first-park check, plays into a new park, and has the same launch window; matching the Mac app feature by feature |
-| Linux (x86-64) | **In progress**: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
+| Windows (x86-64) | **Beta 1** ([PC Beta 1](https://github.com/Joshspeakman/OpenPark/releases/tag/pc-beta-1)): builds from GOG's Windows installer, passes the golden first-park check, plays the game, with the same launch window; matching the Mac app feature by feature |
+| Linux (x86-64) | **Beta 1**: the same checks pass (tested under WSL2 Ubuntu); builds and runs |
 
-**Windows and Linux, as of 2026-11-25.** One app on three systems: the same recompiled game, the same settings (one
+**Windows and Linux: PC Beta 1 (2026-11-26).** One app on three systems: the same recompiled game, the same settings (one
 shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 front end in place of the Mac's Cocoa one.
 - **Proven on both:** the recompiled code reproduces the golden first-park frame and saved profile, byte for byte
   (`tests/check_native.sh --park`, the same check the Mac passes), and a muted test run plays into a new park with the
@@ -85,6 +85,35 @@ shared table, `runtime/app_spec.c`) and the same launch window, with an SDL2 fro
   - a drag-and-drop setup like the Mac's.
 
 How a platform is added, and what is portable today: [docs/PORTING.md](docs/PORTING.md).
+
+## Build and install (Windows and Linux)
+
+The same steps as the Mac's, with your own copy of the game: GOG's Windows installer
+`setup_theme_park_1.01_cs_(77027).exe` or its Mac package `theme_park_enUS_1_0_33010.pkg` (both checked by hash,
+`config/inputs.json`; nothing in either is run).
+
+**Windows** (x86-64), in [MSYS2](https://www.msys2.org/)'s CLANG64 shell, with python.org's Python 3:
+
+```sh
+pacman -S mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-SDL2 mingw-w64-clang-x86_64-zlib \
+  mingw-w64-clang-x86_64-pkgconf mingw-w64-clang-x86_64-innoextract
+git clone https://github.com/Joshspeakman/OpenPark.git && cd OpenPark
+py -3 -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe tools/prepare.py "$USERPROFILE/Downloads/setup_theme_park_1.01_cs_(77027).exe"
+bash tests/check_native.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE vendor/freedom-force-recomp --park
+bash tools/build_windows.sh     # installs to %LOCALAPPDATA%\Programs\ThemeParkNative, with a Start menu entry
+```
+
+**Linux** (x86-64): clang, SDL2 (`libsdl2-dev`), zlib and Python 3; FluidSynth (`libfluidsynth-dev` and a General
+MIDI SoundFont such as `fluid-soundfont-gm`) for the music, optional.
+
+```sh
+git clone https://github.com/Joshspeakman/OpenPark.git && cd OpenPark
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python3 tools/prepare.py ~/Downloads/theme_park_enUS_1_0_33010.pkg
+bash tests/check_native.sh work/extracted/payload/Contents/Resources/game/GAME/MAIN.EXE vendor/freedom-force-recomp --park
+bash tools/build_linux.sh       # installs ~/.local/bin/theme-park and a menu entry
+```
 
 ## Requirements (macOS)
 

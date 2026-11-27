@@ -4,7 +4,16 @@
 #include "rt.h"
 #include <stdlib.h>
 #include <setjmp.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#define NOGDI
+#include <windows.h>
+#undef near
+#undef far
+#else
 #include <sys/mman.h>
+#endif
 #include <stdio.h>
 
 uint8_t *G_MEM;
@@ -71,8 +80,28 @@ void rt_fprem(Ctx *c, int ieee) { (void)ieee; rt_unhandled(c, c->tc, "x87 fprem"
 void rt_f80_store(uint8_t *M, uint32_t a, double v) { (void)M; (void)a; (void)v; rt_unhandled(&state, state.tc, "x87 80-bit store"); }
 double rt_x87_1(int op, double x) { (void)op; (void)x; rt_unhandled(&state, state.tc, "x87 transcendental"); }
 double rt_x87_2(int op, double y, double x) { (void)op; (void)y; (void)x; rt_unhandled(&state, state.tc, "x87 transcendental"); }
+#ifdef _WIN32
+/* Windows has no lazily committed private mapping: the 4 GiB are reserved, the extender's first 64 MiB committed, and a
+ * touch anywhere else in the reservation commits that 64 KiB (zeros) and goes on, unless TP_GUARD is set (tests: any
+ * access past the 64 MiB faults, as mprotect does elsewhere). From the 2026-10-19 windows branch (edc8b9c). */
+static int guest_guard;
+static LONG CALLBACK guest_fault(EXCEPTION_POINTERS *e) {
+    EXCEPTION_RECORD *r = e->ExceptionRecord;
+    if (r->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || r->NumberParameters < 2 || !G_MEM || guest_guard) return EXCEPTION_CONTINUE_SEARCH;
+    uint8_t *at = (uint8_t *)r->ExceptionInformation[1];
+    if (at < G_MEM || at >= G_MEM + (1ull << 32)) return EXCEPTION_CONTINUE_SEARCH;
+    uintptr_t page = (uintptr_t)at & ~(uintptr_t)0xffff;
+    return VirtualAlloc((void *)page, 0x10000, MEM_COMMIT, PAGE_READWRITE) ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 void *tp_memory(void) {
     if (!G_MEM) {
+#ifdef _WIN32
+        void *p = VirtualAlloc(NULL, 1ull << 32, MEM_RESERVE, PAGE_NOACCESS);
+        if (!p || !VirtualAlloc(p, 64u << 20, MEM_COMMIT, PAGE_READWRITE)) { fprintf(stderr, "cannot reserve the 4 GiB guest address space\n"); exit(2); }
+        G_MEM = p; guest_guard = getenv("TP_GUARD") != NULL;
+        AddVectoredExceptionHandler(1, guest_fault);
+#else
         void *p = mmap(0, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
         /* (every 32-bit address must read: a smaller region in its place faulted far from the cause) */
         if (p == MAP_FAILED) { fprintf(stderr, "cannot reserve the 4 GiB guest address space (ulimit -v? vm.overcommit_memory=2?)\n"); exit(2); }
@@ -80,6 +109,7 @@ void *tp_memory(void) {
         /* Tests: TP_GUARD faults any access past the extender's 64 MiB. */
         if (p != MAP_FAILED && getenv("TP_GUARD"))
             mprotect(G_MEM + (64u << 20), (1ull << 32) - (64u << 20), PROT_NONE);
+#endif
     }
     return G_MEM;
 }

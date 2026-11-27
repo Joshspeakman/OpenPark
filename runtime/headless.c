@@ -39,6 +39,7 @@ static void saved(const char *rel, const char *hex, void *ctx) {
 #include <math.h>
 extern uint8_t *G_MEM;
 uint32_t tp_get(unsigned i);
+#ifndef _WIN32
 static void on_fault(int sig, siginfo_t *si, void *uc) {   /* (async-signal-safe: snprintf into a buffer, write) */
     (void)uc; char m[200];
     int n = snprintf(m, sizeof m, "signal %d at host %p (guest offset %#llx), guest block %08x esp %08x\n", sig, si->si_addr,
@@ -46,6 +47,7 @@ static void on_fault(int sig, siginfo_t *si, void *uc) {   /* (async-signal-safe
     if (n > 0) write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
     _exit(3);
 }
+#endif
 
 #ifdef WITH_INTRO
 struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
@@ -56,8 +58,10 @@ struct Ctx; int intro_dispatch(struct Ctx *); void intro_dispatch_init(void);
 void tp_select_code(int (*dispatch)(struct Ctx *), void (*init)(void));
 static double hl_wide = 1;   /* the z step's widescreen factor (s steps compose at it) */
 int main(int argc, char **argv) {
+#ifndef _WIN32
     struct sigaction sa = {0}; sa.sa_sigaction = on_fault; sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0);
+#endif
     const char *game = 0, *overlay = 0, *out = "work/headless", *keys = "", *clicks = "", *block_clicks = "";
     uint32_t quantum = 1000, limit = 8000000; int realtime = 0; double seconds = 0, shots = 0;
     double fuzz = 0; int intro = 0;            /* after the deterministic part: seconds of random clicks in real time */
@@ -97,7 +101,7 @@ int main(int argc, char **argv) {
         if (e == q) break;                                /* (no progress: not a number) */
         q = *e ? e + 1 : e;
     }
-    mkdir(out, 0755);
+    tp_mkdir(out);
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     if (intro) { tp_select_code(intro_dispatch, intro_dispatch_init); }
     if (getenv("TP_ARGS")) tp_host_set_args(getenv("TP_ARGS"));

@@ -1,17 +1,21 @@
-/* runtime/platform.h on Linux and other POSIX systems (C11 + pthreads). Untested on Linux so far beyond compiling
- * (tests/check_portable.sh, the CI); the macOS build uses platform/macos/platform_macos.c instead. */
+/* runtime/platform.h on Linux and other POSIX systems (C11 + pthreads), linked with runtime/platform_pool.c. Built by
+ * the SDL app (tools/build_linux.sh) and the CI; the macOS build uses platform/macos/platform_macos.c instead. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdlib.h>
 #include <time.h>
 #include "platform.h"
 
-/* SCHED_FIFO needs privileges most desktops do not grant: then the default scheduler, which is fine at 60 fps. */
+/* Opt-in (TP_RT_SCHED=1): the game thread computes most of the time (and spins the last half millisecond of a frame),
+ * and as a real-time thread it would starve the desktop's threads on its core; it also needs RLIMIT_RTPRIO or
+ * CAP_SYS_NICE. Without it the pacer still works, woken a little later under load. */
 int tp_plat_realtime_thread(double period) {
     (void)period;
-    struct sched_param sp = {.sched_priority = 10};
-    return pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0;
+    const char *e = getenv("TP_RT_SCHED"); if (!e || atoi(e) != 1) return 0;
+    struct sched_param sp = {.sched_priority = sched_get_priority_min(SCHED_RR)};
+    return pthread_setschedparam(pthread_self(), SCHED_RR, &sp) == 0;
 }
 
 void tp_plat_game_thread(void) {}
@@ -30,5 +34,5 @@ void tp_plat_sleep(double seconds) {
 #endif
 }
 
-/* Serial for now: the compositor's bands are independent, so a thread pool can come in later. */
-void tp_plat_parallel_for(size_t n, void *ctx, void (*fn)(void *, size_t)) { for (size_t i = 0; i < n; i++) fn(ctx, i); }
+void tp_pool_parallel_for(size_t n, void *ctx, void (*fn)(void *, size_t));   /* (platform_pool.c) */
+void tp_plat_parallel_for(size_t n, void *ctx, void (*fn)(void *, size_t)) { tp_pool_parallel_for(n, ctx, fn); }

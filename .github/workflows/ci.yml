@@ -3,7 +3,7 @@
 name: ci
 on:
   push:
-    branches: [main, nightly]
+    branches: [main, nightly, pc]
   pull_request:
 jobs:
   checks:
@@ -26,3 +26,32 @@ jobs:
         run: bash tests/check_portable.sh
       - name: Visitor View on a synthetic park
         run: bash tests/check_walk.sh
+  # The SDL2 app for Linux and Windows (platform/sdl/) against stand-ins for the game (tests/stub_game.c): compiles clean,
+  # links, and stops cleanly without game files. Playing it needs the owner's package (docs/PC-HANDOFF.md).
+  sdl-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev zlib1g-dev clang
+      - name: The SDL app (Linux, clang)
+        run: CC=clang bash tests/check_sdl.sh
+      - name: The SDL app (Linux, gcc)
+        run: CC=gcc bash tests/check_sdl.sh
+  sdl-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - run: git config --global core.autocrlf false
+        shell: pwsh
+      - uses: actions/checkout@v5
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-SDL2 mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-pkgconf
+      - name: The SDL app (Windows, MSYS2 CLANG64)
+        run: CC=clang bash tests/check_sdl.sh

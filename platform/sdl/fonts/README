@@ -1,0 +1,10 @@
+The launch window's type (platform/sdl/launcher.c): open-licence stand-ins for the Mac launcher's macOS faces, all under
+the SIL Open Font License 1.1 (the OFL-*.txt beside them), from github.com/google/fonts at 6ebe737e44fd64ee736bbc6feed6136a6dbfd222 (2026-11-25).
+
+  FiraSansExtraCondensed-Black.ttf   for Futura Condensed ExtraBold (ticket titles, tile values, Play, page titles)
+  Poppins-Bold.ttf                   for Futura Bold (the spaced capitals)
+  AlegreyaSans-Regular.ttf, -Italic  for Optima (notes, the tagline); also the arrows the others lack
+  Arvo-Bold.ttf                      for American Typewriter Bold (the ticket stubs)
+
+Chosen by rendering each beside the Mac's (docs/launcher-reference). The build scripts copy this folder beside the
+program.

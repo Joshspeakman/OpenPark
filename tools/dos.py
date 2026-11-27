@@ -3,6 +3,7 @@
 The host is shared by the x86 oracle and native verification harness. It is not
 an independent DOS implementation oracle and is not the final app platform.
 """
+import os
 import struct
 import zlib
 import hashlib
@@ -16,6 +17,14 @@ BIAS = 0x100000
 GDT, PSP, ENV = 0x1000, 0x2000, 0x3000
 SEGMENTS = ('cs', 'ds', 'es', 'ss', 'fs', 'gs')
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi')
+
+
+def run_timeout(microseconds):
+    """emu_start's `timeout` for a run that repeats many times (a block quantum, a service). Unicorn's timeout starts a
+    watchdog thread that each run then waits for; on Windows that wait is a whole timer tick (14.9 ms a run, against
+    0.01 ms without it), which made the quantum loops about 1,500 times slower. There the instruction `count` alone bounds
+    the run; macOS and Linux keep the timeout."""
+    return {} if os.name == 'nt' else {'timeout': microseconds}
 
 
 def scratch_profile(output, label='run'):
@@ -140,7 +149,8 @@ class DOS:
         self.block_clicks=[]
 
     def saved_files(self):
-        return {str(p.relative_to(self.scratch)):hashlib.sha256(p.read_bytes()).hexdigest()
+        # (names with '/' on every system, as config/milestones.json and the checks spell them)
+        return {p.relative_to(self.scratch).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in sorted(self.scratch.rglob('*')) if p.is_file()}
 
     def close(self):
